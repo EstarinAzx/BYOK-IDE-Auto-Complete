@@ -6,6 +6,29 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.37] — 2026-07-25
+
+### Fixed
+
+- **A truncated turn now says so.** Upstream ends a cut-short reply with
+  `stop_reason` `max_tokens` / `content_filter` / `refusal`, but the Anthropic door
+  hardcoded `sawTool ? 'tool_use' : 'end_turn'` in both the SSE encoder and the buffered
+  reducer — so the reason was destroyed at the door and every truncated turn reached
+  Claude Code labelled as a clean finish. The reason survived only as a
+  `_[Response truncated: <reason>]_` marker appended to the text: prose in the data
+  channel, persisted to the transcript and replayed to the model next turn as its own
+  words. A new `truncation` stream event carries the reason through to the closing
+  `message_delta`, where it outranks `tool_use` — mirroring upstream, which sends
+  `refusal` alongside a real `tool_use` block. Observed 15 times between 2026-07-05 and
+  2026-07-25, every one at ≥56k context (#163).
+- **The visible marker is gated on answer text, not on any content.** The first cut of
+  the above suppressed the marker whenever anything was delivered, and thinking counts —
+  but the commonest shape on record is a model that spends its budget thinking, emits no
+  answer text, then gets refused (5 of the 6 content-bearing cases). Those turns would
+  have rendered as a silently empty reply. The marker now survives wherever no answer
+  text arrived, and is dropped only once real text exists to pollute. VS Code native chat
+  keeps the marker unconditionally — a chat part has no `stop_reason` channel.
+
 ## [2.0.36] — 2026-07-25
 
 ### Added
