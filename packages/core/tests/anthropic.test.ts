@@ -1620,28 +1620,34 @@ describe('anthropicStream (streaming IO)', () => {
     ]);
   });
 
-  // max_tokens truncation WITH partial text: keep the text, append a visible truncation marker carrying the
-  // reason (no longer relabeled a clean end_turn).
-  it('appends a truncation marker with the stop_reason after partial text', async () => {
+  // max_tokens truncation WITH partial text: keep the text and report the reason OUT OF BAND. Delivered
+  // content is never followed by prose — a markdown marker appended here lands in `content`, is persisted to
+  // the transcript, and is replayed to the model next turn as if it had written it.
+  it('reports the reason as a truncation event after partial text, without appending prose', async () => {
     stub([
       'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"cut here"}}',
       'event: message_delta\ndata: {"delta":{"stop_reason":"max_tokens"}}',
       'event: message_stop\ndata: {"type":"message_stop"}',
     ]);
     const out = await collect(anthropicStream(args));
-    expect(out[0]).toEqual({ type: 'text', value: 'cut here' });
-    expect(out.at(-1)).toEqual({ type: 'text', value: '\n\n_[Response truncated: max_tokens]_' });
+    expect(out).toEqual([
+      { type: 'text', value: 'cut here' },
+      { type: 'truncation', reason: 'max_tokens' },
+    ]);
   });
 
-  // max_tokens truncation with NO visible text (a thinking turn that spent the budget — the #88 amplifier):
-  // surface the reason as a marker rather than throwing, so the user sees WHY it was empty.
-  it('surfaces the truncation reason even when nothing visible was delivered', async () => {
+  // max_tokens truncation with NO visible text (a thinking turn that spent the budget — the #88 amplifier).
+  // Here the marker is load-bearing: without it the door emits an empty envelope, which is the #89 bug Claude
+  // Code rejects as "empty or malformed". So the prose stays ONLY in the content-less case, and the event
+  // rides alongside it.
+  it('keeps the visible marker when nothing was delivered, and still reports the reason', async () => {
     stub([
       'event: message_delta\ndata: {"delta":{"stop_reason":"max_tokens"}}',
       'event: message_stop\ndata: {"type":"message_stop"}',
     ]);
     expect(await collect(anthropicStream(args))).toEqual([
       { type: 'text', value: '\n\n_[Response truncated: max_tokens]_' },
+      { type: 'truncation', reason: 'max_tokens' },
     ]);
   });
 

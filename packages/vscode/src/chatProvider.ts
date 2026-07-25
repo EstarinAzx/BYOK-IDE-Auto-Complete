@@ -199,6 +199,9 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       try {
         for await (const ev of anthropicStream({ creds, baseUrl, model: modelId, messages: toAnthropicMessages(messages), effort: deps.effort(), tools, toolChoice, signal: controller.signal })) {
           if (ev.type === 'text') { progress.report(new vscode.LanguageModelTextPart(ev.value)); continue; }
+          // the Bridge renders a truncation as the reply's stop_reason, but a vscode chat part has no
+          // such channel — so here the reason stays visible prose, or a cut-short turn would end in silence.
+          if (ev.type === 'truncation') { progress.report(new vscode.LanguageModelTextPart(`\n\n_[Response truncated: ${ev.reason}]_`)); continue; }
           // Thinking passthrough events have no vscode chat part — dropped here (Anthropic-door-only fidelity).
           if (ev.type !== 'toolCall') continue;
           // A backend can emit malformed argument JSON — degrade to {} rather than abort the whole turn.

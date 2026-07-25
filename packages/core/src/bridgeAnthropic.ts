@@ -13,7 +13,7 @@
  * send-builders — no second normalized shape.
  */
 
-import type { NormalizedTurn, ToolSpec, ChatModelInfo, EffortLevel, BridgeUsage, AssembledToolCall } from './catalog';
+import type { NormalizedTurn, ToolSpec, ChatModelInfo, EffortLevel, BridgeUsage, AssembledToolCall, AnthropicTruncationReason } from './catalog';
 import type { BridgeChatRequest, BridgeStreamEvent } from './bridge';
 
 // A message_start usage block (initial input/cache snapshot, small initial output_tokens) — mirrors the
@@ -281,6 +281,7 @@ export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
   let openKind: 'text' | 'tool' | 'thinking' | null = null;   // the currently-open block's kind, or none
   let openIndex = 0;             // the currently-open block's index
   let sawTool = false;           // any tool call emitted → stop_reason is tool_use, not end_turn
+  let truncation: AnthropicTruncationReason | undefined;   // upstream cut the turn short → outranks both
   let usage: BridgeUsage | null = null;   // latest real token usage — start()/finish() read it; null → zeros
   const advisorUsages: AdvisorUsageEntry[] = [];   // reviewer sub-call usage (#143) → finish()'s usage.iterations
 
@@ -379,6 +380,9 @@ export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
       }
       // diagnosis (#156) is door-internal (the door consumes it before pushing) — never a wire frame.
       if (ev.type === 'diagnosis') return '';
+      // truncation is a stop_reason, not content — record it and emit nothing. This MUST stay above the
+      // tool fallthrough below, which would otherwise render it as a bogus tool_use block.
+      if (ev.type === 'truncation') { truncation = ev.reason; return ''; }
       sawTool = true;
       let s = closeOpen();
       openIndex = nextIndex++;
@@ -389,11 +393,11 @@ export const createAnthropicSseEncoder = (meta: AnthropicSseMeta) => {
       return s + closeOpen();
     },
 
-    // The closing frames: close any still-open block, then message_delta (stop_reason tool_use if a tool ran,
-    // else end_turn) + message_stop.
+    // The closing frames: close any still-open block, then message_delta (the truncation reason if upstream
+    // cut the turn short, else tool_use if a tool ran, else end_turn) + message_stop.
     finish: (): string =>
       closeOpen() +
-      frame('message_delta', { type: 'message_delta', delta: { stop_reason: sawTool ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { ...deltaUsage(usage), ...usageIterations(advisorUsages, usage, meta.model) } }) +
+      frame('message_delta', { type: 'message_delta', delta: { stop_reason: truncation ?? (sawTool ? 'tool_use' : 'end_turn'), stop_sequence: null }, usage: { ...deltaUsage(usage), ...usageIterations(advisorUsages, usage, meta.model) } }) +
       frame('message_stop', { type: 'message_stop' }),
   };
 };
@@ -428,7 +432,8 @@ export type AnthropicMessageResponse = {
   role: 'assistant';
   model: string;
   content: AntReplyBlock[];
-  stop_reason: 'end_turn' | 'tool_use';
+  // the three truncation reasons join the two clean-close labels — a cut-short turn must say so.
+  stop_reason: 'end_turn' | 'tool_use' | AnthropicTruncationReason;
   stop_sequence: null;
   usage: { input_tokens: number; output_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number; iterations?: AntUsageIteration[] };
 };
@@ -440,11 +445,13 @@ export type AnthropicMessageResponse = {
 export const buildAnthropicMessageResponse = (events: BridgeStreamEvent[], meta: AnthropicSseMeta): AnthropicMessageResponse => {
   const content: AntReplyBlock[] = [];
   let sawTool = false;
+  let truncation: AnthropicTruncationReason | undefined;   // mirrors the encoder's precedence
   let usage: BridgeUsage | null = null;
   const advisorUsages: AdvisorUsageEntry[] = [];   // reviewer sub-call usage (#143) → the reply's usage.iterations
   for (const ev of events) {
     if (ev.type === 'usage') { usage = ev.usage; continue; }  // real counts → the reply usage block, not content
     if (ev.type === 'advisor_usage') { advisorUsages.push({ usage: ev.usage, model: ev.model }); continue; }
+    if (ev.type === 'truncation') { truncation = ev.reason; continue; }   // a stop_reason, not a block
     if (ev.type === 'text') {
       const last = content[content.length - 1];
       if (last && last.type === 'text') last.text += ev.text;
@@ -484,7 +491,7 @@ export const buildAnthropicMessageResponse = (events: BridgeStreamEvent[], meta:
   }
   return {
     id: meta.id, type: 'message', role: 'assistant', model: meta.model,
-    content, stop_reason: sawTool ? 'tool_use' : 'end_turn', stop_sequence: null,
+    content, stop_reason: truncation ?? (sawTool ? 'tool_use' : 'end_turn'), stop_sequence: null,
     // Real counts when the backend reported them (Anthropic upstream), else the numeric-zero fallback (a
     // non-Anthropic provider through this door emits no usage). The field must exist and be numeric:
     // Claude Code's /model validation reads usage.input_tokens, and a missing usage is the crash.

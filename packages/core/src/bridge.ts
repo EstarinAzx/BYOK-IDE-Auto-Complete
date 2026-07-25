@@ -11,7 +11,7 @@
  * buildAnthropicMessagesBody without a second mapping.
  */
 
-import type { NormalizedTurn, ToolSpec, AssembledToolCall, ChatModelInfo, BridgeUsage, AnthropicCacheMissReason } from './catalog';
+import type { NormalizedTurn, ToolSpec, AssembledToolCall, ChatModelInfo, BridgeUsage, AnthropicCacheMissReason, AnthropicTruncationReason } from './catalog';
 
 // ----------------------------- Inbound: OpenAI request -> Wisp ----------------------------- //
 
@@ -134,6 +134,11 @@ export type BridgeStreamEvent =
   // reads the miss reason for its cache-health log; reducers and other doors ignore it. The message id is
   // recorded upstream (the diagnosis chain) before this event is ever yielded.
   | { type: 'diagnosis'; messageId: string; missReason?: AnthropicCacheMissReason }
+  // the turn was cut short (max_tokens / content_filter / refusal). Carries no wire content — the
+  // Anthropic door renders it as the closing message_delta's stop_reason, outranking tool_use/end_turn.
+  // MUST be handled explicitly by every consumer of this union: the Anthropic encoder's push() treats any
+  // unrecognized event as a client tool call, so an unhandled truncation would invent a tool_use block.
+  | { type: 'truncation'; reason: AnthropicTruncationReason }
   // Advisor (server tool, Anthropic door only): the door itself PRODUCES these while playing the server
   // role — the backend never emits them. server_tool_use announces the advisor call to Claude Code;
   // advisor_result/advisor_error carry the reviewer's verdict back. None of them are client tool calls,

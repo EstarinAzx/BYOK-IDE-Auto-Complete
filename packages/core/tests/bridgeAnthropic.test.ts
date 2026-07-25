@@ -127,6 +127,40 @@ describe('buildAnthropicMessageResponse', () => {
     ]);
     expect(res.stop_reason).toBe('end_turn');
   });
+
+  // A truncation event carries the upstream stop_reason (refusal / max_tokens / content_filter) OUT OF BAND.
+  // It is not content: it must render no block at all. The regression it guards is the push() fallthrough —
+  // an unhandled event type is treated as a tool call, which would both invent a tool_use block and mislabel
+  // stop_reason as tool_use.
+  it('carries a truncation reason into stop_reason without emitting a content block', () => {
+    const events: BridgeStreamEvent[] = [{ type: 'truncation', reason: 'refusal' }];
+    const res = buildAnthropicMessageResponse(events, meta);
+    expect(res.content).toEqual([]);
+    expect(res.stop_reason).toBe('refusal');
+  });
+
+  // Upstream's own precedence: the 7554-token case ended with a real tool_use block AND stop_reason refusal.
+  // The truncation reason describes how the turn ENDED, so it outranks the tool_use label.
+  it('prefers the truncation reason over tool_use when a tool call also ran', () => {
+    const events: BridgeStreamEvent[] = [
+      { type: 'tool_call', call: { id: 'toolu_1', name: 'write', argsJson: '{}' } },
+      { type: 'truncation', reason: 'refusal' },
+    ];
+    const res = buildAnthropicMessageResponse(events, meta);
+    expect(res.content).toEqual([{ type: 'tool_use', id: 'toolu_1', name: 'write', input: {} }]);
+    expect(res.stop_reason).toBe('refusal');
+  });
+});
+
+// The streaming twin of the reducer tests above — the reason must reach the wire's closing message_delta,
+// which is the frame Claude Code actually reads.
+describe('buildAnthropicSse truncation', () => {
+  it('closes the stream with the truncation stop_reason and invents no tool block', () => {
+    const sse = buildAnthropicSse([{ type: 'text', text: 'partial' }, { type: 'truncation', reason: 'max_tokens' }], meta);
+    const delta = frames(sse).find((f) => f.event === 'message_delta');
+    expect(delta?.data.delta.stop_reason).toBe('max_tokens');
+    expect(frames(sse).some((f) => f.data?.content_block?.type === 'tool_use')).toBe(false);
+  });
 });
 
 describe('parseAnthropicMessagesRequest', () => {

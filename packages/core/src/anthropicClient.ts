@@ -17,7 +17,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { AnthropicCreds, buildAnthropicMessagesBody, anthropicUserId, mintAnthropicDeviceId, anthropicTextDelta, anthropicUsage, anthropicDiagnosis, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type BridgeUsage, type EffortLevel, type AnthropicCacheMissReason } from './catalog';
+import { AnthropicCreds, buildAnthropicMessagesBody, anthropicUserId, mintAnthropicDeviceId, anthropicTextDelta, anthropicUsage, anthropicDiagnosis, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type BridgeUsage, type EffortLevel, type AnthropicCacheMissReason, type AnthropicTruncationReason } from './catalog';
 import { sseBlocks } from './codexClient';
 
 type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; systemSuffix?: string; previousMessageId?: string; signal?: AbortSignal };
@@ -35,6 +35,10 @@ export type AnthropicStreamEvent =
   | { type: 'thinking'; value: string }
   | { type: 'thinkingSignature'; value: string }
   | { type: 'redactedThinking'; data: string }
+  // the turn was CUT SHORT and this is why. Carries no content — the Anthropic door renders it as the
+  // closing message_delta's stop_reason. Before this event the reason existed only as a markdown marker
+  // inside the text, so every truncated turn reached the client mislabelled end_turn / tool_use.
+  | { type: 'truncation'; reason: AnthropicTruncationReason }
   // Real token usage off message_start (initial input/cache) and message_delta (final counts) — the door
   // forwards it to the client's meter. The other doors that consume this stream ignore it.
   | { type: 'usage'; usage: BridgeUsage }
@@ -284,7 +288,15 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
   // A truncation reason is always worth surfacing — it explains an empty or cut-short turn; the marker also
   // makes the envelope non-empty, so it stands in for a content-less turn without needing to throw.
   const truncation = anthropicTruncationReason(stopReason);
-  if (truncation) { yield { type: 'text', value: `\n\n_[Response truncated: ${truncation}]_` }; return; }
+  if (truncation) {
+    // The marker is load-bearing ONLY when nothing else arrived: it keeps the envelope non-empty, which is
+    // the whole #89 guard. After delivered content it is prose injected into `content` — persisted to the
+    // transcript and replayed to the model next turn as its own words — so there the reason rides out of
+    // band alone.
+    if (!delivered) yield { type: 'text', value: `\n\n_[Response truncated: ${truncation}]_` };
+    yield { type: 'truncation', reason: truncation };
+    return;
+  }
   // Nothing delivered and no reason to explain it → the empty-envelope bug. Throw so the door surfaces it.
   if (!delivered) throw new Error('Anthropic returned an empty response — the model produced no visible content (a thinking-only or dropped turn). Try again.');
   // Content did stream but the stream never closed cleanly — keep it, flag only the abrupt end.

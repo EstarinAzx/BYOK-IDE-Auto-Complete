@@ -154,7 +154,11 @@ export const anthropicAttribution = (firstUserMessage: string, version: string):
 // The Messages message_delta stop_reason that means the reply was CUT SHORT — budget spent (max_tokens),
 // blocked (content_filter), or declined (refusal). The Anthropic analogue of Codex's responsesIncompleteReason,
 // but it rides a live terminal frame, not a payload field. A clean close / unknown / undefined → undefined.
-export const anthropicTruncationReason = (stopReason: string | undefined): string | undefined =>
+// Narrow, not `string`: the reason is carried out of band to the door's stop_reason, and the Messages
+// contract only admits these three there — widening it would let an arbitrary upstream label onto the wire.
+export type AnthropicTruncationReason = 'max_tokens' | 'content_filter' | 'refusal';
+
+export const anthropicTruncationReason = (stopReason: string | undefined): AnthropicTruncationReason | undefined =>
   stopReason === 'max_tokens' || stopReason === 'content_filter' || stopReason === 'refusal' ? stopReason : undefined;
 
 // One conversation message for the Messages backend. Inquire sends system+user; native chat sends

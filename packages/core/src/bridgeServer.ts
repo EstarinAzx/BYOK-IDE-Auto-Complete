@@ -490,6 +490,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       else if (ev.type === 'thinkingSignature') yield { type: 'thinking_signature', signature: ev.value };
       else if (ev.type === 'redactedThinking') yield { type: 'redacted_thinking', data: ev.data };
       else if (ev.type === 'usage') yield { type: 'usage', usage: ev.usage };
+      else if (ev.type === 'truncation') yield { type: 'truncation', reason: ev.reason };
       // #156: record the message id the moment it arrives (an aborted stream must still advance the chain
       // — the server DID mint this message), then forward the diagnosis for the door's cache-health log.
       else if (ev.type === 'diagnosis') { onDiagnosis?.(ev.messageId); yield { type: 'diagnosis', messageId: ev.messageId, missReason: ev.missReason }; }
