@@ -56,6 +56,43 @@ Worth stating plainly because it keeps getting re-derived: **a bridged session h
 plain `opus` pick is its own local budget — wisp neither sets it nor sees it, and the
 door's `/v1/models` (`id`/`display_name`/`created_at`) has no window field to carry it.
 
+## Aliases CAN carry the tier — the budget is a bare regex (resolved 2026-07-25)
+
+The follow-up question ("do alias / Provider rows get 1M?") is **yes**, and it needs no
+wisp change. Claude Code's effective-window function, read out of the 2.1.220 binary:
+
+```js
+function Wb(e){ if(NVe()) return !1; return /\[1m\]/i.test(e) }   // NVe = CLAUDE_CODE_DISABLE_1M_CONTEXT
+function lZc(e,t){
+  if(Wb(e)) return 1e6;                            // ← FIRST branch, pure string test, no registry lookup
+  if(t?.includes(T_e.header) && t8(e)) return 1e6;
+  if(LM(e)) return 1e6;                            // native_1m + a first-party/known-provider check
+  let r=_ro(e); if(r!==null) return r; …
+}
+```
+
+So **any** model id containing `[1m]` budgets 1M — including a gateway id like
+`claude-wisp-<alias>[1m]`. Verified on the wisp side: `withAlias` applies no charset
+validation (only non-empty and not a Provider id), an alias named `probe[1m]` persists,
+and the door advertises it as `claude-wisp-probe[1m]`.
+
+Two limits, both cosmetic or operational:
+
+- The **display** function is stricter — `Uoe` appends " (1M context)" only when the id
+  resolves to a registry record with `context.supports_1m_suffix`. A `claude-wisp-*[1m]`
+  entry therefore gets the 1M budget without the pretty label.
+- **Only pin such an alias at an anthropic non-Haiku Target.** Claiming 1M against
+  codex's 400K window converts a compaction into the 502 that
+  [[codex-502-input-exceeds-context-window-is-the-providers-limit-not-the-bridge]]
+  already documents.
+
+This also explains the plain-`opus` 200k that started the investigation: `claude-opus-5`'s
+registry record says `context:{window:1e6, native_1m:!0, supports_1m_beta:!0,
+supports_1m_suffix:!0}`, but `LM()` additionally requires `ny(e)` to be first-party or a
+known provider kind — which a custom `ANTHROPIC_BASE_URL` does not satisfy. Native 1M is
+therefore unreachable through the Bridge by construction. **The suffix is the only lever,
+and it is a string match** — which is precisely why `stripModelTier` had to exist.
+
 ## Reversibility
 
 High. `stripModelTier` is one pure line at one call site; deleting it restores the

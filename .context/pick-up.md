@@ -19,19 +19,18 @@ commit `589ccb1`.
 **Nothing is queued. No task is half-done.** Pick from Open questions in
 [[active-work]] or ask the user.
 
-## The one live thread
+## Nothing is live — the last thread closed
 
-**Do alias / Provider rows get a 1M budget?** Claude Code budgets a model from its own
-table keyed by the id string; the door's `/v1/models` carries no window field (Anthropic's
-real one doesn't either), so a `claude-wisp-*` entry gets whatever CC defaults to. The
-only lever is the id string. Untested: whether a **trailing `[1m]` on a `claude-wisp-*`
-id** moves that budget the way it does on a native id.
+**Aliases CAN carry the 1M budget: name the alias with the tier.** Claude Code's window
+function tests `/\[1m\]/i` on the raw model string as its first branch (no registry
+lookup), so an alias named e.g. `probe[1m]` reaches the picker as `claude-wisp-probe[1m]`
+and budgets 1M. Wisp needs no change; the 2.0.36 strip keeps the suffix off the wire.
+Only pin such an alias at an **anthropic non-Haiku** Target — 1M claimed against codex's
+400K is the documented 502. Code path in
+[[2026-07-25-1m-tier-is-a-harness-label-not-a-wire-model]].
 
-Cheap test: add an alias, pick it in `/model`, read `/context`. Safe to try now — since
-2.0.36 the tier is stripped before the wire, so a suffixed id can no longer 404.
-
-If it works, aliases could carry the tier and inherit the 1M budget wisp already puts on
-the wire. If it doesn't, write it down and stop — there is no other lever.
+A `probe[1m]` → `anthropic/claude-opus-5` alias was left in `~/.wisp` from that test.
+Rename or `wisp routing unset 'probe[1m]'` if it is still there and unwanted.
 
 ## Landmines
 

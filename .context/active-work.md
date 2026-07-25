@@ -54,12 +54,13 @@ budget question below.
 
 ## Open questions
 
-- **Do alias / Provider rows get a 1M budget?** The door advertises `claude-wisp-<id>`
-  entries carrying `id`/`display_name`/`created_at` only — no window field exists in the
-  Anthropic `/v1/models` shape, so Claude Code budgets them from its own table. Untested:
-  whether a **trailing `[1m]` on a `claude-wisp-*` id** moves that budget the way it does
-  on a native id. If it does, aliases could be named with the tier and inherit 1M; the
-  strip makes that safe to try. Cheap test — add an alias, pick it, read `/context`.
+- ~~Do alias / Provider rows get a 1M budget?~~ **RESOLVED 2026-07-25: yes, name the
+  alias with the tier.** Claude Code's window function tests `/\[1m\]/i` against the raw
+  model string as its FIRST branch, with no registry lookup, so `claude-wisp-<alias>[1m]`
+  budgets 1M exactly like a native suffixed id. `withAlias` imposes no charset rule and
+  the door advertises the bracketed name verbatim. Full code path + the two limits (no
+  "(1M context)" label; anthropic non-Haiku Targets only) in
+  [[2026-07-25-1m-tier-is-a-harness-label-not-a-wire-model]].
 - **Does the Agent tool ever take a non-enum model?** Today `model` is
   `["sonnet","opus","haiku","fable"]`, which is what killed slot 1.4.0. Worth a re-check
   after a Claude Code minor bump; the 1.4.0 text is in `73e57bd` if it ever loosens.
