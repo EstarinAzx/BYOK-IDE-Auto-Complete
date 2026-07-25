@@ -1651,6 +1651,21 @@ describe('anthropicStream (streaming IO)', () => {
     ]);
   });
 
+  // The dominant real-world shape (5 of 6 observed content-bearing refusals): the model spends its budget
+  // thinking, emits NO answer text, then upstream refuses. Thinking is not a visible answer — suppressing the
+  // marker here renders the turn as an empty reply. So the guard tests answer TEXT, not "any content at all".
+  it('keeps the marker when only thinking arrived before the truncation', async () => {
+    stub([
+      'event: content_block_start\ndata: {"index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}',
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"thinking_delta","thinking":"weighing it"}}',
+      'event: message_delta\ndata: {"delta":{"stop_reason":"refusal"}}',
+      'event: message_stop\ndata: {"type":"message_stop"}',
+    ]);
+    const out = await collect(anthropicStream(args));
+    expect(out.at(-2)).toEqual({ type: 'text', value: '\n\n_[Response truncated: refusal]_' });
+    expect(out.at(-1)).toEqual({ type: 'truncation', reason: 'refusal' });
+  });
+
   // Partial text but the terminal frame was lost (idle socket/proxy drop): keep the text, only flag the abrupt
   // end — never discard delivered content, never false-alarm a good turn whose tail frame was merely dropped.
   it('keeps streamed text and appends a soft marker when the terminal frame is missing', async () => {

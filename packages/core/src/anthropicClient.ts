@@ -289,11 +289,13 @@ export async function* anthropicStream(args: AnthropicRequestArgs): AsyncGenerat
   // makes the envelope non-empty, so it stands in for a content-less turn without needing to throw.
   const truncation = anthropicTruncationReason(stopReason);
   if (truncation) {
-    // The marker is load-bearing ONLY when nothing else arrived: it keeps the envelope non-empty, which is
-    // the whole #89 guard. After delivered content it is prose injected into `content` — persisted to the
-    // transcript and replayed to the model next turn as its own words — so there the reason rides out of
-    // band alone.
-    if (!delivered) yield { type: 'text', value: `\n\n_[Response truncated: ${truncation}]_` };
+    // The marker is load-bearing whenever no ANSWER TEXT arrived: it keeps the envelope non-empty (the #89
+    // guard) and it is the only visible sign the turn was cut short. Deliberately `sawDelta`, not `delivered`
+    // — a thinking-only refusal is the commonest shape on record, and thinking is not an answer, so gating on
+    // "any content at all" would render those turns as a silently empty reply. Once real text exists the
+    // marker becomes prose injected into `content` — persisted to the transcript and replayed to the model
+    // next turn as its own words — so there the reason rides out of band alone.
+    if (!sawDelta) yield { type: 'text', value: `\n\n_[Response truncated: ${truncation}]_` };
     yield { type: 'truncation', reason: truncation };
     return;
   }
