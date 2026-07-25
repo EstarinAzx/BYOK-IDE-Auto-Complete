@@ -6,6 +6,44 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.36] — 2026-07-25
+
+### Added
+
+- **Opus 5 support.** `claude-opus-5` (2026-07-24) reached the model list on its own —
+  `anthropicModelsFrom` reads models.dev live and keeps no family whitelist — but the
+  thinking/effort gate did not: `modelSupportsAnthropicEffort` named the Claude 5 family
+  member by member (`fable-5` / `sonnet-5`), so every opus-5 turn ran with adaptive
+  thinking and `output_config.effort` **silently off** while the panel still offered the
+  full low→max ladder. `isClaude5` is now a regex over the family-local version digits,
+  so opus-5 joins the effort + xhigh + max sets and a suffixed id (`claude-opus-5[1m]`)
+  matches too; `opus-4-5` / `sonnet-4-5` still read as pre-5. opus-5 also leads the
+  offline fallback list, becomes the anthropic row's `defaultModel`, and is what the
+  TUI's one-tap `opus` family bind now points at. `CLAUDE_CODE_VERSION` 2.1.216 →
+  **2.1.219** (the hash is unvalidated, #148, so the bump cannot break an accepted
+  request; the beta token list stays the 2.1.216 capture).
+- **wisp-slot 1.4.0 — 1M-context spawn for anthropic Targets.** The harness budgets
+  context from the model name a subagent was *spawned* with, and a Slot re-routes behind
+  its back. When the bound Target is `anthropic/<non-Haiku>`, the skill now spawns with
+  the slot family's full Claude id plus `[1m]` (`claude-fable-5[1m]`) instead of the bare
+  family word, so compaction is budgeted against the 1M window wisp already requests on
+  the wire. The suffix never leaves the harness; non-anthropic Targets keep the bare word.
+
+### Fixed
+
+- **A `[1m]`-suffixed Target no longer 502s.** Claude Code addresses the 1M tier as
+  `claude-opus-5[1m]`, but that suffix is a harness-local label — it sets Claude Code's own
+  context budget and compaction point and is not a wire model id (live probe: `404
+  not_found_error: model: claude-opus-5[1m]`, while the bare id returns 200). Family routes
+  always hid this, since the Target pin replaces the inbound model; a Target pinned **with**
+  the suffix (a Slot rebind, `wisp routing set opus anthropic/claude-opus-5[1m]`) rode
+  verbatim to the backend and came back as a 502. `stripModelTier` now drops a trailing tier
+  at one seam — the wire `model` field — leaving routing, logs, caps and the effort gate
+  reading the id as typed. Beta selection is untouched by design: the window comes from
+  `context-1m-2025-08-07`, which wisp already sends on every non-Haiku Claude request, so a
+  bridged session has been 1M on the wire with or without a suffix. (The 200k Claude Code
+  shows for a plain `opus` pick is its own local budget — wisp neither sets nor sees it.)
+
 ## [2.0.35] — 2026-07-23
 
 ### Fixed
