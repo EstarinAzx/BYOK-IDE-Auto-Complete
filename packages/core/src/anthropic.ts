@@ -204,8 +204,8 @@ const parseToolInput = (argsJson: string): Record<string, unknown> => {
 // the OAuth endpoint accepts adaptive + output_config.effort on both. Haiku and older 400, so omit there.
 // A regex, not three includes(), so the family test survives a suffixed id: Claude Code addresses the 1M
 // tier as `claude-opus-5[1m]`, and an equality/suffix-blind match would silently drop effort on it.
-// opus-5 (2026-07-24) rides here UNPROBED — every Opus 4.5+ and both shipped Claude 5 models take
-// adaptive+effort, so the flagship of the same family is the safe read; re-check with /test if it 400s.
+// opus-5 (2026-07-24) was live-probed 2026-07-25: adaptive + output_config.effort=xhigh accepted, the reply
+// opens with a thinking block.
 // Note the version digits are family-local: `opus-4-5`/`sonnet-4-5` never match `opus-5`/`sonnet-5`.
 const isClaude5 = (m: string): boolean => /(?:fable|sonnet|opus)-5/.test(m);
 const modelSupportsAnthropicEffort = (model: string): boolean => {
@@ -241,6 +241,16 @@ export const anthropicThinkingEffort = (model: string, effort?: EffortLevel): { 
 };
 
 // ----------------------------- Anthropic Messages body + reply reducers ----------------------------- //
+
+// Claude Code addresses the 1M-context tier as a SUFFIXED id (`claude-opus-5[1m]`). That suffix is a
+// harness-local label driving ITS budget and compaction point — never a wire model id: api.anthropic.com
+// answers `404 not_found_error: model: claude-opus-5[1m]` (live probe 2026-07-25). A family route already
+// hides it (the Target pin replaces the inbound model), but a Target pinned WITH the suffix — a Slot rebind,
+// a `wisp routing set` — rode verbatim to the backend and surfaced as a 502.
+// Stripped at ONE seam, the body's `model` field below, so routing, logs, caps and the effort gate all keep
+// reading the id as TYPED. Deliberately NOT wired into beta selection: the exclusion table states what each
+// model really supports, and a label must never override it (the window is the beta's job, not the name's).
+export const stripModelTier = (model: string): string => model.replace(/\[1m\]$/, '');
 
 // Translate a conversation into an Anthropic Messages request body. The LEADING system text moves to the
 // top-level `system` block array, led by the Claude Code attribution block (its fingerprint derived from
@@ -395,7 +405,7 @@ export const buildAnthropicMessagesBody = (args: {
     passed = -1;
   }
   return {
-    model: args.model,
+    model: stripModelTier(args.model),
     max_tokens: args.maxTokens,
     system,
     messages,

@@ -7,7 +7,7 @@ import {
   parseAnthropicBootstrap, anthropicUserId, anthropicAccountLabel, mintAnthropicDeviceId,
   base64url, codeVerifier, codeChallenge, oauthState,
   anthropicFingerprint, anthropicAttribution,
-  buildAnthropicMessagesBody, reduceAnthropicTextEvents, anthropicModelCaps, anthropicModelsFrom, ANTHROPIC_MODELS,
+  buildAnthropicMessagesBody, stripModelTier, reduceAnthropicTextEvents, anthropicModelCaps, anthropicModelsFrom, ANTHROPIC_MODELS,
   toAnthropicTools, reduceAnthropicToolCalls, anthropicThinkingEffort, effortOptionsFor, anthropicTruncationReason,
   anthropicUsage, anthropicCacheOutcome, anthropicDiagnosis, anthropicDiagnosisStale, createAnthropicDiagnosisChain,
   type Provider, type SseEvent, type BridgeUsage,
@@ -236,7 +236,40 @@ describe('anthropicAttribution', () => {
   });
 });
 
+// Claude Code addresses the 1M tier as `claude-opus-5[1m]`, but that suffix is a HARNESS-LOCAL label, never
+// a wire model id: api.anthropic.com answers `404 not_found_error: model: claude-opus-5[1m]` (live probe,
+// 2026-07-25). A family route hides it (the Target pin replaces the model), but a Target pinned WITH the
+// suffix rode verbatim to the backend and surfaced as a 502.
+describe('stripModelTier', () => {
+  it('drops a trailing [1m] tier and leaves every other id untouched', () => {
+    expect(stripModelTier('claude-opus-5[1m]')).toBe('claude-opus-5');
+    expect(stripModelTier('claude-opus-5')).toBe('claude-opus-5');
+    // Only a TRAILING tier is the harness label — a bracket anywhere else belongs to the id as typed.
+    expect(stripModelTier('claude-opus-5[1m]-preview')).toBe('claude-opus-5[1m]-preview');
+  });
+});
+
 describe('buildAnthropicMessagesBody', () => {
+  // The one seam where the tier must die: the wire `model` field. Routing, logs, caps and the effort gate
+  // all keep seeing the id as typed — only what leaves for the backend is stripped.
+  it('strips the [1m] tier from the wire model', () => {
+    const body = buildAnthropicMessagesBody({
+      model: 'claude-opus-5[1m]', maxTokens: 16, version: '0.19.0',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    expect(body.model).toBe('claude-opus-5');
+  });
+
+  // Stripping must not cost a suffixed id its effort ladder — the gate reads args.model, not the wire field.
+  it('keeps thinking + effort on a suffixed id', () => {
+    const body = buildAnthropicMessagesBody({
+      model: 'claude-opus-5[1m]', maxTokens: 16, version: '0.19.0', effort: 'xhigh',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    expect(body.output_config).toEqual({ effort: 'xhigh' });
+    expect(body.thinking).toEqual({ type: 'adaptive' });
+  });
+
   // Inquire sends system+user: Anthropic carries the system prompt top-level (a block array), NOT as a
   // message role, so the system text moves to `system` and only the user turn stays in `messages`. The
   // attribution rides as the FIRST system block, its fingerprint derived from the first user message.
