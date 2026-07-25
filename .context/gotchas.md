@@ -1,7 +1,7 @@
 ---
 type: gotchas-index
 project: wisp
-updated: 2026-07-22
+updated: 2026-07-25
 tags: [context, gotchas]
 ---
 
@@ -9,6 +9,7 @@ tags: [context, gotchas]
 
 Non-obvious traps. One file per trap in `gotchas/`. A flat list.
 
+- [[claude-code-can-refuse-a-turn-before-the-bridge-ever-sees-it]] — `Context limit reached` in a bridged session can be a LOCAL Claude Code block that never hit the wire; prove it from CC's own transcript (`~/.claude/projects/<slug>/*.jsonl`) — a ms-scale gap between tool_result and the `<synthetic>` error means no round trip. 2.1.220 also inflates the `/context` Messages row past its own honest headline
 - [[advisor-toggle-forks-the-cache-prefix-two-variants]] — advisor mode forks the cached prefix into two variants: Claude Code's auxiliary fork queries (auto-memory extraction, compact, …) replay the conversation WITHOUT the advisor tool (class-gated injection); first fork re-writes ~whole prefix uncached, then each variant re-bills the other's history deltas. Not a user toggle, not a wisp bug. Tickets #158/#159/#160 (all resolved)
 - [[buildanthropicmessagesbody-must-not-mutate-caller-rawcontent]] — `buildAnthropicMessagesBody` must replay a *copy* of `rawContent` (strip any inbound `cache_control`); mutating the caller's array lets multi-build flows (advisor base→reviewer→continuation) stack markers past Anthropic's cap of 4 → "Found 5". Regression in `anthropic.test.ts`
 - [[anthropic-cache-ttl-flip-busts-the-prefix-mid-session]] — deriving the Anthropic cache TTL from `convo.length` flips 5m→1h between turn 1 and turn 2 of the same session; a TTL change rewrites `cache_control` and busts the server-side prefix cache (2× re-bill on turn 2 of every session). Fix TTL per call path, never from turn count
