@@ -565,6 +565,38 @@ describe('anthropicThinkingEffort', () => {
       output_config: { effort: 'high' },
     });
   });
+
+  // Opus 5 (2026-07-24) joins the Claude 5 family gate — the pre-bump matcher listed fable-5/sonnet-5 by
+  // name, so opus-5 fell through to {} and ran with thinking and effort SILENTLY off.
+  it('keeps max on opus-5 (full Claude 5 ladder)', () => {
+    expect(anthropicThinkingEffort('claude-opus-5', 'max')).toEqual({
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'max' },
+    });
+    expect(anthropicThinkingEffort('claude-opus-5', 'xhigh')).toEqual({
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'xhigh' },
+    });
+  });
+
+  // Claude Code addresses the 1M tier as `claude-opus-5[1m]` (its /model picker's own id) and the door
+  // forwards a pinned id verbatim — a suffix-blind family match would drop effort on exactly that pick.
+  it('keeps the full ladder on a [1m]-suffixed opus-5 id', () => {
+    expect(anthropicThinkingEffort('claude-opus-5[1m]', 'max')).toEqual({
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'max' },
+    });
+  });
+
+  // Guard the family-local version digits: opus-4-5 / sonnet-4-5 must NOT read as the 5 family. Both
+  // predate max, so a greedy matcher would send max where the wire 400s.
+  it('does not read the 4-5 models as Claude 5', () => {
+    expect(anthropicThinkingEffort('claude-sonnet-4-5', 'max')).toEqual({});
+    expect(anthropicThinkingEffort('claude-opus-4-5', 'max')).toEqual({
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'high' },
+    });
+  });
 });
 
 describe('buildAnthropicMessagesBody — thinking/effort', () => {
@@ -735,6 +767,13 @@ describe('anthropicModelCaps', () => {
     expect(anthropicModelCaps('claude-sonnet-4-6')).toEqual({ contextInput: 1_000_000, maxOutput: 64_000, vision: true });
     expect(anthropicModelCaps('claude-haiku-4-5')).toEqual({ contextInput: 200_000, maxOutput: 64_000, vision: true });
   });
+
+  // The opus branch is a substring test, so a new flagship inherits the window with no edit — including
+  // the [1m]-suffixed id Claude Code addresses the 1M tier by. models.dev agrees: opus-5 is 1M/128K.
+  it('gives opus-5 the opus window, suffixed id included', () => {
+    expect(anthropicModelCaps('claude-opus-5')).toEqual({ contextInput: 1_000_000, maxOutput: 128_000, vision: true });
+    expect(anthropicModelCaps('claude-opus-5[1m]')).toEqual({ contextInput: 1_000_000, maxOutput: 128_000, vision: true });
+  });
 });
 
 describe('anthropicModelsFrom', () => {
@@ -791,10 +830,11 @@ describe('anthropicMessagesHeaders', () => {
     expect('Accept' in anthropicMessagesHeaders('tok')).toBe(false);
   });
 
-  // #149: fingerprint parity with real claude-cli 2.1.216 — the UA advertises the captured version
-  // (the cc_version hash is unvalidated, see #148, so the bump cannot break an accepted request).
-  it('advertises the claude-cli 2.1.216 User-Agent', () => {
-    expect(anthropicMessagesHeaders('tok')['User-Agent']).toBe('claude-cli/2.1.216 (external, cli)');
+  // #149: fingerprint parity with real claude-cli — the UA advertises the version wisp claims, tracking
+  // the shipping CLI (2.1.219). The cc_version hash is unvalidated (#148), so the bump cannot break an
+  // accepted request; only UA and attribution having to agree is load-bearing.
+  it('advertises the claude-cli 2.1.219 User-Agent', () => {
+    expect(anthropicMessagesHeaders('tok')['User-Agent']).toBe('claude-cli/2.1.219 (external, cli)');
   });
 
   // #149: the Stainless SDK header set real claude emits (its bundled @anthropic-ai/sdk is a Stainless
@@ -858,6 +898,10 @@ describe('selectAnthropicBetas (#151)', () => {
     // Exclusion gate, not an allowlist: new families inherit 1M the way real claude's latch pushes it.
     expect(selectAnthropicBetas('claude-sonnet-5')).toContain('context-1m-2025-08-07');
     expect(selectAnthropicBetas('claude-fable-5')).toContain('context-1m-2025-08-07');
+    // opus-5 inherits 1M through the same exclusion (only opus-4-[0-5] is carved out), suffix and all —
+    // so a wisp-routed opus-5 turn is already 1M-context without Claude Code's [1m] id.
+    expect(selectAnthropicBetas('claude-opus-5')).toContain('context-1m-2025-08-07');
+    expect(selectAnthropicBetas('claude-opus-5[1m]')).toContain('context-1m-2025-08-07');
   });
 
   // Haiku is never an advisor base and has no 1M variant; everything else (incl. the thinking betas —
@@ -1347,7 +1391,7 @@ describe('anthropicStream (streaming IO)', () => {
 
   // #149: the version bump must reach the WIRE BODY's cc_version billing block, not only the UA — the
   // client feeds CLAUDE_CODE_VERSION into the attribution fingerprint the backend ties to the UA.
-  it('embeds cc_version=2.1.216 in the request body attribution block', async () => {
+  it('embeds cc_version=2.1.219 in the request body attribution block', async () => {
     let sentBody: any;
     vi.stubGlobal('fetch', async (_url: string, init: any) => {
       sentBody = JSON.parse(init.body);
@@ -1358,7 +1402,7 @@ describe('anthropicStream (streaming IO)', () => {
       ]);
     });
     await collect(anthropicStream(args));
-    expect(sentBody.system[0].text).toContain('cc_version=2.1.216.');
+    expect(sentBody.system[0].text).toContain('cc_version=2.1.219.');
   });
 
   // #139: the Bridge threads the volatile system tail through to the body builder — the wire body must

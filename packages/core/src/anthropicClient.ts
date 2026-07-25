@@ -101,9 +101,10 @@ export const selectAnthropicBetas = (model: string): string => {
   ].join(',');
 };
 // The attribution fingerprint (catalog) embeds this version, and the User-Agent advertises it — they MUST
-// match (the backend ties the cc_version to the claude-cli UA). Captured live from real claude-cli 2.1.216
-// (2026-07-21); the cc_version hash is UNVALIDATED (#148), so the bump can't break an accepted request.
-const CLAUDE_CODE_VERSION = '2.1.216';
+// match (the backend ties the cc_version to the claude-cli UA). Tracks the shipping claude-cli (2.1.219,
+// 2026-07-25); the cc_version hash is UNVALIDATED (#148), so the bump can't break an accepted request.
+// The beta token list above is still the 2.1.216 capture — only the advertised version moved.
+const CLAUDE_CODE_VERSION = '2.1.219';
 const ANTHROPIC_USER_AGENT = `claude-cli/${CLAUDE_CODE_VERSION} (external, cli)`;
 
 // The Stainless SDK headers real claude emits — its bundled @anthropic-ai/sdk is a Stainless build that

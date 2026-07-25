@@ -73,7 +73,7 @@ export const PROVIDERS: Provider[] = [
   // Anthropic = subscription Claude backend (Messages API via Claude.ai OAuth, no key). kind:'anthropic-
   // oauth' switches off the OpenAI-chat path, like Codex. baseUrl is api.anthropic.com (client appends
   // /v1/messages). No catalogKey; hidden from the chat picker until keyed.
-  { id: 'anthropic', label: 'Anthropic', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-opus-4-8', apiKeyEnv: '', kind: 'anthropic-oauth' },
+  { id: 'anthropic', label: 'Anthropic', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-opus-5', apiKeyEnv: '', kind: 'anthropic-oauth' },
   // Grok = subscription xAI backend (Responses API via xAI OAuth, no key) — a Codex-twin. kind:'xai-oauth'.
   // ⚠️ NOT the API-key Groq row (Llama): distinct id 'xai'. baseUrl is the subscription proxy (grok-build);
   // grok-4.5 overrides to api.x.ai in the client. No catalogKey; hidden from the chat picker until keyed.

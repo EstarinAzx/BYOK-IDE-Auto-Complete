@@ -48,7 +48,7 @@ export const sectionOf = (row: RouteRow): 'families' | 'aliases' => row.kind ===
 // The one-tap "bind Claude subscription models" mapping: each Family route's natural Claude.ai
 // model. TUI-local data — promote to core if the side panel ever grows the same button.
 export const CLAUDE_FAMILY_MODELS: Record<FamilyKey, string> = {
-  opus: 'claude-opus-4-8',
+  opus: 'claude-opus-5',
   sonnet: 'claude-sonnet-5',
   haiku: 'claude-haiku-4-5',
   fable: 'claude-fable-5',

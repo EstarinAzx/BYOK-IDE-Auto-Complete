@@ -119,7 +119,7 @@ export const parseAnthropicCreds = (raw: string | undefined): AnthropicCreds | u
 
 // Curated Claude model ids — the OFFLINE FALLBACK for anthropicModelsFrom. The anthropic row's
 // defaultModel must stay a member.
-export const ANTHROPIC_MODELS: string[] = ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
+export const ANTHROPIC_MODELS: string[] = ['claude-opus-5', 'claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
 
 // Live Claude dropdown ids from models.dev — undated aliases only (dated -YYYYMMDD snapshots duplicate
 // them). Deliberately NO family whitelist: a brand-new family name must appear, never be filtered out.
@@ -202,7 +202,12 @@ const parseToolInput = (argsJson: string): Record<string, unknown> => {
 // Which Claude models accept the thinking+effort body fields. Opus 4.5-4.8 and Sonnet 4.6 mirror
 // openclaude's modelSupportsEffort; the Claude 5 family (fable-5 / sonnet-5) was live-probed 2026-07-18 —
 // the OAuth endpoint accepts adaptive + output_config.effort on both. Haiku and older 400, so omit there.
-const isClaude5 = (m: string): boolean => m.includes('fable-5') || m.includes('sonnet-5');
+// A regex, not three includes(), so the family test survives a suffixed id: Claude Code addresses the 1M
+// tier as `claude-opus-5[1m]`, and an equality/suffix-blind match would silently drop effort on it.
+// opus-5 (2026-07-24) rides here UNPROBED — every Opus 4.5+ and both shipped Claude 5 models take
+// adaptive+effort, so the flagship of the same family is the safe read; re-check with /test if it 400s.
+// Note the version digits are family-local: `opus-4-5`/`sonnet-4-5` never match `opus-5`/`sonnet-5`.
+const isClaude5 = (m: string): boolean => /(?:fable|sonnet|opus)-5/.test(m);
 const modelSupportsAnthropicEffort = (model: string): boolean => {
   const m = model.toLowerCase();
   return /opus-4-[5-8]/.test(m) || m.includes('sonnet-4-6') || isClaude5(m);
