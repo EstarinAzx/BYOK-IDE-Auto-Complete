@@ -59,6 +59,19 @@ curl -s -o /dev/null -w "%{http_code}" "$ANTHROPIC_BASE_URL/v1/models"
 
 **5. Spawn.** Call the Agent tool with `model: "<slot family>"` — the family word. Never the Target string, never a Wisp Alias (Aliases do not exist in the Agent model surface). Label the agent with the real backend: set `description` to `<target model>: <short task>` (e.g. `gpt-5.6-sol: reply with one`) — the family word lies in the UI, the label is the only place the true model shows.
 
+**5a. The 1M variant — `anthropic` Targets only.** Wisp always requests the 1M window on the wire for a non-Haiku Claude Target, but *this harness* budgets context and decides when to compact from the model name it was spawned with, and it never learns what the Slot re-routed to. So when the bound Target is `anthropic/<model>` and that model is **not** Haiku, spawn with the slot family's full Claude id plus the 1M suffix instead of the bare word:
+
+| Slot family | Spawn model |
+|---|---|
+| `opus` | `claude-opus-5[1m]` |
+| `sonnet` | `claude-sonnet-5[1m]` |
+| `fable` | `claude-fable-5[1m]` |
+| `haiku` | bare word — Haiku is 200K, it has no 1M tier |
+
+The id must name the **slot family**, not the Target's own family: Wisp matches a family route by finding the family word inside any `claude-*` id, so a `fable` slot bound to `anthropic/claude-opus-5` still spawns as `claude-fable-5[1m]` — the word routes it to the slot, the suffix sets the budget, and the Target answers. The suffix never leaves the harness. If the Agent tool rejects the suffixed id, spawn with the bare family word and carry on — that costs only earlier compaction, not correctness.
+
+**Every other provider keeps the bare family word.** Their windows are their own (codex is 400K), and telling a subagent it has 1M against a 400K backend converts a compaction into a 502 mid-task.
+
 **6. Hold.** A family's binding stays until every agent launched through *that family* has finished. Agents on the same family share its Target — spawn as many as you like through one snapshot. Launching agents on other families in parallel is expected (see "Running Slots in parallel"), not a batch exception: each family's revert waits only for its own agents, so free a family the moment its agents complete rather than blocking on unrelated ones.
 
 **7. Revert the row (per family).** Run `wisp snapshot revert <slot-family>`. It writes the recorded value back over the live one, prints the overwritten value (`revert haiku -> xai/grok-4.5 (was codex/gpt-5.6-terra)`), and clears the snapshot. Surface that line — it shows the user exactly what changed. If it errors `'<family>' is not snapshotted.` someone already reverted; re-read `wisp routing` and report the live value rather than guessing. (Revert is unconditional — it overwrites whatever the row currently holds, with no compare-and-set guard.)
@@ -104,6 +117,8 @@ A crash or force-kill can leave a family rebound with its snapshot still held �
 | "The warning is advisory and the deadline is now" | The user decides, before spawn — not you. |
 | "Restore anyway, cleanup is my job" | Revert overwrites the live row. If someone changed it since the snapshot, that's newer state — report, don't clobber. |
 | "User asked to rebind a family — run the full dance" | No subagent to run = plain routing edit. One `set`, no snapshot, no checklist. |
+| "The Slot is a Claude family, so `[1m]` fits whatever it's bound to" | The suffix sets the *harness's* budget; the Target answers. `anthropic` non-Haiku Targets only — 1M against codex's 400K is a 502. |
+| "Target is `anthropic/claude-opus-5`, so spawn `claude-opus-5[1m]`" | Only if `opus` is the slot. The family word inside the id picks the route — a wrong word lands on a different family's Target. |
 
 ## Red flags — STOP
 
@@ -111,6 +126,7 @@ A crash or force-kill can leave a family rebound with its snapshot still held �
 - Binding a family whose snapshot is already held (`already snapshotted`) without reverting it first
 - Hand-editing the snapshot store or `wisp routing set`-ing over a held snapshot instead of reverting
 - Passing an Alias or `provider/model` string as the Agent model
+- Appending `[1m]` for a non-`anthropic` Target, a Haiku one, or under a family word that is not the Slot's
 - Spawning while a `warning:` line is unsurfaced
 
 ## Limits
