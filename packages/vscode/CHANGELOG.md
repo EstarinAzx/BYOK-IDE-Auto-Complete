@@ -4,6 +4,46 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] — 2026-07-28
+
+Catches up with the TUI line (wisp-router 2.0.32–2.0.37) — Opus 5, `[1m]` tier
+handling, usage-limit auto-cooldown, cache-advisory sharpening, truncation
+honesty — plus an extension-only fix to the Codex picker windows.
+
+### Added
+
+- **Opus 5 support** (wisp-router 2.0.36). `claude-opus-5` joins the effort ladder +
+  xhigh/max sets via a family-version regex (a suffixed `claude-opus-5[1m]` matches too),
+  leads the offline fallback list, and becomes the anthropic row's default model.
+  `CLAUDE_CODE_VERSION` 2.1.216 → 2.1.219.
+- **Auto-cooldown + family fallback on usage-limit 429 (#161)** (2.0.34). A provider
+  answering `429 usage_limit_reached` is marked cooling until its reset horizon;
+  family-matched `claude-*` routes fall back to the anthropic Provider meanwhile.
+
+### Fixed
+
+- **Codex models advertise their real context windows.** The picker's offline caps
+  fallback pinned every gpt-5.x Codex model at 400K input / 32K output — numbers captured
+  before the gpt-5.4+ flagships (including the 5.6 sol/terra/luna trio) shipped their
+  1.05M-context / 128K-output window. The fallback now tiers by family (flagship
+  1.05M/128K, `-codex`/`-mini` 400K/128K, spark 128K/32K, o-series 200K/100K), and the
+  live models.dev lookup — which now carries the Codex ids — wins whenever the catalog is
+  loaded. Display metadata only: the Bridge never trims a conversation to the advertised
+  window, so an over-window request is still rejected upstream (the 502 passthrough).
+- **A truncated turn now says so** (2.0.37). The Anthropic door carries upstream's
+  cut-short reason (`max_tokens` / `content_filter` / `refusal`) into the reply's
+  `stop_reason` instead of flattening it to `end_turn`/`tool_use`, and the visible
+  `_[Response truncated…]_` marker is gated on answer text so a thinking-only refusal
+  isn't rendered as an empty turn. VS Code native chat keeps the marker unconditionally —
+  a chat part has no `stop_reason` channel.
+- **A `[1m]`-suffixed Target no longer 502s** (2.0.36). The harness-local tier suffix is
+  stripped at the wire seam; routing, logs, caps and the effort gate keep reading the id
+  as typed.
+- **Cache-advisory sharpening (#156, #158, #159, #162)** (2.0.32–2.0.35). Stale server
+  miss verdicts log as advisory rather than MISS, the diagnosis chain keys per
+  cache-prefix variant, the STALE line states the observable, and PARTIAL no longer flags
+  healthy incremental growth.
+
 ## [1.8.0] — 2026-07-21
 
 The Bridge's Anthropic door catches up with the TUI line (wisp-router 2.0.11–2.0.31):
