@@ -371,13 +371,28 @@ describe('standardEffortToCodex', () => {
 });
 
 describe('codexModelCaps', () => {
-  // The Codex backend has no /models route and isn't keyed to models.dev, so the chat picker would show
-  // the neutral default window. These are the real windows from models.dev/api.json. gpt-5.x Codex = 400K,
+  // The OFFLINE FALLBACK when the models.dev catalog is absent (the live lookup wins otherwise). Tiers
+  // mirror models.dev's openai entries: gpt-5.4+ flagships (incl. the 5.6 sol/terra/luna trio) = 1.05M/128K,
   // and the gpt-5/o families are multimodal — the Responses backend accepts input_image (as Codex CLI does).
-  it('returns the 400K/32K window for the gpt-5.x Codex family, vision capable', () => {
-    expect(codexModelCaps('gpt-5.3-codex')).toEqual({ contextInput: 400_000, maxOutput: 32_768, vision: true });
-    expect(codexModelCaps('gpt-5.5')).toEqual({ contextInput: 400_000, maxOutput: 32_768, vision: true });
-    expect(codexModelCaps('gpt-5.1-codex-max')).toEqual({ contextInput: 400_000, maxOutput: 32_768, vision: true });
+  it('returns the 1.05M/128K window for the gpt-5.4+ flagships, vision capable', () => {
+    expect(codexModelCaps('gpt-5.6-sol')).toEqual({ contextInput: 1_050_000, maxOutput: 128_000, vision: true });
+    expect(codexModelCaps('gpt-5.6-terra')).toEqual({ contextInput: 1_050_000, maxOutput: 128_000, vision: true });
+    expect(codexModelCaps('gpt-5.5')).toEqual({ contextInput: 1_050_000, maxOutput: 128_000, vision: true });
+    expect(codexModelCaps('gpt-5.4')).toEqual({ contextInput: 1_050_000, maxOutput: 128_000, vision: true });
+  });
+
+  // The -codex / -mini variants sit on the 400K window (models.dev: gpt-5.3-codex, gpt-5.4-mini), and the
+  // ids models.dev no longer lists (gpt-5.2-codex, gpt-5.1-codex-max/-mini) stay on their generation's 400K.
+  it('returns the 400K/128K window for the -codex and -mini variants, vision capable', () => {
+    expect(codexModelCaps('gpt-5.3-codex')).toEqual({ contextInput: 400_000, maxOutput: 128_000, vision: true });
+    expect(codexModelCaps('gpt-5.4-mini')).toEqual({ contextInput: 400_000, maxOutput: 128_000, vision: true });
+    expect(codexModelCaps('gpt-5.1-codex-max')).toEqual({ contextInput: 400_000, maxOutput: 128_000, vision: true });
+    expect(codexModelCaps('gpt-5.2-codex')).toEqual({ contextInput: 400_000, maxOutput: 128_000, vision: true });
+  });
+
+  // The fast-loop spark variant is the small window (models.dev: 128K context / 32K output).
+  it('returns the 128K/32K window for the spark variant, vision capable', () => {
+    expect(codexModelCaps('gpt-5.3-codex-spark')).toEqual({ contextInput: 128_000, maxOutput: 32_000, vision: true });
   });
 
   // The o-series reasoning models are a 200K context / 100K output, also multimodal.

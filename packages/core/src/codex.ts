@@ -179,12 +179,18 @@ export const codexReasoning = (model: string, effort: CodexEffort = DEFAULT_EFFO
   return /^(gpt-5|o3|o4)/.test(m) ? { effort, summary: 'auto' } : undefined;
 };
 
-// Real Codex model windows — the backend has no /models route and these ids aren't in models.dev, so
-// without this the picker shows the neutral default. From models.dev/api.json: gpt-5.x Codex = 400K/32K,
-// o-series = 200K/100K. vision:true (gpt-5/o are multimodal; the Responses backend accepts input_image).
+// Real Codex model windows — the OFFLINE FALLBACK when the models.dev catalog is absent (the live
+// lookupModelsDevCaps('openai', …) wins otherwise, and now carries these ids). Tiers mirror models.dev:
+// gpt-5.4+ flagships (incl. 5.6 sol/terra/luna) = 1.05M/128K, -codex/-mini variants = 400K/128K,
+// spark = 128K/32K, o-series = 200K/100K. The order matters: o-series first (o4-mini has '-mini'),
+// spark before -codex (gpt-5.3-codex-spark has both). vision:true (gpt-5/o are multimodal; the
+// Responses backend accepts input_image).
 export const codexModelCaps = (model: string): ModelCaps => {
-  if (/^o[0-9]/.test(model.toLowerCase())) return { contextInput: 200_000, maxOutput: 100_000, vision: true };
-  return { contextInput: 400_000, maxOutput: 32_768, vision: true };
+  const m = model.toLowerCase();
+  if (/^o[0-9]/.test(m)) return { contextInput: 200_000, maxOutput: 100_000, vision: true };
+  if (m.includes('spark')) return { contextInput: 128_000, maxOutput: 32_000, vision: true };
+  if (/-(codex|mini|nano)/.test(m)) return { contextInput: 400_000, maxOutput: 128_000, vision: true };
+  return { contextInput: 1_050_000, maxOutput: 128_000, vision: true };
 };
 
 // Curated Codex model ids — the OFFLINE FALLBACK for codexModelsFrom. The codex row's defaultModel must
