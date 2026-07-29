@@ -442,3 +442,111 @@ describe('createProviderCooldowns — the transient channel (#168)', () => {
     expect(r).toEqual({ provider: providers[3], pinnedModel: 'claude-fable-5', matched: 'family' });
   });
 });
+
+// ----------------------------- The classified quota channel (#190) ----------------------------- //
+
+/*
+ * #190 gives the LONG cooldown channel a second door: a Provider record that classified the failure itself
+ * hands over the horizon the server stated, instead of this module re-parsing one out of an error message.
+ * The property under test is the one the #168 banner names — the two channels stay separate maps, so a blip
+ * cannot sideline a provider for days and a multi-day window cannot be shortened to seconds. BOTH directions
+ * are asserted, because only one of them is obvious from reading the code.
+ */
+
+const SIX_DAYS_SECONDS = 551_032;
+
+describe('createProviderCooldowns — the classified quota channel (#190)', () => {
+  const blipTimes = (cd: ReturnType<typeof makeCooldowns>, n: number): void => {
+    for (let i = 0; i < n; i++) cd.noteTransient('antigravity', AT_CAPACITY);
+  };
+
+  it('seeds the long channel from the stated horizon, then heals', () => {
+    let now = 1_000_000;
+    const cd = makeCooldowns(() => now, () => 0);
+    cd.noteQuotaWindow('antigravity', SIX_DAYS_SECONDS);
+    expect(cd.cooling('antigravity')).toBe(true);
+    expect(cd.coolingUntil('antigravity')).toBe(1_000_000 + SIX_DAYS_SECONDS * 1000);
+    now += SIX_DAYS_SECONDS * 1000 + 1;
+    expect(cd.cooling('antigravity')).toBe(false);
+  });
+
+  // A 429 carrying no parseable delay must behave, not throw. The caller supplies the default horizon; a
+  // zero or nonsense one is simply not a cooldown rather than an entry that never expires.
+  it('refuses a horizon that is zero or nonsense rather than throwing', () => {
+    const cd = makeCooldowns(() => 0, () => 0);
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => cd.noteQuotaWindow('antigravity', bad)).not.toThrow();
+    }
+    expect(cd.cooling('antigravity')).toBe(false);
+  });
+
+  // Direction one: a blip cannot write a long horizon. Repeated transient failures trip the SHORT channel and
+  // nothing else, however many of them there are.
+  it('a blip cannot write a long horizon', () => {
+    let now = 0;
+    const cd = makeCooldowns(() => now, () => 0);
+    blipTimes(cd, TRANSIENT_FAILURES_BEFORE_COOLDOWN * 4);
+    expect(cd.coolingUntil('antigravity')).toBe(TRANSIENT_COOLDOWN_SECONDS * 1000);
+    now = TRANSIENT_COOLDOWN_SECONDS * 1000 + 1;
+    expect(cd.cooling('antigravity')).toBe(false); // nothing wrote a multi-day entry
+  });
+
+  // Direction two: a long quota window cannot be shortened by a blip. The transient channel writes its own
+  // map and coolingUntil reports the LATER horizon, so the window outlives every 30s entry.
+  it('a long quota window cannot be shortened by a blip', () => {
+    let now = 0;
+    const cd = makeCooldowns(() => now, () => 0);
+    cd.noteQuotaWindow('antigravity', SIX_DAYS_SECONDS);
+    blipTimes(cd, TRANSIENT_FAILURES_BEFORE_COOLDOWN * 2);
+    expect(cd.coolingUntil('antigravity')).toBe(SIX_DAYS_SECONDS * 1000);
+    now = TRANSIENT_COOLDOWN_SECONDS * 1000 * 100;
+    expect(cd.cooling('antigravity')).toBe(true);
+    expect(cd.coolingUntil('antigravity')).toBe(SIX_DAYS_SECONDS * 1000);
+  });
+
+  // Additive, not a behaviour change: the Codex message door still answers exactly as before, and it still
+  // recognises only its OWN wire — the Antigravity throw shape is not something this module parses.
+  it('leaves the Codex message door untouched', () => {
+    const cd = makeCooldowns(() => 0, () => 0);
+    expect(cd.noteUsageLimit('codex', CODEX_429)).toBe(SIX_DAYS_SECONDS);
+    expect(cd.noteUsageLimit('antigravity', 'Antigravity API error 429: QUOTA_EXHAUSTED')).toBeUndefined();
+    expect(cd.cooling('codex')).toBe(true);
+    expect(cd.cooling('antigravity')).toBe(false);
+  });
+});
+
+/*
+ * RECORDED, NOT FIXED (#190 acceptance criterion). withCooldownFallback re-aims FAMILY matches only, and a
+ * family match is by construction a claude-* id. A Gemini model name is never a family match, so a cooling
+ * Antigravity addressed by its own model name has no fallback at all and the request simply fails. That is
+ * the honest outcome — anthropic cannot serve `gemini-3.1-pro-low` — and it is pinned here so the next reader
+ * meets it as a decision rather than as a surprise several sessions later.
+ */
+describe('a cooling Antigravity has no fallback for a Gemini model name (#190)', () => {
+  const withAntigravity = [...providers, p('antigravity')];
+  const isAnthropic = (pr: Provider) => pr.id === 'anthropic';
+  const coolingAntigravity = (id: string) => id === 'antigravity';
+
+  it('an Active-fallback match on a Gemini name is left to fail', () => {
+    const direct = resolveRoute(EMPTY_ROUTING_MAP, withAntigravity, 'antigravity', 'gemini-3.1-pro-low');
+    expect(direct?.matched).toBe('active');
+    expect(withCooldownFallback(direct, 'gemini-3.1-pro-low', withAntigravity, coolingAntigravity, isAnthropic)).toBe(direct);
+  });
+
+  it('an Alias match on a Gemini name is left to fail too', () => {
+    const map: RoutingMap = { families: {}, aliases: [{ name: 'gem', target: { providerId: 'antigravity', model: 'gemini-3.1-pro-low' } }] };
+    const direct = resolveRoute(map, withAntigravity, 'active', 'gem');
+    expect(direct?.matched).toBe('alias');
+    expect(withCooldownFallback(direct, 'gem', withAntigravity, coolingAntigravity, isAnthropic)).toBe(direct);
+  });
+
+  // The contrast that makes the rule legible: route a FAMILY at Antigravity and the fallback DOES fire,
+  // because the id the client asked for is a claude-* one anthropic can actually answer.
+  it('but a family route pointed at Antigravity does fall back', () => {
+    const map: RoutingMap = { families: { opus: { providerId: 'antigravity', model: 'claude-opus-4-6-thinking' } }, aliases: [] };
+    const direct = resolveRoute(map, withAntigravity, 'active', 'claude-opus-4-8');
+    expect(direct?.matched).toBe('family');
+    const r = withCooldownFallback(direct, 'claude-opus-4-8', withAntigravity, coolingAntigravity, isAnthropic);
+    expect(r).toEqual({ provider: providers[3], pinnedModel: 'claude-opus-4-8', matched: 'family' });
+  });
+});

@@ -27,6 +27,7 @@ import type { Provider } from './catalog';
 import type { BridgeStreamEvent } from './bridge';
 import type { ToolSpec, BridgeUsage } from './shared';
 import type { AnthropicTruncationReason } from './anthropic';
+import type { CodexErrorClass } from './codex';
 
 // ----------------------------- Small JSON helpers ----------------------------- //
 
@@ -782,19 +783,69 @@ export const decideAntigravity429 = (body: unknown): Antigravity429Decision => {
   return decision;
 };
 
+// ----------------------------- The classified failure (#190) ----------------------------- //
+
 /*
- * The classified error, or undefined when this layer declines. Below the instant-retry threshold the caller
- * should simply retry the same credential, so nothing is classified.
+ * What the door answers a classified 429 with — the shared four-field shape #166 introduced — plus, for a
+ * spent quota window, the horizon the server itself stated, so the cooldown ledger never has to invent one.
  *
  * ⚠ The message shape is load-bearing: isTransientProviderError regexes String(err) for
  * "API error (429|500|502|503|504)". A client that throws any other shape silently receives ZERO retries,
  * and nobody notices until a blip becomes a user-visible failure.
  */
-export const antigravity429Error = (body: unknown): { status: number; message: string } | undefined => {
+export type AntigravityFailure = CodexErrorClass & {
+  cooldownSeconds?: number; // spent quota window only, and only when the server actually stated a horizon
+};
+
+// Two codes, not one: the Bridge log names them, and "the window is spent" and "slow down" are different
+// operational facts. Only the first seeds the long cooldown channel.
+export const ANTIGRAVITY_QUOTA_EXHAUSTED_CODE = 'antigravity_quota_exhausted';
+export const ANTIGRAVITY_RATE_LIMITED_CODE = 'antigravity_rate_limited';
+
+/*
+ * The classified verdict, or undefined when this layer declines. Below the instant-retry threshold the caller
+ * should simply retry the same credential, so nothing is classified.
+ *
+ * A sub-five-minute rate limit is deliberately NOT given a cooldownSeconds: that is the blip flavour, and the
+ * shared streak logic in routing.ts already owns it. Writing a horizon for one would put a seconds-long
+ * hiccup into the channel that exists for multi-day plan windows.
+ */
+export const antigravity429Failure = (body: unknown): AntigravityFailure | undefined => {
   const decision = decideAntigravity429(body);
   if (decision.kind === 'soft_retry' || decision.kind === 'instant_retry_same_auth') return undefined;
+  const exhausted = decision.kind === 'full_quota_exhausted';
   const detail = decision.reason ?? decision.kind;
-  return { status: 429, message: `Antigravity API error 429: ${detail}` };
+  const horizon = exhausted && decision.retryAfterMs !== undefined ? Math.ceil(decision.retryAfterMs / 1000) : undefined;
+  return {
+    status: 429,
+    code: exhausted ? ANTIGRAVITY_QUOTA_EXHAUSTED_CODE : ANTIGRAVITY_RATE_LIMITED_CODE,
+    type: 'rate_limit_error',
+    message: `Antigravity API error 429: ${detail}`,
+    ...(horizon !== undefined ? { cooldownSeconds: horizon } : {}),
+  };
+};
+
+// The status/message view, kept because that is what the throw shape needs and what #187 pinned.
+export const antigravity429Error = (body: unknown): { status: number; message: string } | undefined => {
+  const failure = antigravity429Failure(body);
+  return failure && { status: failure.status, message: failure.message };
+};
+
+/*
+ * The verdict rides ON the thrown Error rather than being re-derived from its message, because the message
+ * CANNOT round-trip it: a 429 this layer DECLINED renders as `Antigravity API error 429: <raw upstream body>`,
+ * and that body is prose we do not control — it says RESOURCE_EXHAUSTED and RATE_LIMIT_EXCEEDED too. A string
+ * matcher would have to guess, and guessing "classified" stops a bounded retry that would have worked.
+ *
+ * String(err) is untouched by the attachment, so the retryability contract above still holds exactly.
+ */
+const FAILURE_PROPERTY = '__wispAntigravityFailure';
+
+// Read back what antigravityApiError attached: undefined for every other Provider's error, and for an
+// Antigravity 429 this layer declined to classify.
+export const antigravityFailureOf = (err: unknown): AntigravityFailure | undefined => {
+  const carried = (err as Record<string, unknown> | null | undefined)?.[FAILURE_PROPERTY];
+  return isObj(carried) ? (carried as AntigravityFailure) : undefined;
 };
 
 // ----------------------------- The SSE mapper ----------------------------- //
@@ -979,8 +1030,10 @@ export const antigravityApiError = (status: number, body: string): Error => {
   if (status === 429) {
     let parsed: unknown;
     try { parsed = JSON.parse(body); } catch { parsed = undefined; }
-    const classified = antigravity429Error(parsed);
-    if (classified) return new Error(classified.message);
+    const failure = antigravity429Failure(parsed);
+    // #190: the verdict travels ON the Error. This is the ONE place that knows the body classified —
+    // everything downstream (the record's classify hook, the cooldown ledger) only ever sees the Error.
+    if (failure) return Object.assign(new Error(failure.message), { [FAILURE_PROPERTY]: failure });
   }
   const detail = body.trim().slice(0, 500);
   return new Error(`Antigravity API error ${status}${detail ? `: ${detail}` : ''}`);

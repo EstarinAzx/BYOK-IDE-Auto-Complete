@@ -29,6 +29,7 @@ import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
   toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, isCodexProvider, isAnthropicProvider, isXaiProvider,
   isAntigravityProvider, isAntigravityImageModel, antigravityImageRefusal,
+  antigravityFailureOf, ANTIGRAVITY_QUOTA_EXHAUSTED_CODE,
   anthropicCacheOutcome, anthropicDiagnosisStale, createAnthropicDiagnosisChain, createAnthropicCacheGrowthTracker,
   classifyCodexErrorMessage, buildStatus,
   type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type AntigravityCreds, type EffortLevel, type BridgeUsage, type AnthropicCacheMissReason, type CodexErrorClass,
@@ -50,7 +51,7 @@ import {
 import type { NormalizedTurn } from './catalog';
 import {
   resolveRoute, withCooldownFallback, createProviderCooldowns,
-  isTransientProviderError, retryDelayMs, MAX_PROVIDER_ATTEMPTS,
+  isTransientProviderError, retryDelayMs, MAX_PROVIDER_ATTEMPTS, DEFAULT_COOLDOWN_SECONDS,
   type RoutingMap, type RouteMatch,
 } from './routing';
 
@@ -221,6 +222,17 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // once the failures repeat.
   const noteProviderError = (providerId: string, err: unknown): void => {
     const message = String(err);
+    // #190: a record that classified the failure itself already knows the horizon the server stated, so the
+    // long channel is seeded from that number instead of being re-parsed out of prose. Checked FIRST, so a
+    // spent plan window can never fall through and be counted as a blip. A horizonless exhaustion takes the
+    // same short default #161 uses — wrong guesses self-heal, and rediscovering it every request does not.
+    const failure = antigravityFailureOf(err);
+    if (failure?.code === ANTIGRAVITY_QUOTA_EXHAUSTED_CODE) {
+      const quotaSeconds = failure.cooldownSeconds ?? DEFAULT_COOLDOWN_SECONDS;
+      cooldowns.noteQuotaWindow(providerId, quotaSeconds);
+      deps.log(`[bridge] provider ${providerId} quota exhausted — cooling down ${Math.round(quotaSeconds / 60)}m until ${new Date(Date.now() + quotaSeconds * 1000).toISOString()} (#190)`);
+      return;
+    }
     const seconds = cooldowns.noteUsageLimit(providerId, message);
     if (seconds !== undefined) {
       deps.log(`[bridge] provider ${providerId} usage limit hit — cooling down ${Math.round(seconds / 60)}m; claude-* family routes fall back to anthropic until ${new Date(Date.now() + seconds * 1000).toISOString()} (#161)`);
@@ -431,7 +443,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // layer, unit-tested), so unlike the three above it needs no mapOAuthStream hop.
       id: 'antigravity',
       matches: isAntigravityProvider,
-      classify: () => undefined,
+      // #190: the FIRST record to answer a rate limit as 429 rather than leaving it a gateway fault. The
+      // verdict is read off the Error the client threw, never re-derived from its message — a 429 the pure
+      // layer DECLINED carries its raw upstream body, which uses the same vocabulary, so a string matcher
+      // would stop the bounded retry that declining exists to allow.
+      classify: (err) => antigravityFailureOf(err),
       open: async ({ parsed, provider, model, baseUrl, signal }) => {
         const creds = await deps.antigravityCreds?.();
         if (!creds) return signedOut(provider);
