@@ -9,119 +9,110 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last firing (2026-07-29, relay leg 8): #171 landed.** `3e0125e` on main (PR #179, squash-merged), ticket
-closed with **every acceptance criterion checked**. The Bridge now writes `~/.wisp/status.json` after each
-bridged turn on the Anthropic door, and the `wisp-slot` statusline renders
-`[WISP haiku→gpt-5.6-sol ctx 122% 5h 4% 7d 22%]`. Gate was **779/779** (759 → 779, +20 new tests) and
-`bun run compile` clean in **both** packages.
+**Last firing (2026-07-29, relay leg 9): #173 landed — `wisp-router@2.0.38` is live on npm.** Commit
+`55daebb` on main, tag `v2.0.38`, workflow run `30422101844` green on all four platform runners, ticket
+closed with every acceptance criterion checked. **Spec #164 is complete — all nine tickets shipped.**
 
-## The one next task: ticket #173 — cut `wisp-router` 2.0.38
+## The one next task: `queue empty` — the next move is a human one
 
-**`ready-for-agent` = #173, and that is the whole queue.** All eight of its blockers are closed. It is the
-last ticket in spec #164, and shipping it is what makes the eight-ticket harvest reachable by users.
+**There is no `ready-for-agent` ticket. The relay chain has stopped and should not be restarted** until
+something is labelled for it; with an empty queue it will pick nothing, write `queue empty`, and stop again.
 
-The relay chain is live (`.claude/relay/ticket-loop.md`, `stop: false`, leg 9), so a leg should already be
-working this. If no leg is running, re-issue:
+The highest-value thing to do is the **live Bridge session** that has been pending for nine tickets. One
+restart covers four checks — see *The live session* below.
 
-```
-/relay N=1 /preset ticket-loop -> after the ticket's gate (tests green + landed, or ready-for-human relabel), run /preset wrap-up gateless: eyeball gate auto-go (unattended), /context-update, rewrite .context/pick-up.md to the next unblocked ready-for-agent ticket or 'queue empty', commit .context on main — never the ticket branch. At leg boot also read .context/pick-up.md.
-```
+## The live session (one trip, four checks)
 
-## What #173 actually needs (read before opening a file)
+Restart the Bridge on this build, then bridge a session through **Claude Code / the Anthropic door** (not
+curl against `/v1/chat/completions` — the OpenAI door deliberately drops usage events):
 
-- **Release mechanics are established, not to be redesigned.** Delivery is per-platform `bun build --compile`
-  binaries published by the **tag-triggered** workflow (`.github/workflows/release.yml`, tag `v*`). **The git
-  tag must equal the version in `packages/tui/package.json`** or the workflow never matches. The TUI keeps its
-  own `CHANGELOG.md` covering 2.0.11 onward.
-- **The judgement call is the real work.** #172 changed the **shared catalog**, which reaches the picker and
-  native chat — surfaces that ship only in the **vsix**, not on npm. #173 has an explicit acceptance criterion
-  demanding a recorded decision, with reasoning, on whether a matching vsix bump is owed. Answer it; don't
-  leave it implicit, and don't assume npm alone suffices because the title says npm.
-- **Release notes must say which surface each change reaches** (npm Bridge vs vsix picker / native chat) —
-  also an acceptance criterion, not a nicety.
-- **`packages/tui:verify`** is finally the right tool — this ticket bumps the TUI package.
-- **⚠️ This ticket publishes to npm** — the one outward-facing, hard-to-reverse action in the batch. The
-  `ready-for-agent` label plus the spec's "final leg of the relay run" is the authorization; the *reasoning*
-  for the vsix half still has to be written down.
+1. **#165 / #163 — the verdict.** Bridge a **Codex** session, read `/context`. **Non-zero ⇒ the diagnosis
+   was right** and the 502 cluster should stop recurring. **Still zero ⇒ the tighter-OAuth-cap hypothesis is
+   back.** Leave #163 open until this runs. Nine shipped tickets ride on it.
+2. **#171 — the snapshot.** After a real turn, `~/.wisp/status.json` should exist. **Judge #171 by that
+   file, not by the badge** — the `ctx …%` reader ships in the `wisp-slot` plugin, which is **not bumped
+   yet** (#180). Absent file ⇒ `recordStatus` never fired.
+3. **#169 — keyed usage.** A session on the **default** Provider (OpenCode Go) must report non-zero tokens
+   in `/context`. Watch for a **400 naming `stream_options`** rather than silence — that is the untested
+   failure mode, and the fix would be a per-row opt-out flag, not removing the opt-in for everyone.
+4. **#172 — the Codex default.** A fresh Codex sign-in that never opens the model picker completes a turn.
 
-## What #171 shipped (for #173's release notes)
+Also still open by hand: **#167's** manual criterion (one turn each through Codex, Anthropic and Grok), and
+**#170's** two criteria (needs a Kimi Code subscription — `wisp` → `/signin kimi`; the sign-in doubles as the
+unverified-constants check).
 
-- **Bridge → `~/.wisp/status.json`**, written by the **Anthropic door only** (Claude Code's route), carrying
-  the turn's real usage against the model's window plus the account's quota utilization.
-- **Reaches npm** (the TUI hosts the Bridge via `wisp serve` / `claude-wisp`) **and** the vsix (the extension
-  hosts the same engine) **and** the marketplace plugin (the statusline script that reads the file). Three
-  surfaces — worth calling out precisely in the notes.
-- New pure module `packages/core/src/status.ts`; `onQuota` callbacks in the two OAuth clients;
-  `WispHome.writeStatus`; an optional `recordStatus` dep on the Bridge.
+## Then triage the two tickets this leg filed
+
+Both are `ready-for-human` **only to stop the relay auto-grabbing them**, not because they are hard:
+
+- **#180 — ship the harvest to the vsix + `wisp-slot` plugin.** Both bumps are **owed**. The vsix bundles its
+  own `@wisp/core`, so #170's Kimi row, #172's corrected Codex default, #165's chat-path guard and #171's
+  `recordStatus` reach **no** extension user on any npm version. The plugin carries #171's *reader* half, and
+  `3e0125e` changed `wisp-statusline.js` without bumping `plugin.json` — so **1.5.0 means two different
+  things**. Flip to `ready-for-agent` to pre-stage the bumps, changelogs and `bun run package`; the install
+  step still needs you.
+- **#181 — a BOM in `~/.wisp/config.json` silently empties the whole config.** Small, safe, agent-sized. It
+  carries one design question worth answering first: tolerate the BOM, or **fail loud** on an unparseable
+  config? Today it does neither.
 
 ## Landmines
 
-- **RUN `bun run compile` IN BOTH PACKAGES.** The root script only covers `packages/vscode`;
-  `packages/tui` has its own (`tsc -p ./`). Vitest does not typecheck either —
+- **RUN `bun run compile` IN BOTH PACKAGES.** The root script only covers `packages/vscode`; `packages/tui`
+  has its own (`tsc -p ./`). Vitest typechecks neither —
   [[widening-a-client-stream-event-union-breaks-else-narrowing-vitest]].
-- **`status.json` is a cross-release compatibility surface.** Core writes it; the `wisp-slot` plugin's
-  statusline script reads it. Adding fields is free (the reader ignores unknown keys); renaming or removing
-  one needs both sides to move in the same release.
+- **npm is one of THREE faces.** The vsix bundles its own engine and `plugins/slot/` ships through the plugin
+  marketplace, so a core fix reaches neither on an npm publish. Every release entry now carries a
+  `### Surfaces` section — keep it, and **file the owed bump as a ticket in the same pass**, because an owed
+  bump recorded only in prose evaporates.
+  [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]].
+- **Never seed a sandbox `WISP_HOME` from PowerShell `Out-File -Encoding utf8`** — it writes a BOM, and a BOM
+  makes Wisp discard the *entire* config while still exiting 0 with plausible output. It looks exactly like a
+  broken feature. [[a-bom-in-wisp-config-silently-empties-the-whole-config]].
+- **A release tag must equal `packages/tui/package.json`'s version** or the workflow never matches. Assert it
+  before pushing the tag — a wrong tag is annoying to unwind.
+- **Release cuts are a direct commit on main, not a PR** (`b25e862`, now `55daebb`): `CHANGELOG.md` +
+  `package.json` only. CI stamps the npm shell packages' versions from the tag, so nothing else needs
+  committing.
+- **`status.json` is a cross-release compatibility surface.** Core writes it, the plugin's statusline script
+  reads it. Adding fields is free; renaming or removing one needs both sides to move in the same release —
+  and they are on **different registries**.
 - **Anything volatile written into `~/.wisp` must be excluded from the dir watcher** in `homeStore.ts`, or
   every write wakes both faces to re-read `config.json`. `status.json` is the first such file.
 - **Don't widen `BridgeStreamEvent` casually.** The Anthropic encoder's `push()` reads an unrecognized event
   as a **client tool call**, so an unhandled member invents a `tool_use` block instead of degrading.
   [[2026-07-29-quota-is-a-side-channel-not-a-bridge-stream-event]].
-- **#165 is still unverified live — this is the #163 verdict and it needs a human.** Restart the Bridge on
-  this build, bridge a Codex session, read `/context`. Non-zero ⇒ diagnosis right. Still zero ⇒ the
-  tighter-OAuth-cap hypothesis is back. **Leave #163 open until this runs.** Eight shipped tickets ride on it.
-- **#171's end-to-end path rides that same trip.** After a real bridged turn, `~/.wisp/status.json` should
-  exist. Absent ⇒ `recordStatus` never fired. Present but the badge shows no readings ⇒ the reader's
-  30-minute staleness window or its model-match guard.
-- **A model list is not an accepted list.** Changing the Codex default again means **probing first**, then
-  widening the whitelist —
-  [[2026-07-29-a-model-list-is-not-an-accepted-list-whitelist-the-probed-ids]].
-- **The untested #169 failure mode is a 400, not silence.** A backend that **400s on an unknown parameter**
-  was never exercised against `stream_options`. The fix would be a per-row opt-out flag, not removing the
-  opt-in for everyone.
-- **#170's auth constants are unverified** — host `auth.kimi.com`, client id, endpoints, all quoted from the
-  ticket because the CLIProxyAPI source path 404s. A wrong value **fails loud** at sign-in.
+- **A model list is not an accepted list.** Changing the Codex default means **probing first**, then widening
+  the whitelist — [[2026-07-29-a-model-list-is-not-an-accepted-list-whitelist-the-probed-ids]].
 - **Anthropic quota is a FRACTION (0.22), Codex is an INTEGER percent (7).** Normalized in `status.ts` — do
-  not re-normalize downstream. And never filter headers by keyword regex; that missed
+  not re-normalize downstream. Never filter headers by keyword regex; that missed
   `x-codex-primary-used-percent` during the recon.
-- **A transcript's `model` may not be the model that served the turn** — the door echoes the *requested*
-  name. Open question, deliberately untouched.
+- **`## Blocked by` on the harvest tickets is body text, not native links** — GraphQL `blockedBy` returns
+  empty even for a genuinely blocked ticket.
+  [[harvest-tickets-carry-body-text-blockers-not-native-links]].
 - **Fold transcript rows by `message.id` before concluding anything** —
   [[cc-transcript-rows-are-blocks-not-messages]].
 - **`.context/` commits go to main, never a ticket branch.**
 
-## Carried-over user actions
+## Loose thread noticed, not touched
 
-All want the **same session** — one Bridge restart covers the first four:
-
-- **Verify #165 live** (above) — the decisive check, now carrying eight shipped tickets.
-- **Verify #171 live** — same trip: a real turn should produce `~/.wisp/status.json` and a `ctx …%` badge.
-- **Verify #169 live** — a bridged session on the **default** Provider (OpenCode Go) must report non-zero
-  tokens in `/context`. Run it through **Claude Code / the Anthropic door**, not curl against
-  `/v1/chat/completions` — the OpenAI door deliberately drops usage events.
-- **Verify #172 live** — a fresh Codex sign-in that never picks a model completes a turn.
-- **#167's manual criterion**: one turn each through Codex, Anthropic and Grok, confirming all three still
-  stream through the Bridge.
-- **#170's two criteria** — needs a Kimi Code subscription. `wisp` → `/signin kimi`, approve at the printed
-  URL, bridge a turn, check `/context` reports non-zero. The sign-in doubles as the constants check.
-- **Install `packages/vscode/wisp-1.9.0.vsix`** — still not done.
+`packages/vscode/src/chatProvider.ts` — #165's Anthropic branch has a **duplicated**
+`if (ev.type !== 'toolCall') continue;` (the line already existed just above the inserted one). Dead, not
+wrong: it compiles and behaviour is identical. Left alone as out of #173's scope; noted on **#180**, which is
+the ticket that touches that file next.
 
 ## Related
 
 - [[active-work]]
 - [[overview]]
+- [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
+- [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
 - [[2026-07-29-quota-is-a-side-channel-not-a-bridge-stream-event]]
 - [[2026-07-29-a-model-list-is-not-an-accepted-list-whitelist-the-probed-ids]]
-- [[2026-07-29-cliproxyapi-harvest-scoped-minimum-record-usage-first]]
 - [[2026-07-29-oauth-credentialed-but-keyed-on-the-wire-resolves-at-the-keyfor-seam]]
-- [[a-shared-bearer-rule-or-the-oauth-row-401s-on-half-the-paths]]
 - [[2026-07-29-chat-completions-usage-is-a-sibling-mapper-not-a-shared-one]]
 - [[2026-07-29-retry-wraps-priming-cooldown-channels-are-separate-maps]]
 - [[2026-07-29-two-doors-share-the-error-answer-not-the-request]]
 - [[2026-07-29-codex-failures-classified-unmatched-stays-502]]
-- [[a-door-commits-its-200-head-before-the-upstream-request-has-run]]
-- [[widening-a-client-stream-event-union-breaks-else-narrowing-vitest]]
-- [[readablestream-error-discards-the-queued-chunks]]
 - [[harvest-tickets-carry-body-text-blockers-not-native-links]]
-- [[both-oauth-providers-ship-quota-headers-codex-rejects-gpt-5-3-codex]]
+- [[widening-a-client-stream-event-union-breaks-else-narrowing-vitest]]
 - [[cc-transcript-rows-are-blocks-not-messages]]

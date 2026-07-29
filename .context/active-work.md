@@ -7,163 +7,136 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-29 by Opus 5 (relay leg 8 — #171 landed)._
-_At commit: `3e0125e` on main, pushed. **One ticket left: #173, the release cut.**_
+_Last updated: 2026-07-29 by Opus 5 (relay leg 9 — #173 landed; **spec #164 complete**)._
+_At commit: `55daebb` on main, pushed, tag `v2.0.38`. **The agent queue is empty.**_
 
 ## Current focus
 
-**Eight of the harvest's nine tickets are shipped.** Legs 1–8 landed **#165** (Responses-wire usage),
-**#166** (error classification), **#167** (the ProviderExecutor seam), **#168** (retry + transient cooldown),
-**#169** (API-key usage), **#170** (the Kimi Provider), **#172** (the Codex default model) and now **#171**
-(the live statusline). Every leg gate-green.
+**Nothing in flight. The CLIProxyAPI harvest is shipped and spec #164 is done.** Legs 1–9 landed all nine
+tickets — #165 (Responses-wire usage), #166 (error classification), #167 (the ProviderExecutor seam), #168
+(retry + transient cooldown), #169 (API-key usage), #170 (the Kimi Provider), #171 (the live statusline),
+#172 (the Codex default model) and #173 (the release cut). Every leg gate-green.
 
-**Only #173 remains — cut `wisp-router` 2.0.38 and ship the harvest.** All eight of its blockers are closed,
-it carries the `ready-for-agent` label, and it is the last ticket in spec #164.
+**`wisp-router@2.0.38` is live on npm.** Workflow run `30422101844` succeeded on all four platform runners;
+verified by a real install into a scratch dir (2 packages — thin shell + platform binary) with both bins
+executed.
 
-**The verdict is still not in.** #165's last acceptance criterion — a bridged Codex session reading non-zero
-`/context` — needs a human with a restarted Bridge. **Eight** shipped tickets now ride on that check, and
-#171's own end-to-end path (a real turn actually writing `status.json`) rides the same session.
+**The decisive live check is still outstanding, and now nine shipped tickets ride on it.** See *User action
+pending*.
 
 ## State
 
-- **In flight:** nothing. Working tree clean on main; relay chain live (`stop: false`).
-- **Done this session (relay leg 8):**
-  - **#171 landed** — `3e0125e` on main (PR #179, squash-merged), ticket closed, all acceptance criteria
-    checked.
-  - **The Bridge now writes `~/.wisp/status.json`** after each bridged turn on the **Anthropic door** — the
-    turn's real usage against the model's window, plus the account's utilization off the response head. The
-    `wisp-slot` statusline reads it back and renders
-    `[WISP haiku→gpt-5.6-sol ctx 122% 5h 4% 7d 22%]`.
-  - **New pure module `packages/core/src/status.ts`** — `parseCodexQuota` / `parseAnthropicQuota` normalize
-    two header families with different units onto one 0..100 scale; `contextTokens` / `contextPercent` /
-    `contextWindowFor` / `buildStatus` assemble the snapshot. 20 new tests, fixtures copied verbatim from the
-    recon's live dumps.
-  - **Quota travels by callback, not by stream event** — the load-bearing call this session.
-    [[2026-07-29-quota-is-a-side-channel-not-a-bridge-stream-event]].
-  - **Keyed Providers get no context reading**, on purpose: they report usage, but their window is only
-    known from models.dev, which the door does not fetch per turn.
-  - Gate: **779/779 tests** (759 → 779, +20), `bun run compile` clean in **both** packages, and an 8-path
-    smoke run of the statusline script against an isolated `WISP_HOME`.
-- **User action pending:**
-  - **Verify #165 live** — restart the Bridge on this build, bridge a Codex session, read `/context`.
-    This is the #163 verdict; see [[pick-up]] for what each outcome means.
-  - **Verify #171 live** — the same trip covers it: after a real bridged turn, `~/.wisp/status.json` should
-    exist and the statusline should carry `ctx …%`. Absent file ⇒ `recordStatus` never fired; present but no
-    badge readings ⇒ the reader's staleness / model-match guards.
+- **In flight:** nothing. Working tree clean on main. **Relay chain stopped** — the agent queue is dry.
+- **Done this session (relay leg 9):**
+  - **#173 landed** — `55daebb` on main, tag `v2.0.38`, direct-commit release convention (no PR, matching
+    `b25e862`), ticket closed with every acceptance criterion checked.
+  - **Gate before cutting:** 779/779 tests, root `bun run compile` clean, `packages/tui` `bun run compile`
+    clean, plus `packages/tui:verify` — renderer-free `routing` / `routing --json` exit 0, and `claude-wisp`
+    exits 1 with the Bridge guidance, the same assertion CI's smoke test makes.
+  - **Post-publish verification:** installed `wisp-router@2.0.38` from npm into a scratch dir and ran both
+    bins — the negative path (Bridge guidance, exit 1) and a positive one (`wisp routing --json` returning a
+    seeded map).
+  - **The load-bearing call: a release names its surfaces.** npm is one of **three** faces, and the other two
+    get nothing from an npm publish. Recorded as
+    [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]].
+  - **Two bumps ruled owed and deliberately not cut** → **#180** (`ready-for-human`): the **vsix** (four
+    tickets changed extension-face code, and the extension bundles its own copy of `@wisp/core`) and the
+    **`wisp-slot` plugin** (#171's *reader* half ships through the marketplace; `3e0125e` changed the script
+    without bumping `plugin.json`, so **1.5.0 now means two different things**).
+  - **A real bug found while verifying** → **#181** (`ready-for-human`): a **BOM in `~/.wisp/config.json`
+    silently discards the entire config** — provider, models, effort, the whole Routing map — exit 0, no
+    stderr. Pre-existing, not from this cut.
+    [[a-bom-in-wisp-config-silently-empties-the-whole-config]].
+  - **`overview.md` corrected** — it still said 13 built-ins / four Provider kinds; #170 made it **14 +
+    Custom and five kinds**. Counted from `PROVIDERS`, not guessed.
+- **User action pending** (all want the **same session** — one Bridge restart covers the first four):
+  - **Verify #165 live** — restart the Bridge on this build, bridge a Codex session, read `/context`. This is
+    the #163 verdict; see [[pick-up]] for what each outcome means.
+  - **Verify #171 live** — same trip: a real turn should leave `~/.wisp/status.json`. ⚠ The `ctx …%` badge
+    will **not** appear until the `wisp-slot` plugin is bumped (#180) — the reader half is not shipped yet.
+    Judge #171 by the file, not the badge.
   - **Verify #169 live** — a bridged session on the **default** Provider (OpenCode Go) must report non-zero
-    tokens in `/context`. Watch for a **400 naming `stream_options`** rather than silence.
+    tokens in `/context`. Run it through Claude Code / the Anthropic door, not curl against
+    `/v1/chat/completions` (the OpenAI door deliberately drops usage events). Watch for a **400 naming
+    `stream_options`** rather than silence.
   - **Verify #172 live** — a fresh Codex sign-in that never picks a model completes a turn.
-  - **#167's manual criterion** — one turn each through Codex, Anthropic and Grok to confirm all three
-    still stream.
+  - **#167's manual criterion** — one turn each through Codex, Anthropic and Grok.
   - **#170's two open criteria** — needs a Kimi Code subscription; the sign-in attempt doubles as the
     unverified-constants check.
-  - **Install `packages/vscode/wisp-1.9.0.vsix`** (carried over, still not done).
+  - **Install `packages/vscode/wisp-1.9.0.vsix`** (carried over, still not done — #180 supersedes it with a
+    newer bump).
 
-## Queue — 1 ticket left
+## Queue — agent queue empty
 
-| # | Ticket | Blocked by |
+Spec #164 complete. All nine tickets shipped:
+
+| # | Ticket | Landed |
 |---|---|---|
-| ~~165~~ | ~~Codex and Grok turns report real token usage~~ | **DONE — `1971541`** |
-| ~~166~~ | ~~Codex failures classified into real HTTP statuses~~ | **DONE — `07969d2`** |
-| ~~167~~ | ~~Collapse three Bridge handlers into one ProviderExecutor record~~ | **DONE — `c697733`** |
-| ~~168~~ | ~~Transient failures retried and cooled down~~ | **DONE — `89f94c5`** |
-| ~~169~~ | ~~API-key Providers report real token usage~~ | **DONE — `7b8d73d`** |
-| ~~170~~ | ~~Kimi Provider via device flow~~ | **DONE — `d656686`** |
-| ~~172~~ | ~~Codex Provider default model rejected by ChatGPT-account path~~ | **DONE — `49761d8`** |
-| ~~171~~ | ~~Statusline: live context percentage + quota meters~~ | **DONE — `3e0125e`** |
-| **173** | **Cut `wisp-router` 2.0.38** — ship the harvest | — (**next**, all 8 blockers closed) |
+| ~~165~~ | ~~Codex and Grok turns report real token usage~~ | `1971541` |
+| ~~166~~ | ~~Codex failures classified into real HTTP statuses~~ | `07969d2` |
+| ~~167~~ | ~~Collapse three Bridge handlers into one ProviderExecutor record~~ | `c697733` |
+| ~~168~~ | ~~Transient failures retried and cooled down~~ | `89f94c5` |
+| ~~169~~ | ~~API-key Providers report real token usage~~ | `7b8d73d` |
+| ~~170~~ | ~~Kimi Provider via device flow~~ | `d656686` |
+| ~~171~~ | ~~Statusline: live context percentage + quota meters~~ | `3e0125e` |
+| ~~172~~ | ~~Codex Provider default model rejected by ChatGPT-account path~~ | `49761d8` |
+| ~~173~~ | ~~Cut `wisp-router` 2.0.38 — ship the harvest~~ | `55daebb` / `v2.0.38` |
 
-Also open, ungroomed: **#69** (copilot-wisp launcher), **#163** (502 observation — #165+#166 are its
-candidate fix; leave open until the live `/context` check confirms).
+**Open, awaiting a human — no `ready-for-agent` ticket exists:**
 
-- **These edges are body text, not native links** — GraphQL `blockedBy` reports empty for all of them. See
-  [[harvest-tickets-carry-body-text-blockers-not-native-links]] before trusting a dependency query.
-- **#173 publishes to npm.** It is the one ticket in this batch whose work is outward-facing and hard to
-  reverse. It is labelled `ready-for-agent` and the spec calls it "the final leg of the relay run", so the
-  authorization is explicit — but its acceptance criteria include a **judgement call** (whether a matching
-  vsix bump is owed, given #172 touched the shared catalog) that must be recorded with reasoning, not
-  guessed silently.
+| # | Ticket | Why it needs a human |
+|---|---|---|
+| **180** | Ship the harvest to the vsix + `wisp-slot` plugin | Two more outward-facing publishes #173 never authorized; one criterion (install the `.vsix` in a real host) is unreachable unattended. Flip to `ready-for-agent` to pre-stage the bumps, changelogs and `bun run package`. |
+| **181** | BOM in `config.json` silently empties the whole config | Small and agent-doable; the open question filed with it is a design call — tolerate the BOM or **fail loud**? Today it does neither. |
+| **163** | The 502 observation | #165+#166 are its candidate fix. **Leave open until the live `/context` check runs.** |
+| **69** | copilot-wisp launcher | Ungroomed. |
 
 ## Pick up here
 
-The relay takes **#173** next and the harvest ships. Do not re-plan; the ticket carries its own acceptance
-criteria and the release mechanics are established (tag must equal `packages/tui/package.json`'s version or
-the workflow will not match).
+**No agent work is queued.** The highest-value next move is a human one: the **live Bridge session** that
+settles #163/#165 and covers #169, #171 and #172 in one trip. After that, triage #180 and #181 — both are
+`ready-for-human` only to stop the relay auto-grabbing them, and #181 in particular is a small, safe,
+agent-sized fix the moment you flip its label.
+
+Do **not** restart the relay chain expecting work: with no `ready-for-agent` ticket it will pick nothing,
+write `queue empty`, and stop.
 
 ## Skills for next session
 
-- `/preset pick-up` — session door (the baton points straight at the relay).
-- `/relay N=1 /preset ticket-loop` — exact command preserved in [[pick-up]].
-- `packages/tui:verify` — sandboxed CLI verification for TUI command-surface changes. **#173 bumps the TUI
-  package**, so this one is finally the right tool.
+- `/preset pick-up` — session door.
+- `packages/tui:verify` — sandboxed CLI verification for TUI command surfaces. ⚠ Seed the sandbox config
+  from Bash, **not** PowerShell `Out-File -Encoding utf8` — see
+  [[a-bom-in-wisp-config-silently-empties-the-whole-config]].
+- `/relay N=1 /preset ticket-loop` — only after something is labelled `ready-for-agent`.
 
 ## Open questions
 
-- **Does #165 actually kill the 502s?** Still THE decisive test. Restart the Bridge, bridge a Codex session,
-  confirm `/context` reads non-zero, then watch whether the 217k–245k cluster stops recurring. If it does not,
-  the tighter-OAuth-cap hypothesis is back — and #166 now means the next failure arrives as a **400 naming the
-  cause** rather than an opaque 502, with #168 having already retried it three times first.
-- **Is the 30-minute staleness window on the statusline snapshot right?** Picked cold (#171). Too short and a
-  long thinking pause blanks the readings; too long and a finished session's numbers linger. One constant in
-  `wisp-statusline.js`; revisit after living with it.
-- **Should the snapshot be per-session rather than global?** `status.json` is one file for the whole machine,
-  so two concurrent bridged sessions overwrite each other. The model-match guard hides the worst of it, but
-  two sessions on the SAME family would still cross. Deliberately not solved — no evidence it bites yet.
-- **Which Codex ids does the ChatGPT-account path actually accept?** Only `gpt-5.6-sol` and `gpt-5.4` are
-  probed 200; `gpt-5.3-codex` and bare `gpt-5.6` are probed 400. The rule behind that split is unknown — the
-  refused pair share no shape — so the test whitelists rather than pattern-matches.
-- **Does any keyed backend reject `stream_options`?** New with #169 and unverified live. If one does, the fix
-  is a per-row opt-out flag, not removing the opt-in.
+- **Does #165 actually kill the 502s?** Still THE decisive test, now carrying nine shipped tickets. If it
+  does not, the tighter-OAuth-cap hypothesis is back — and #166 means the next failure arrives as a **400
+  naming the cause** rather than an opaque 502, with #168 having retried it three times first.
+- **Tolerate a BOM or fail loud on an unparseable config?** Filed with #181. Today Wisp does neither — it
+  discards the config and continues silently.
+- **Does `auth.json` have the same BOM behaviour?** Same read path, unverified. A wiped `auth.json` would
+  read as signed-out.
+- **Is the 30-minute staleness window on the statusline snapshot right?** Picked cold (#171). One constant in
+  `wisp-statusline.js`; revisiting it needs #180 shipped first.
+- **Should the snapshot be per-session rather than global?** `status.json` is one file per machine, so two
+  concurrent bridged sessions overwrite each other. The model-match guard hides most of it; two sessions on
+  the SAME family still cross. Deliberately unsolved — no evidence it bites yet.
+- **Which Codex ids does the ChatGPT-account path actually accept?** Only `gpt-5.6-sol` and `gpt-5.4` probed
+  200; `gpt-5.3-codex` and bare `gpt-5.6` probed 400. The rule behind the split is unknown, so the test
+  whitelists rather than pattern-matches.
+- **Does any keyed backend reject `stream_options`?** New with #169, unverified live. If one does, the fix is
+  a per-row opt-out flag, not removing the opt-in.
 - **Are the #168 constants right in production?** 3 attempts / 200ms base / 30s cooldown after 3 failed
-  requests in 120s were picked cold, never tuned against a real outage. Revisit after the first real
-  transient event (grep `#168`).
+  requests in 120s, picked cold. Revisit after the first real transient event (grep `#168`).
 - **Should the two doors' provider dispatch ever fully merge?** Left open on purpose (#167).
-- **Is `kimi-k2.7-code` a real Kimi Code model id?** Best-effort; the row serves a live `/models` route, so
-  the picker is the correction path.
-- **ANSWERED (leg 8):** ~~can quota ride the existing stream union like usage did?~~ It can, but it
-  shouldn't — see the decision entry.
-- **ANSWERED (leg 7):** ~~is the caps table or the model list wrong too?~~ Neither — the account-path
-  restriction is orthogonal to both.
-- **ANSWERED (leg 6):** ~~does the keyed record cover an OAuth-token Provider unchanged?~~ No — but the gap
-  is one seam (`keyFor`), not one executor.
-- **ANSWERED (leg 5):** ~~can the two usage mappers be one function?~~ No — sibling, not shared.
-- **ANSWERED (leg 4):** ~~does the retry wrap the shared error answer?~~ No — the cooldown does.
-- **ANSWERED (leg 3):** ~~is `startProviderStream` a fourth copy of the OpenAI door's handlers?~~ No.
-- **ANSWERED (leg 2):** ~~can the doors even set an error status on a streaming request?~~ Only if primed.
-- **ANSWERED (leg 1):** ~~do non-Anthropic Providers report usage?~~ No — and as of #169 every kind does.
-- **Should the door echo the resolved target instead of the requested model name?** Still open.
-- **The 2026-07-25 10:11 turn reports 484 output tokens with no surviving content block.** Still unexplained.
-- **Does the Agent tool ever take a non-enum model?** Re-check after a Claude Code minor bump.
-
-## Recent context
-
-- **The relay pattern has now held for eight legs**, every one gate-green — including one clean stop on an
-  apparent human-decision boundary and one clean restart when that boundary turned out to be stale prose.
-- **`status.json` is a new compatibility surface.** It is written by core (npm/vsix) and read by the
-  `wisp-slot` plugin's statusline script (marketplace). Adding fields is free; renaming or removing one needs
-  both sides to move together.
-- **Anything volatile written into `~/.wisp` must be excluded from the dir watcher**, or every write wakes
-  both faces to re-read `config.json`. `status.json` is the first such file; it will not be the last.
-- **The vsix is the ship vehicle for picker/native-chat surfaces**; npm releases don't reach them. #172
-  changed the shared catalog, so #173 must decide explicitly whether a vsix bump is owed.
 
 ## Related
 
 - [[overview]]
 - [[pick-up]]
 - [[decisions]]
-- [[2026-07-29-quota-is-a-side-channel-not-a-bridge-stream-event]]
-- [[2026-07-29-a-model-list-is-not-an-accepted-list-whitelist-the-probed-ids]]
-- [[2026-07-29-cliproxyapi-harvest-scoped-minimum-record-usage-first]]
-- [[2026-07-29-oauth-credentialed-but-keyed-on-the-wire-resolves-at-the-keyfor-seam]]
-- [[a-shared-bearer-rule-or-the-oauth-row-401s-on-half-the-paths]]
-- [[2026-07-29-chat-completions-usage-is-a-sibling-mapper-not-a-shared-one]]
-- [[2026-07-29-retry-wraps-priming-cooldown-channels-are-separate-maps]]
-- [[2026-07-29-two-doors-share-the-error-answer-not-the-request]]
-- [[2026-07-29-codex-failures-classified-unmatched-stays-502]]
-- [[a-door-commits-its-200-head-before-the-upstream-request-has-run]]
-- [[readablestream-error-discards-the-queued-chunks]]
-- [[harvest-tickets-carry-body-text-blockers-not-native-links]]
-- [[both-oauth-providers-ship-quota-headers-codex-rejects-gpt-5-3-codex]]
-- [[codex-502-input-exceeds-context-window-is-the-providers-limit-not-the-bridge]]
-- [[cc-transcript-rows-are-blocks-not-messages]]
+- [[gotchas]]
+- [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
+- [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
