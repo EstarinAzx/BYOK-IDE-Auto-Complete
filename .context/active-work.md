@@ -125,10 +125,30 @@ Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #16
 still governs the rest: `## Blocked by` is body text, not native links, so **labels are the only real gate**
 and exactly one ticket is armed at a time.
 
-**Re-arming order** (one step at a time): #188 lands → label #189 → then #190 **and** #191 together → then
-#192, which closes #185.
+**#188 LANDED 2026-07-29** — squash-merged as **`ba8dab3`** via PR #193, closed. 905/905 vitest, compile
+clean both packages, persistence verified end to end against a real `WispHome`. It was briefly held
+`ready-for-human` mid-session while the credential question below was settled, then merged on the
+maintainer's explicit call. **#189 is now armed.**
 
-**What #186 proved:** access confirmed (project `phonic-bonfire-bq1hc`), **PKCE S256 accepted** (no spec
+**Re-arming order** (one step at a time): #189 lands → label #190 **and** #191 together → then #192, which
+closes #185.
+
+**Credential hygiene, settled 2026-07-29** — [[2026-07-29-a-public-repo-is-a-publishing-decision-not-a-commit]]:
+
+- **Never write account-identifying values into this repo.** The Cloud Code project id is read live from
+  `loadCodeAssist` at sign-in; tests use the placeholder `example-project-1`. One earlier commit (`4421e61`)
+  put the real id in `.context/`; scrubbed going forward, history deliberately **not** rewritten (it is an
+  inert identifier — it authorises nothing without the OAuth bearer, and a public repo's history is already
+  forkable).
+- **No access or refresh token has ever been committed** — verified with token-pattern search across all of
+  git history, zero matches. The live tokens live in `~/.wisp/auth.json` and `D:\scratch\antigravity-spike\`,
+  both outside the repo. That scratch file is the only real credential artefact on disk.
+- **Client id + secret are a judgement call, not a rule.** An installed-app secret cannot be kept
+  confidential (RFC 8252) — which is why PKCE S256 is built in — but redistributing it can get the upstream
+  client revoked. Ask before putting one in a public repo; do not decide it by reference parity alone.
+
+**What #186 proved:** access confirmed (project id read live from `loadCodeAssist`; the real value is
+deliberately not recorded in this repo), **PKCE S256 accepted** (no spec
 revision needed), refresh token received, pinned version `2.2.1` accepted, **daily host answered**, vision
 **and** PDF input both accepted (closing that open question), tool calling works streaming and non-streaming.
 Verified constants are a comment on #188; fixtures at `D:\scratch\antigravity-spike\out\`, outside the repo.
