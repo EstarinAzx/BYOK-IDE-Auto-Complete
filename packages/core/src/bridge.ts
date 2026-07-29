@@ -151,6 +151,33 @@ export type BridgeStreamEvent =
   // (top-level usage stays the base pass only, which is what the #111 cache-health guard reads).
   | { type: 'advisor_usage'; usage: BridgeUsage; model: string };
 
+// The real token counts off an opted-in chat-completions stream's FINAL chunk (#169). Sibling of #165's
+// responsesUsage, not a reuse of it: same target shape, same conventions, different source field names —
+// this wire says prompt_/completion_ where the Responses wire says input_/output_.
+//
+// Every convention below is #165's, and each is load-bearing:
+//   - cached prompt tokens move to cache-read, and the uncached input gives them up (floored at 0 — a
+//     backend reporting cached > total must not produce a negative meter reading);
+//   - cache-WRITE is always 0, this protocol has no such concept to report;
+//   - the completion total passes through whole as output.
+// No usage block, or totals that aren't numbers → undefined, so the caller emits NO event. That is what lets
+// a Provider which IGNORES the opt-in still complete cleanly, and it keeps a synthesized zero — the very bug
+// #165 exists to kill — off the wire.
+export const chatCompletionsUsage = (chunk: any): BridgeUsage | undefined => {
+  const usage = chunk?.usage;
+  const prompt = usage?.prompt_tokens;
+  const completion = usage?.completion_tokens;
+  if (typeof prompt !== 'number' || typeof completion !== 'number') return undefined;
+  const cachedDetail = usage?.prompt_tokens_details?.cached_tokens;
+  const cached = typeof cachedDetail === 'number' ? cachedDetail : 0;
+  return {
+    input_tokens: Math.max(0, prompt - cached),
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: cached,
+    output_tokens: completion,
+  };
+};
+
 // The terminal finish_reason: 'tool_calls' when the turn emitted any tool call (the client must run them),
 // else 'stop'. Mid-stream chunks carry finish_reason null until the terminal chunk.
 export type FinishReason = 'stop' | 'tool_calls';
