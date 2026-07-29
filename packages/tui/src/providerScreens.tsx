@@ -25,6 +25,7 @@ import {
   isCodexProvider, isAnthropicProvider, isXaiProvider, isCodexSignedIn, isAnthropicSignedIn,
   isXaiSignedIn, anthropicAccountLabel, DEFAULT_EFFORT,
   isKimiProvider, isKimiSignedIn,
+  isAntigravityProvider, isAntigravitySignedIn,
   type Provider, type EffortLevel,
 } from '@wisp/core';
 import { home, activeProvider } from './store';
@@ -33,11 +34,11 @@ import { onSubmitText, SELECT_MOUSE } from './widgets';
 
 // ----------------------------------------- Key + model storage ----------------------------------------- //
 
-// The OAuth kinds sign in instead of taking an API key — three browser flows plus Kimi's device flow (#170).
+// The OAuth kinds sign in instead of taking an API key — four browser flows plus Kimi's device flow (#170).
 // Kimi belongs here even though its REQUESTS are plain OpenAI-chat: this predicate is about how the
 // credential is obtained, not about which wire carries the turn.
 const isOAuthProvider = (p: Provider): boolean =>
-  isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p) || isKimiProvider(p);
+  isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p) || isKimiProvider(p) || isAntigravityProvider(p);
 
 // Keyed rows only — the OAuth kinds sign in via /signin, they don't take keys.
 const keyedProviders = (): Provider[] => PROVIDERS.filter((p) => !isOAuthProvider(p));
@@ -52,6 +53,7 @@ const oauthStatus = (p: Provider): string =>
   : isAnthropicProvider(p) ? (isAnthropicSignedIn(home.readAuth().anthropic) ? (anthropicAccountLabel(home.readAuth().anthropic) ?? 'signed in') : 'signed out')
   : isXaiProvider(p) ? (isXaiSignedIn(home.readAuth().xai) ? 'signed in' : 'signed out')
   : isKimiProvider(p) ? (isKimiSignedIn(home.readAuth().kimi) ? 'signed in' : 'signed out')
+  : isAntigravityProvider(p) ? (isAntigravitySignedIn(home.readAuth().antigravity) ? 'signed in' : 'signed out')
   : '';
 
 export const saveKey = (p: Provider, key: string): void => {

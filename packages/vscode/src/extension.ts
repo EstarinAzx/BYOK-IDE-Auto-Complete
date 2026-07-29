@@ -27,7 +27,7 @@ import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvid
 import {
   Provider, PROVIDERS, CUSTOM_ID, resolveModel, resolveBaseUrl, resolveKeyId, planLegacyMigration, planZenToGoMigration,
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, DEFAULT_EFFORT,
-  isAnthropicProvider, isAnthropicSignedIn, anthropicAccountLabel, isXaiProvider, isXaiSignedIn, isKimiProvider, KimiAuth, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
+  isAnthropicProvider, isAnthropicSignedIn, anthropicAccountLabel, isXaiProvider, isXaiSignedIn, isKimiProvider, KimiAuth, isAntigravityProvider, isAntigravitySignedIn, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
   type CodexCreds, type EffortLevel, type AnthropicCreds, type XaiCreds,
 } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
@@ -370,6 +370,9 @@ const getState = async (): Promise<PanelState> => {
     : isAnthropicProvider(p) ? await anthropicAuth.isSignedIn()
     : isXaiProvider(p) ? await xaiAuth.isSignedIn()
     : isKimiProvider(p) ? kimiAuth.isSignedIn()
+    // #188: a pure read of the stored slice — this face has no AntigravityAuth instance because it offers no
+    // sign-in button (that lives in `wisp`); both faces share auth.json, so the status is still truthful.
+    : isAntigravityProvider(p) ? isAntigravitySignedIn(home.readAuth().antigravity)
     : false;
   // The OAuth dropdowns are models.dev-sourced — race the cached fetch against a short timeout (same
   // pattern as chatProvider) so a cold/slow models.dev can never stall panel open; undefined → curated

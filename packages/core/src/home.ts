@@ -16,7 +16,7 @@
  * keys are preserved so a TUI-era field survives an extension read-modify-write.
  */
 
-import type { AnthropicCreds, CodexCreds, XaiCreds, KimiCreds, EffortLevel } from './catalog';
+import type { AnthropicCreds, CodexCreds, XaiCreds, KimiCreds, AntigravityCreds, EffortLevel } from './catalog';
 import type { RoutingMap, SnapshotEntry, SnapshotStore } from './routing';
 
 // ----------------------------- Types ----------------------------- //
@@ -39,6 +39,7 @@ export type WispAuth = {
   anthropic?: AnthropicCreds;
   xai?: XaiCreds;
   kimi?: KimiCreds;
+  antigravity?: AntigravityCreds;
   bridgeSecret?: string;
 };
 
@@ -116,6 +117,9 @@ const CODEX_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', idTok
 const ANTHROPIC_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number', deviceId: 'string', accountUuid: 'string', accountEmail: 'string', organizationName: 'string', rateLimitTier: 'string' } as const;
 const XAI_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number', tokenEndpoint: 'string' } as const;
 const KIMI_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number' } as const;
+// #188: projectId is the one field no other kind has — the Cloud Code project every envelope carries. The
+// allowlist is also what keeps the reference's per-email `accounts` map out: spec #185 stores ONE account.
+const ANTIGRAVITY_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number', projectId: 'string' } as const;
 
 // ----------------------------- parseWispConfig ----------------------------- //
 
@@ -181,6 +185,10 @@ export const parseWispAuth = (raw: string | undefined | null): WispAuth => {
   if ('kimi' in auth) {
     const kimi = sanitizeCreds(auth.kimi, KIMI_CRED_FIELDS);
     if (kimi) auth.kimi = kimi; else delete auth.kimi;
+  }
+  if ('antigravity' in auth) {
+    const antigravity = sanitizeCreds(auth.antigravity, ANTIGRAVITY_CRED_FIELDS);
+    if (antigravity) auth.antigravity = antigravity; else delete auth.antigravity;
   }
   if ('bridgeSecret' in auth && typeof auth.bridgeSecret !== 'string') delete auth.bridgeSecret;
   return auth as WispAuth;

@@ -27,6 +27,7 @@ export * from './codexAuth';
 export * from './anthropicAuth';
 export * from './xaiAuth';
 export * from './kimiAuth';
+export * from './antigravityAuth';
 export * from './home';
 export * from './homeStore';
 export * from './status';

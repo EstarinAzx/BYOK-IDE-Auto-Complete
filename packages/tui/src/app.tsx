@@ -29,12 +29,12 @@ import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from '@open
 import type { InputRenderable, Selection } from '@opentui/core';
 import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, completeSlash, resolveModel,
-  isCodexProvider, isAnthropicProvider, isXaiProvider, isKimiProvider,
+  isCodexProvider, isAnthropicProvider, isXaiProvider, isKimiProvider, isAntigravityProvider,
   isAnthropicSignedIn, effectiveAliasOnly, resolveRoute, EMPTY_ROUTING_MAP,
   FAMILY_KEYS, withFamilyRoute, withAlias, withoutAlias,
   type Provider, type EffortLevel, type Target,
 } from '@wisp/core';
-import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth } from './store';
+import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth, antigravityAuth } from './store';
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
 import type { Mode, RouteRow } from './modes';
 import { SPLASH, ACCENT, DIM } from './theme';
@@ -228,7 +228,7 @@ export const App = () => {
       ? kimiAuth.signIn((device) => {
           if (seq === signinSeq.current) setMode({ kind: 'signin-wait', provider: p, origin, device });
         }, controller.signal)
-      : (isCodexProvider(p) ? codexAuth : isAnthropicProvider(p) ? anthropicAuth : xaiAuth).signIn();
+      : (isCodexProvider(p) ? codexAuth : isAnthropicProvider(p) ? anthropicAuth : isXaiProvider(p) ? xaiAuth : antigravityAuth).signIn();
     flow.then(
       () => { if (seq === signinSeq.current) (onSuccess ?? (() => backToInput(`Signed in — ${p.label} is ready.`)))(); },
       (err) => { if (seq === signinSeq.current) backToInput(`Sign-in failed: ${err instanceof Error ? err.message : String(err)}`); },
@@ -253,7 +253,7 @@ export const App = () => {
 
   // Sign-out is instant — core writes the {} tombstone (which also suppresses the ~/.codex re-import).
   const doSignOut = (p: Provider, origin?: 'menu') => {
-    (isCodexProvider(p) ? codexAuth : isAnthropicProvider(p) ? anthropicAuth : isXaiProvider(p) ? xaiAuth : kimiAuth).signOut();
+    (isCodexProvider(p) ? codexAuth : isAnthropicProvider(p) ? anthropicAuth : isXaiProvider(p) ? xaiAuth : isKimiProvider(p) ? kimiAuth : antigravityAuth).signOut();
     (origin === 'menu' ? backToProviders : backToInput)(`Signed out of ${p.label}.`);
   };
 
@@ -311,7 +311,7 @@ export const App = () => {
         const p = target.args[0] ? byId(target.args[0]) : undefined;
         if (target.args[0] && !p) { setStatus(`Unknown provider: ${target.args[0]}`); return; }
         // OAuth rows sign in, they don't take keys — same filter the picker applies.
-        if (p && (isCodexProvider(p) || isAnthropicProvider(p) || isKimiProvider(p))) {
+        if (p && (isCodexProvider(p) || isAnthropicProvider(p) || isKimiProvider(p) || isAntigravityProvider(p))) {
           setStatus(`${p.label} uses OAuth — try /signin ${p.id}.`); return;
         }
         // A key typed inline was echoed on screen — refuse it and open the masked field instead.
@@ -335,9 +335,9 @@ export const App = () => {
         const arg = target.args[0]?.toLowerCase();
         // Match by kind, not id, so the arg names the door (codex/anthropic/xai) rather than a catalog row.
         const p = arg
-          ? oauthProviders().find((x) => (arg === 'codex' && isCodexProvider(x)) || (arg === 'anthropic' && isAnthropicProvider(x)) || (arg === 'xai' && isXaiProvider(x)) || (arg === 'kimi' && isKimiProvider(x)))
+          ? oauthProviders().find((x) => (arg === 'codex' && isCodexProvider(x)) || (arg === 'anthropic' && isAnthropicProvider(x)) || (arg === 'xai' && isXaiProvider(x)) || (arg === 'kimi' && isKimiProvider(x)) || (arg === 'antigravity' && isAntigravityProvider(x)))
           : undefined;
-        if (arg && !p) { setStatus(`/${command} takes codex, anthropic, xai, or kimi — got: ${target.args[0]}`); return; }
+        if (arg && !p) { setStatus(`/${command} takes codex, anthropic, xai, kimi, or antigravity — got: ${target.args[0]}`); return; }
         if (!p) { setMode({ kind: 'oauth-pick', action: command }); return; }
         command === 'signin' ? startSignIn(p) : doSignOut(p);
         return;

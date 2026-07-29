@@ -20,6 +20,9 @@ import {
   validateAntigravityFunctionCallPairing,
   parseAntigravityRetryDelayMs, decideAntigravity429, antigravity429Error,
   antigravityStreamEvents,
+  isAntigravityProvider, isAntigravitySignedIn, tokensToAntigravityCreds,
+  shouldRefreshAntigravityToken, parseAntigravityProject,
+  type Provider,
 } from '../src/catalog';
 
 // A fake upstream — the SSE mapper is asserted against this, never a socket.
@@ -785,5 +788,88 @@ describe('antigravityStreamEvents', () => {
       { response: { candidates: [{ content: { parts: [{ functionCall: { id: 'c', name: 'write', args: { path: 'a.md', deep: { n: 1 } } } }] } }] } },
     ])));
     expect(events[0].call.argsJson).toBe('{"path":"a.md","deep":{"n":1}}');
+  });
+});
+
+// ----------------------------- The credential bundle (#188) ----------------------------- //
+
+describe('isAntigravityProvider', () => {
+  const provider = (over: Partial<Provider> = {}): Provider => ({
+    id: 'antigravity', label: 'Antigravity', baseUrl: 'https://daily-cloudcode-pa.googleapis.com',
+    defaultModel: 'gemini-3.1-pro-low', apiKeyEnv: '', kind: 'antigravity-oauth', ...over,
+  });
+
+  it('is true for a row whose kind is antigravity-oauth', () => {
+    expect(isAntigravityProvider(provider())).toBe(true);
+  });
+
+  it('is false for absent kind and for every other kind', () => {
+    expect(isAntigravityProvider(provider({ kind: undefined }))).toBe(false);
+    expect(isAntigravityProvider(provider({ kind: 'openai-chat' }))).toBe(false);
+    expect(isAntigravityProvider(provider({ kind: 'codex' }))).toBe(false);
+    expect(isAntigravityProvider(provider({ kind: 'anthropic-oauth' }))).toBe(false);
+    expect(isAntigravityProvider(provider({ kind: 'xai-oauth' }))).toBe(false);
+    expect(isAntigravityProvider(provider({ kind: 'kimi-oauth' }))).toBe(false);
+  });
+});
+
+describe('isAntigravitySignedIn', () => {
+  it('is true only when an access token is present', () => {
+    expect(isAntigravitySignedIn({ accessToken: 'ya29.x' })).toBe(true);
+  });
+
+  it('reads the {} sign-out tombstone and a refresh-only blob as signed out', () => {
+    expect(isAntigravitySignedIn({})).toBe(false);
+    expect(isAntigravitySignedIn({ refreshToken: 'r', projectId: 'example-project-1' })).toBe(false);
+  });
+
+  it('reads an unwritten slice as signed out', () => {
+    expect(isAntigravitySignedIn(undefined)).toBe(false);
+  });
+});
+
+describe('tokensToAntigravityCreds', () => {
+  it('stamps expires_in onto the injected clock as an absolute deadline', () => {
+    expect(tokensToAntigravityCreds({ access_token: 'a', refresh_token: 'r', expires_in: 3599 }, 1_000_000))
+      .toEqual({ accessToken: 'a', refreshToken: 'r', expiresAt: 1_000_000 + 3599 * 1000 });
+  });
+
+  it('omits absent fields rather than writing undefined', () => {
+    expect(tokensToAntigravityCreds({ access_token: 'a' }, 5)).toEqual({ accessToken: 'a' });
+  });
+
+  it('drops a non-numeric expires_in instead of stamping NaN', () => {
+    expect(tokensToAntigravityCreds({ access_token: 'a', expires_in: '3599' as any }, 5)).toEqual({ accessToken: 'a' });
+  });
+});
+
+describe('shouldRefreshAntigravityToken', () => {
+  it('refreshes inside the 5-minute skew window and not before it', () => {
+    const now = 10_000_000;
+    expect(shouldRefreshAntigravityToken({ expiresAt: now + 4 * 60_000 }, now)).toBe(true);
+    expect(shouldRefreshAntigravityToken({ expiresAt: now + 6 * 60_000 }, now)).toBe(false);
+  });
+
+  it('refreshes an already-expired token', () => {
+    expect(shouldRefreshAntigravityToken({ expiresAt: 1 }, 10_000_000)).toBe(true);
+  });
+
+  it('cannot prove staleness without an expiresAt', () => {
+    expect(shouldRefreshAntigravityToken({}, 10_000_000)).toBe(false);
+  });
+});
+
+describe('parseAntigravityProject', () => {
+  it('reads cloudaicompanionProject out of a loadCodeAssist response', () => {
+    expect(parseAntigravityProject({ cloudaicompanionProject: 'example-project-1' })).toBe('example-project-1');
+  });
+
+  it('trims, and answers undefined for blank, wrong-typed, or absent values', () => {
+    expect(parseAntigravityProject({ cloudaicompanionProject: '  p1  ' })).toBe('p1');
+    expect(parseAntigravityProject({ cloudaicompanionProject: '   ' })).toBeUndefined();
+    expect(parseAntigravityProject({ cloudaicompanionProject: 42 })).toBeUndefined();
+    expect(parseAntigravityProject({})).toBeUndefined();
+    expect(parseAntigravityProject(null)).toBeUndefined();
+    expect(parseAntigravityProject('nope')).toBeUndefined();
   });
 });

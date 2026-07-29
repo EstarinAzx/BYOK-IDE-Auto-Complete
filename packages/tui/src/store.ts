@@ -12,7 +12,7 @@
  */
 
 import { spawn } from 'child_process';
-import { PROVIDERS, WispHome, CodexAuth, AnthropicAuth, XaiAuth, KimiAuth, isKimiProvider, resolveKeyId, type Provider } from '@wisp/core';
+import { PROVIDERS, WispHome, CodexAuth, AnthropicAuth, XaiAuth, KimiAuth, AntigravityAuth, isKimiProvider, resolveKeyId, type Provider } from '@wisp/core';
 
 // ----------------------------- Store ----------------------------- //
 
@@ -55,6 +55,10 @@ export const xaiAuth = new XaiAuth(
 export const kimiAuth = new KimiAuth(
   { read: () => home.readAuth().kimi, write: (c) => { home.writeAuth({ kimi: c }); } },
   () => {});
+// Antigravity (#188) is a browser flow like the first three — Google OAuth on a fixed loopback port.
+export const antigravityAuth = new AntigravityAuth(
+  { read: () => home.readAuth().antigravity, write: (c) => { home.writeAuth({ antigravity: c }); } },
+  openExternal, () => {});
 
 // ----------------------------- Bearer resolution ----------------------------- //
 
