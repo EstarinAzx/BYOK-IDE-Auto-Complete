@@ -27,7 +27,7 @@ import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvid
 import {
   Provider, PROVIDERS, CUSTOM_ID, resolveModel, resolveBaseUrl, resolveKeyId, planLegacyMigration, planZenToGoMigration,
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, DEFAULT_EFFORT,
-  isAnthropicProvider, isAnthropicSignedIn, anthropicAccountLabel, isXaiProvider, isXaiSignedIn, isKimiProvider, KimiAuth, isAntigravityProvider, isAntigravitySignedIn, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
+  isAnthropicProvider, isAnthropicSignedIn, anthropicAccountLabel, isXaiProvider, isXaiSignedIn, isKimiProvider, KimiAuth, isAntigravityProvider, isAntigravitySignedIn, AntigravityAuth, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
   type CodexCreds, type EffortLevel, type AnthropicCreds, type XaiCreds,
 } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
@@ -97,6 +97,7 @@ let xaiAuth: XaiAuth;
 // Kimi talks the ordinary OpenAI-chat wire, so this exists only to hand keyForProvider a bearer. Sign-in
 // itself is a `wisp` command (both faces share ~/.wisp/auth.json, so a terminal sign-in lights up the picker).
 let kimiAuth: KimiAuth;
+let antigravityAuth: AntigravityAuth;
 
 // The Bridge listener handle — created in activate, started/stopped by the command AND the panel switch. OFF
 // until toggled on (PRD: no local port open until the user deliberately enables it).
@@ -950,6 +951,13 @@ export const activate = (context: vscode.ExtensionContext): void => {
   kimiAuth = new KimiAuth(
     { read: () => home.readAuth().kimi, write: (c) => { home.writeAuth({ kimi: c }); } },
     (m) => output.appendLine(m));
+  // Antigravity token lifecycle (#189) — like Kimi, the sign-in itself is driven from `wisp`; this face
+  // holds the manager only so the Bridge can REFRESH the stored bundle and bootstrap the Cloud Code
+  // project before a turn. openExternal is wired anyway because the constructor takes it, and nothing on
+  // this face calls signIn().
+  antigravityAuth = new AntigravityAuth(
+    { read: () => home.readAuth().antigravity, write: (c) => { home.writeAuth({ antigravity: c }); } },
+    (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
   // Silent one-time migrations, ordered: Zen→Go slot move (frees the zen slot for the new /zen/v1
   // provider) BEFORE the pre-catalog wisp.apiKey→go shim, so the rare both-present case can't orphan a
   // Go key in the zen slot — then the whole result moves into ~/.wisp (#59). A migration failure must
@@ -1023,6 +1031,10 @@ export const activate = (context: vscode.ExtensionContext): void => {
     // OAuth bundle for the Responses stream.
     xaiSignedIn: () => xaiAuth.isSignedIn(),
     xaiCreds: () => xaiAuth.current(),
+    // Antigravity over the Bridge (#189): signed-in flag gates its /v1/models row, current() returns the
+    // refreshed bundle WITH the Cloud Code project bootstrapped for the generateContent stream.
+    antigravitySignedIn: () => antigravityAuth.isSignedIn(),
+    antigravityCreds: () => antigravityAuth.current(),
     effort: () => activeEffort(),
     activeProviderId: () => activeProvider().id,
     routingMap: () => activeRoutingMap(), // the Routing map (#51), read live so panel edits apply next call

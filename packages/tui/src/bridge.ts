@@ -21,7 +21,7 @@ import {
   PROVIDERS, createBridgeServer, DEFAULT_BRIDGE_PORT, resolveBaseUrl, resolveKeyId,
   EMPTY_ROUTING_MAP, DEFAULT_EFFORT, effectiveAliasOnly, type Provider,
 } from '@wisp/core';
-import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth, bearerFor } from './store';
+import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth, antigravityAuth, bearerFor } from './store';
 
 // ----------------------------- Secret + address ----------------------------- //
 
@@ -70,6 +70,8 @@ export const createTuiBridge = (log: (message: string) => void) =>
     anthropicCreds: () => anthropicAuth.current(),
     xaiSignedIn: () => xaiAuth.isSignedIn(),
     xaiCreds: () => xaiAuth.current(),
+    antigravitySignedIn: () => antigravityAuth.isSignedIn(),
+    antigravityCreds: () => antigravityAuth.current(),
     effort: () => home.readConfig().effort ?? DEFAULT_EFFORT,
     activeProviderId: () => activeProvider().id,
     routingMap: () => home.readConfig().routing ?? EMPTY_ROUTING_MAP,

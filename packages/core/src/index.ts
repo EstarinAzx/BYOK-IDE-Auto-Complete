@@ -3,7 +3,8 @@
 /*
  * Depends on:
  *   - ./catalog, ./routing, ./routingCli, ./bridge, ./bridgeAnthropic, ./bridgeServer,
- *     ./modelsDev, ./codexClient, ./anthropicClient, ./xaiClient, ./codexAuth, ./anthropicAuth, ./xaiAuth,
+ *     ./modelsDev, ./codexClient, ./anthropicClient, ./xaiClient, ./antigravityClient,
+ *     ./codexAuth, ./anthropicAuth, ./xaiAuth,
  *     ./kimiAuth,
  *     ./home, ./homeStore, ./slash — re-exported as one flat namespace.
  * Data shapes: none of its own — everything comes from the modules below.
@@ -23,6 +24,7 @@ export * from './modelsDev';
 export * from './codexClient';
 export * from './anthropicClient';
 export * from './xaiClient';
+export * from './antigravityClient';
 export * from './codexAuth';
 export * from './anthropicAuth';
 export * from './xaiAuth';
