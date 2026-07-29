@@ -63,13 +63,14 @@ cluster stopped is a matter of living on this build, not of one more session.
   - **#171 ✅ (writer half)** — `status.json` carried `contextTokens 211214 / 1000000 → 21%` and meters
     `5h 55% · 7d 27%`, i.e. Anthropic **fractions** correctly normalized to 0..100. The *reader* half is
     still unshipped (#180), so **no `ctx …%` badge appears yet** — judge by the file, not the badge.
+  - **#169 ✅** — two keyed turns (`glm`, `deepseek`, both → **OpenCode Go**) reported non-zero usage:
+    `in=37729 out=4 cacheR=384` and `in=38758 out=44`. `cacheW=0` on both and `glm`'s cached tokens landing
+    in the cache-read tier = `chatCompletionsUsage` working. Both turns completed normally, so **no 400 on
+    `stream_options`** from that backend. ⚠ Both aliases resolve to the **same Provider row** — one backend
+    verified, not nine.
   - **#163 → diagnosis confirmed, ticket left open.** Closing it needs a stretch of use with no refusal in
     the 217k–245k band, not another check.
-- **User action still pending** (one bridged session covers the first three):
-  - **Verify #169 live** — a bridged session on the **default** Provider (OpenCode Go) must report non-zero
-    tokens in `/context`. Run it through Claude Code / the Anthropic door, not curl against
-    `/v1/chat/completions` (the OpenAI door deliberately drops usage events). Watch for a **400 naming
-    `stream_options`** rather than silence.
+- **User action still pending:**
   - **Verify #172 live** — a fresh Codex sign-in that never picks a model completes a turn.
   - **#167's manual criterion** — one turn each through Codex, Anthropic and Grok.
   - **#170's two open criteria** — needs a Kimi Code subscription; the sign-in attempt doubles as the
@@ -141,8 +142,11 @@ write `queue empty`, and stop.
 - **Which Codex ids does the ChatGPT-account path actually accept?** Only `gpt-5.6-sol` and `gpt-5.4` probed
   200; `gpt-5.3-codex` and bare `gpt-5.6` probed 400. The rule behind the split is unknown, so the test
   whitelists rather than pattern-matches.
-- **Does any keyed backend reject `stream_options`?** New with #169, unverified live. If one does, the fix is
-  a per-row opt-out flag, not removing the opt-in.
+- **Does any keyed backend reject `stream_options`?** **Partly answered — OpenCode Go accepts it** (#169
+  verified live 2026-07-29, two turns, no 400). That is the default Provider and the most-used path. Still
+  unexercised: **OpenAI, Groq, Mistral, OpenRouter, Ollama, Ollama Cloud, KiloCode, Cline, Custom**. A
+  rejection would be a **400 naming `stream_options`** on every turn for that row — loud, not silent — and
+  the fix is a per-row opt-out flag, not removing the opt-in for everyone.
 - **Are the #168 constants right in production?** 3 attempts / 200ms base / 30s cooldown after 3 failed
   requests in 120s, picked cold. Revisit after the first real transient event (grep `#168`).
 - **Should the two doors' provider dispatch ever fully merge?** Left open on purpose (#167).

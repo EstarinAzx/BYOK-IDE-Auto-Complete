@@ -21,7 +21,7 @@ something is labelled for it; with an empty queue it will pick nothing, write `q
 The **live Bridge session that had been pending for nine tickets has now run, and the decisive check
 passed** — see below. What remains is two small turns (#169, #172), then triage.
 
-## The live session — ran 2026-07-29 on 2.0.38. Two of four checks passed.
+## The live session — ran 2026-07-29 on 2.0.38. Three of four checks passed.
 
 - **#165 ✅ / #163 diagnosis confirmed.** A bridged **Codex** session (`sonnet` → `codex/gpt-5.6-sol`)
   reported **non-zero usage on 7/7 turns**, with `cacheW=0` throughout while `cacheR` grew — the
@@ -32,11 +32,14 @@ passed** — see below. What remains is two small turns (#169, #172), then triag
 - **#171 ✅ (writer half).** `status.json` carried `211214 / 1000000 → 21%` plus meters `5h 55% · 7d 27%` —
   arithmetic correct, and Anthropic **fractions** correctly normalized to 0..100. The `ctx …%` **badge still
   will not appear** until the `wisp-slot` plugin ships the reader (#180). Judge by the file.
-- **#169 ⬜ still to do.** A bridged session on a **keyed** Provider — a `glm` or `deepseek` alias (OpenCode
-  Go) is the quickest — must report non-zero tokens. Watch for a **400 naming `stream_options`** rather than
-  silence: that is the untested failure mode, and the fix would be a per-row opt-out flag, not removing the
-  opt-in for everyone.
-- **#172 ⬜ still to do.** A fresh Codex sign-in that never opens the model picker completes a turn.
+- **#169 ✅.** Two keyed turns (`glm`, `deepseek` — both **OpenCode Go**) reported non-zero usage
+  (`in=37729 out=4 cacheR=384`, `in=38758 out=44`), `cacheW=0` on both, and neither 400'd — so that backend
+  accepts `stream_options`. ⚠ **Both aliases hit the same Provider row**: one backend verified, not nine.
+  OpenAI, Groq, Mistral, OpenRouter, Ollama, Ollama Cloud, KiloCode, Cline and Custom are still unexercised;
+  a rejection there shows as a **400 naming `stream_options`**, and the fix is a per-row opt-out flag.
+- **#172 ⬜ the last one, and it is small.** A fresh Codex sign-in that never opens the model picker completes
+  a turn. Needs a genuinely fresh sign-in — an account that already has a model chosen does not exercise
+  `defaultModel`, which is the whole point.
 
 **How to check usage — do NOT read `status.json` for this.** It is global and your own bridged turn
 overwrites it; use the per-session Claude Code transcript instead, folded by `message.id`.
