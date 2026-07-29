@@ -7,37 +7,53 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-29 by Opus 5 (relay leg 3: #189 built and pushed, held `ready-for-human`, queue dry)._
-_At commit: `e660b48` on main; #189's work is on `ticket/189-antigravity-executor-openai-door` (`77e1a1e`,_
-_[PR #194](https://github.com/EstarinAzx/Wisp-Router/pull/194), **not merged**)._
-_**Agent queue is EMPTY — #189 needs one human sign-in before anything else is labelled.**_
+_Last updated: 2026-07-29 by Opus 5 (relay leg 3: #189 landed and verified live)._
+_At commit: `c6f644a` on main. **#190 and #191 are both `ready-for-agent` — the chain is re-armed.**_
 
 ## Current focus
 
-**#189 is BUILT, PUSHED and HELD.** The first real Antigravity turn: the fifth `ProviderExecutor` record, a
-new `antigravityClient.ts`, and +239 lines of pure request path in `antigravity.ts` (thirteen-model lineup
-with per-model caps, daily-first host chain, URLs/headers, the `Antigravity API error <status>` throw shape,
-the injected random session-id fallback, and turns → Gemini payload → #187's whole envelope pipeline).
+**#189 LANDED (`c6f644a`, PR #194) — the first real Antigravity turn works, verified live.** Antigravity is
+the **fifth `ProviderExecutor` record**, not a sixth special case. Gate on merged main: **971/971 vitest**,
+`bun run compile` clean in **BOTH** packages.
 
-**Gate green: 969/969 vitest (905 before), `bun run compile` clean in BOTH packages.** Six deliberate-break
-controls confirm the tests bite — the throw shape, the stable session id beating the random fallback, the
-binding rule, tool-result ordering, the 401 non-fallthrough, and the shared request body across a fallback.
-The throw-shape test asserts against **the real `isTransientProviderError`**, not a copied regex.
+`antigravity.ts` +239 (thirteen-model lineup with per-model caps, daily-first host chain, URLs + mirrored
+headers, `antigravityApiError` — the throw shape, the injected random session-id fallback, and
+`buildAntigravityPayload` / `buildAntigravityRequestBody`) + new `antigravityClient.ts` (streaming with the
+SSE flag, non-streaming, the host walk) + the executor record, the `BridgeDeps` pair, the models branch, the
+image refusal, both faces wired.
 
-**It was NOT merged, on purpose.** The headline criterion — "a real streamed turn completes" — needs a
-browser OAuth round trip that cannot run unattended, and **#190 and #191 build straight on it**. There are no
-Antigravity credentials on this machine (`~/.wisp/auth.json` has no antigravity slice; #188's persistence
-check ran against an isolated `WISP_HOME`), so the sign-in is genuinely still owed. See [[pick-up]] for the
-five-minute finish: `/signin antigravity`, three curls, merge, then arm **#190 and #191 together**.
+**Live, after the user's `/signin antigravity`:** a real streamed turn (`TURN_OK` from `gemini-3.1-pro-low`);
+**tool calling end to end** — call emitted, result returned, and the model used it (*"…19 degrees Celsius
+with drizzle"*); the upstream's own id `noxjacvf` passed through untouched; signed-out 401 before any head;
+the image row listed and refused with real creds; the live 429 classified to the exact contract shape. Plus,
+from before the sign-in: the transport question settled by measurement — both Bridge runtimes already
+negotiate `http/1.1`, so the reference's HTTP/1.1 fork is deliberately not ported.
 
-What WAS verified live, unattended: a real request reaching the real Cloud Code daily endpoint (Google
-answered `401 UNAUTHENTICATED`, surfaced in the right throw shape, no retry, no fallback — ⚠ which proves
-URL/method/headers but **not** the body, since Google authenticates before it validates); signed-out 401
-before any head; the image model listed and refused; the models endpoint reflecting signed-in state both
-ways; the #186 tool-call capture mapping correctly from **verbatim spike SSE bytes** (upstream id `5hp24qb7`
-untouched, thinking tokens billed as output, no `[DONE]` needed); and the transport question settled by
-measurement — both Bridge runtimes already negotiate `http/1.1`, so the reference's HTTP/1.1 fork is
-deliberately not ported.
+### ⚠ The bug the live turn caught — and it would have shipped
+
+**The first live turn returned an EMPTY answer at HTTP 200 with a 971-test green suite.** The upstream frames
+SSE with `\r\n\r\n`; `sseBlocks` split on `'\n\n'`, which **never matches CRLF** (the `\r` sits between the
+two `\n`). The whole response arrived as one block, its concatenated JSON failed to parse, every frame was
+dropped — silent, and indistinguishable from a model that said nothing. The fixture had been **retyped rather
+than copied**, normalising CRLF to LF, so every content assertion was faithful and only the framing was wrong.
+
+Separator is now `/\r?\n\r?\n/` (identical on `'\n\n'`, so Codex/Anthropic untouched); fixtures reframed to
+CRLF; two named regression tests. Control: reverting fails 5 tests including
+`expected [] to deeply equal ['TURN','_OK']` — before the fixtures were reframed, the same revert failed
+**nothing**. Full reasoning: [[2026-07-29-a-retyped-sse-fixture-cannot-catch-a-crlf-framing-bug]].
+
+**The lesson about the gate:** #189's six deliberate-break controls and its contract asserted against the
+*real* `isTransientProviderError` all ran **downstream of the framing**. Live verification was not ceremony —
+it was the only thing that could catch this.
+
+### One #189 criterion still open — the account, not the code
+
+**A Claude model turn.** Live result: `Antigravity API error 429: QUOTA_EXHAUSTED`, resets
+`2026-07-30T20:55:48Z`. The path *is* wired (the request builds, sends, reaches the upstream and classifies
+correctly — which is exactly the horizon #190 consumes); what is unproven is a Claude turn *completing*. Does
+**not** block #190 or #191, both of which run on Gemini. Also unforceable: production reached on daily's REAL
+failure — daily is confirmed as the host used, and the fallback is stub-verified against a capacity 503, a
+429 and a transport error.
 
 ### Previously — #187 (`e04f53b`)
 
@@ -64,8 +80,7 @@ signature/pairing pieces, the stateless 429 classifier, and the SSE mapper onto 
 
 Reference clone still at `D:\scratch\CLIProxyAPI` (shallow, `c9417c8`, re-clonable).
 
-**Ticket #186 (auth spike) is `ready-for-human` and now gates EVERYTHING remaining.** Nothing else carries
-`ready-for-agent` — see Queue below.
+_(#186, the auth spike that gated this, passed 2026-07-29 — access confirmed.)_
 
 ### Previously (release arc, closed)
 
@@ -88,11 +103,14 @@ extension carries #182.
 
 ## State
 
-- **In flight:** **#189, built and awaiting one human check** — branch
-  `ticket/189-antigravity-executor-openai-door` (`77e1a1e`), pushed, [PR #194](https://github.com/EstarinAzx/Wisp-Router/pull/194)
-  open and **unmerged**. Working tree clean on main. **The relay chain ran legs 1–3 and stopped because a
-  human is needed** (`.claude/relay/ticket-loop.md`, `stop: true`, leg 3) — the designed ending, not a
-  failure. Re-arm after merging by labelling the next tickets and re-running `/relay N=1 /preset ticket-loop`.
+- **In flight:** nothing. Working tree clean on main at `c6f644a`, pushed; the #189 branch is merged and
+  deleted. **The relay chain ran legs 1–3 (#187, #188, #189) and is re-armed for leg 4 on #190.**
+- **#189 ✅ `c6f644a` (PR #194)** — the executor record + the OpenAI door. Gate on merged main: **971/971
+  vitest**, compile clean in **both** packages. Six deliberate-break controls, plus a **live** end-to-end
+  turn and tool-call round trip after the user signed in. The live run is what caught the CRLF framing bug
+  that the whole green suite missed — see Current focus.
+- **#188 ✅ `ba8dab3` (PR #193)** — the catalog row, credential slice and `AntigravityAuth`. 905/905 vitest,
+  persistence verified end to end against a real `WispHome`.
 - **#187 ✅ `e04f53b`** — the pure Antigravity layer. Gate before the merge: **868/868 vitest**, `bun run
   compile` clean in **both** packages. Verified with two deliberate-break controls (binding rule, history
   corruption) — a green run alone would not have distinguished the safe implementation from the unsafe one.
@@ -140,16 +158,16 @@ Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #16
 #170 `d656686`, #171 `3e0125e`, #172 `49761d8`, #173 `55daebb`/`v2.0.38`), plus the follow-ups #181 `4ec1a81`,
 #180 `ab2235b` and #183 `819900b`/`v2.0.39`.
 
-**Spec #185 — Antigravity, seven tickets, ONE landed:**
+**Spec #185 — Antigravity, seven tickets, FOUR landed:**
 
 | # | Ticket | Label | Blocked by |
 |---|---|---|---|
 | ~~186~~ | ~~Auth spike~~ | ✅ **passed — access confirmed** | — |
 | ~~187~~ | ~~Pure layer — envelope, tools, signatures, 429, SSE~~ | ✅ **`e04f53b`** + `63453e0` | — |
 | ~~188~~ | ~~Catalog row, kind, creds slice, `AntigravityAuth`~~ | ✅ **`ba8dab3`** (PR #193) | — |
-| **189** | Executor record + OpenAI door — first real turn | **`ready-for-human`** — PR #194, unmerged | — |
-| **190** | Rate limits answer 429; cooldown from server horizon | — | #189 |
-| **191** | Anthropic door — Claude Code driven by Gemini | — | #189 |
+| ~~189~~ | ~~Executor record + OpenAI door — first real turn~~ | ✅ **`c6f644a`** (PR #194) | — |
+| **190** | Rate limits answer 429; cooldown from server horizon | **`ready-for-agent`** | — |
+| **191** | Anthropic door — Claude Code driven by Gemini | **`ready-for-agent`** | — |
 | **192** | Release — npm + TUI face, surfaces named | — | #190, #191 |
 
 **#186 PASSED 2026-07-29 — access confirmed, gate lifted, #188 labelled.** The rule that put the gate there
@@ -159,7 +177,9 @@ and exactly one ticket is armed at a time.
 **#188 LANDED 2026-07-29** — squash-merged as **`ba8dab3`** via PR #193, closed. 905/905 vitest, compile
 clean both packages, persistence verified end to end against a real `WispHome`. It was briefly held
 `ready-for-human` mid-session while the credential question below was settled, then merged on the
-maintainer's explicit call. **#189 is now armed.**
+maintainer's explicit call. **#189 LANDED 2026-07-29** — squash-merged as **`c6f644a`** via PR #194, closed. 971/971 vitest, compile
+clean both packages, and verified **live** end to end after the user's `/signin antigravity`. **#190 and #191
+are now armed together**, per the re-arming order; #192 closes the spec after both.
 
 **Re-arming order** (one step at a time): #189 lands → label #190 **and** #191 together → then #192, which
 closes #185.
@@ -222,19 +242,21 @@ Verified constants are a comment on #188; fixtures at `D:\scratch\antigravity-sp
 
 ## Pick up here
 
-**One thread, and it needs a human. The agent queue is dry by design.**
+**The agent queue is armed. Run `/relay N=1 /preset ticket-loop`.**
 
-1. **Human: `wisp` → `/signin antigravity`** (browser OAuth on the Google account). There are no Antigravity
-   credentials on this machine — #188's persistence check ran against an isolated `WISP_HOME`.
-2. **Run the three curls in [PR #194](https://github.com/EstarinAzx/Wisp-Router/pull/194)** against a live
-   `wisp serve`: a models check, a streamed turn, a tool-calling turn. Streamed text plus a `tool_calls`
-   entry carrying the **upstream's own** id = #189's criteria 1–3 met.
-3. **Then, and only then:** merge #194, label **#190 AND #191 together**, and re-run
-   `/relay N=1 /preset ticket-loop` (flip `stop: false` in `.claude/relay/ticket-loop.md`, or just re-issue
-   the command — a stopped chain re-inits).
+It takes the oldest unblocked `ready-for-agent` ticket — **#190** (rate limits answer 429; cooldown seeded
+from the server's stated horizon), then **#191** (the Anthropic door — Claude Code driven by Gemini), then
+**#192**, which closes spec #185. Both #190 and #191 run on **Gemini**, so neither waits on the Claude quota.
 
-Something wrong → comment the finding on #189, leave the label, do not merge. Do not flip labels hoping it
-works out.
+Two things to carry into #190 specifically:
+
+- It edits **`routing.ts`, which every Provider shares.** The two cooldown channels are separate on purpose —
+  a blip must not write a long horizon, and a long quota window must not be shortened by a blip.
+- The horizon it needs is already produced: `decideAntigravity429` returns `retryAfterMs` alongside all four
+  kinds, and #189 confirmed the classification **live** (`Antigravity API error 429: QUOTA_EXHAUSTED`).
+
+One loose end that is **not** blocking: re-run a Claude-model turn after `2026-07-30T20:55:48Z` to close
+#189's last acceptance criterion.
 
 Two user actions still outstanding from before: **install `packages/vscode/wisp-1.10.1.vsix`** (that face is
 not on the marketplace, so it does not carry #182 until installed by hand), and **#170** needs a Kimi Code
@@ -243,8 +265,7 @@ subscription.
 ## Skills for next session
 
 - `/preset pick-up` — session door.
-- `/relay N=1 /preset ticket-loop` — **ran legs 1–3 (#187, #188, #189), stopped because #189 needs a human.**
-  Re-arm by merging #194, labelling #190 **and** #191, then re-issuing the command.
+- `/relay N=1 /preset ticket-loop` — **ran legs 1–3 (#187, #188, #189); leg 4 is armed on #190.**
 - `packages/tui:verify` — sandboxed CLI verification for TUI command surfaces (isolated `WISP_HOME`).
 - `grill-me` / `/preset init` — still the right shape for **#69**, the last ungroomed ticket.
 
