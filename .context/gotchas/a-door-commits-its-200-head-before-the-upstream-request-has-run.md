@@ -26,9 +26,11 @@ status is still settable.
 **The tell in a test:** `expected 200 to be 502`. If a Bridge test asserts any error status on a *streaming*
 request and gets 200, this is why — not a routing miss.
 
-Fixed on the two Codex-reachable paths only (`handleCodexChat` + the Anthropic door). **`handleAnthropicChat`,
-`handleXaiChat` and the keyed OpenAI path still have the hole** — #167 collapses all of them into one
-`ProviderExecutor` handler, which is where priming should become uniform rather than four copies.
+**Fixed everywhere as of #167** (`c697733`): the four per-kind paths collapsed into one `ProviderExecutor`
+handler and priming became uniform, rather than four copies of it. #168 then took a dependency on that
+uniformity — the first pull is the boundary between "delivered nothing" (retryable) and "content is on the
+wire" (never discarded and restarted), so a door that had not primed would have had no such boundary at all.
+See [[2026-07-29-retry-wraps-priming-cooldown-channels-are-separate-maps]].
 
 Two things this is *not*:
 
