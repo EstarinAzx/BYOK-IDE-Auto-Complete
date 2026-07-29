@@ -634,6 +634,32 @@ describe('oauthModelOptions', () => {
   });
 });
 
+describe('PROVIDERS — Antigravity row (#188)', () => {
+  // The 15th built-in: Antigravity (Google OAuth) on a third wire — Gemini generateContent in a Cloud Code
+  // envelope. kind:'antigravity-oauth' branches it off the OpenAI-chat/key paths, like Codex + Anthropic + Grok.
+  it('registers Antigravity as a built-in with kind antigravity-oauth and the daily host', () => {
+    const row = PROVIDERS.find((p) => p.id === 'antigravity');
+    expect(row).toMatchObject({
+      id: 'antigravity', label: 'Antigravity', defaultModel: 'gemini-3.1-pro-low',
+      baseUrl: 'https://daily-cloudcode-pa.googleapis.com', apiKeyEnv: '', kind: 'antigravity-oauth',
+    });
+  });
+
+  // ⚠ #186: the model catalog is ADVISORY. gemini-3.1-pro-high is listed `recommended: true` upstream and
+  // 400s on every request shape tried, so it must never be the id a fresh sign-in sends before the user
+  // picks anything. This test is the guard on that — do not "upgrade" the default to the recommended row.
+  it('does not default to the listed-but-unservable gemini-3.1-pro-high', () => {
+    expect(PROVIDERS.find((p) => p.id === 'antigravity')?.defaultModel).not.toBe('gemini-3.1-pro-high');
+  });
+
+  // Keyless by construction: the credential is an OAuth bundle in auth.json, never a key slot or an env var.
+  it('carries no API-key env fallback and no models.dev catalogKey', () => {
+    const row = PROVIDERS.find((p) => p.id === 'antigravity');
+    expect(row?.apiKeyEnv).toBe('');
+    expect(row?.catalogKey).toBeUndefined();
+  });
+});
+
 describe('PROVIDERS — Grok row (#92)', () => {
   // The 13th built-in: Grok (xAI OAuth), a Codex-twin reached over the subscription proxy. Its default is
   // grok-build; kind:'xai-oauth' branches it off the OpenAI-chat/key paths, like Codex + Anthropic.

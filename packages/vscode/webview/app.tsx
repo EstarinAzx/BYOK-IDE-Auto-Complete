@@ -32,7 +32,7 @@ type State = {
   providerId?: string;
   providers: { id: string; label: string }[];
   isCustom: boolean;
-  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth';
+  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth' | 'antigravity-oauth';
   signedIn?: boolean;
   account?: string; // #150: "you@email · Max" when the bootstrap identity was captured (Anthropic only)
   modelOptions?: string[];
@@ -203,10 +203,13 @@ export const App = () => {
   // The OAuth Providers (Codex, Anthropic) swap the API-key field for a sign-in/out control and carry no
   // live /models route. oauth gates both behaviours; the per-kind label/messages below distinguish them.
   const oauth = state.kind === 'codex' || state.kind === 'anthropic-oauth' || state.kind === 'xai-oauth';
-  // Kimi (#170) is credential-wise an OAuth row but its sign-in is a DEVICE flow driven from the `wisp`
-  // terminal face, so the panel shows status and points there rather than offering a button it cannot run.
-  // It keeps the live /models route, so it stays out of `oauth` for the dropdown source above.
-  const deviceOauth = state.kind === 'kimi-oauth';
+  // Two rows are credential-wise OAuth but sign in from the `wisp` terminal face, so the panel shows status
+  // and points there rather than offering a button it cannot run: Kimi (#170, a device flow) and Antigravity
+  // (#188, whose browser flow needs a fixed loopback port this face does not own). Both keep a live model
+  // route, so they stay out of `oauth` for the dropdown source above.
+  const terminalOauth = state.kind === 'kimi-oauth' || state.kind === 'antigravity-oauth';
+  const terminalName = state.kind === 'antigravity-oauth' ? 'Antigravity' : 'Kimi';
+  const terminalCommand = state.kind === 'antigravity-oauth' ? '/signin antigravity' : '/signin kimi';
   const accountLabel = state.kind === 'anthropic-oauth' ? 'Claude Account' : state.kind === 'xai-oauth' ? 'Grok Account' : 'Codex Account';
   const signInMsg = state.kind === 'anthropic-oauth' ? 'anthropicSignIn' : state.kind === 'xai-oauth' ? 'xaiSignIn' : 'codexSignIn';
   const signOutMsg = state.kind === 'anthropic-oauth' ? 'anthropicSignOut' : state.kind === 'xai-oauth' ? 'xaiSignOut' : 'codexSignOut';
@@ -286,10 +289,10 @@ export const App = () => {
 
         {/* Credentials: OAuth sign-in OR API key. OAuth Providers (Codex, Anthropic) have no API key —
             "usable when signed in" → account sign-in/out control. Others keep the key field. */}
-        {deviceOauth ? (
+        {terminalOauth ? (
           <div class="flex flex-col gap-2">
             <div class="flex items-center justify-between gap-2">
-              <label class="field-label">Kimi Account</label>
+              <label class="field-label">{terminalName} Account</label>
               {state.signedIn ? (
                 <span class="flex items-center gap-1.5 text-[11px] text-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]">
                   <span class="inline-block h-1.5 w-1.5 rounded-full bg-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]" />
@@ -303,7 +306,7 @@ export const App = () => {
               )}
             </div>
             <p class="hint">
-              Subscription-backed Kimi — no API key. Sign in from the terminal with <code>wisp</code> → <code>/signin kimi</code>;
+              Subscription-backed {terminalName} — no API key. Sign in from the terminal with <code>wisp</code> → <code>{terminalCommand}</code>;
               both faces share the same credential store, so it lights up here once approved.
             </p>
           </div>

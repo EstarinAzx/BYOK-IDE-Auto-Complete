@@ -186,6 +186,35 @@ describe('parseWispAuth', () => {
     // The `{}` sign-out tombstone survives (suppresses the ~/.grok/auth.json re-import), like codex/anthropic.
     expect(parseWispAuth(JSON.stringify({ xai: {} }))).toEqual({ xai: {} });
   });
+
+  test('the antigravity slot round-trips its four fields, projectId included (#188)', () => {
+    const antigravity = { accessToken: 'ya29.a', refreshToken: '1//rt', expiresAt: 9012, projectId: 'example-project-1' };
+    expect(parseWispAuth(JSON.stringify({ antigravity }))).toEqual({ antigravity });
+  });
+
+  test('the antigravity slot sanitizes like its twins, and keeps the tombstone (#188)', () => {
+    // A number in a Bearer field or a string in the expiry compare must be dropped; projectId stays a string.
+    const raw = JSON.stringify({ antigravity: { accessToken: 'ya29.a', refreshToken: 42, expiresAt: 'later', projectId: 'p-1' } });
+    expect(parseWispAuth(raw)).toEqual({ antigravity: { accessToken: 'ya29.a', projectId: 'p-1' } });
+    expect(parseWispAuth(JSON.stringify({ antigravity: {} }))).toEqual({ antigravity: {} });
+  });
+
+  // The allowlist is the point, not decoration: sanitizeCreds keeps only KNOWN fields, so a hand-edited or
+  // reference-shaped bundle cannot smuggle extra state (the reference's per-email multi-account map is
+  // explicitly not adopted — a stray `accounts` key must not survive into the store).
+  test('the antigravity slot drops fields outside its allowlist (#188)', () => {
+    const raw = JSON.stringify({
+      antigravity: { accessToken: 'ya29.a', projectId: 'p-1', accounts: { 'you@x.com': { accessToken: 'other' } }, email: 'you@x.com' },
+    });
+    expect(parseWispAuth(raw)).toEqual({ antigravity: { accessToken: 'ya29.a', projectId: 'p-1' } });
+  });
+
+  // #182 / ADR-0004 holds for the new slice too: an unparseable store is never OVERWRITTEN, and the guard
+  // that decides so is isUnusableStore, not the parser. A truncated auth.json holding an antigravity bundle
+  // must still read as unusable so homeStore.merge refuses rather than erasing it.
+  test('a truncated store carrying the antigravity slice still reads as unusable (#182)', () => {
+    expect(isUnusableStore('{"antigravity":{"accessToken":"ya29.a"')).toBe(true);
+  });
 });
 
 // ----------------------------- serializeWispStore ----------------------------- //

@@ -46,7 +46,9 @@ export type Provider = {
   // 'xai-oauth' are the OAuth-backed subscription rows — the Inquire/key/usability paths branch on it.
   // 'kimi-oauth' (#170) is the odd one out: OAuth to sign in, but the ORDINARY OpenAI-chat wire to talk, so
   // it exists only to tell the faces "offer sign-in, not a key field". No request path dispatches on it.
-  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth';
+  // 'antigravity-oauth' (#188) is a THIRD wire — Gemini generateContent in a Cloud Code envelope — so it
+  // branches off the OpenAI-chat path like Codex/Anthropic/Grok do.
+  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth' | 'antigravity-oauth';
   // Context/vision carry no per-row hints — both come from the ACTIVE model via models.dev (catalogKey).
 };
 
@@ -95,6 +97,14 @@ export const PROVIDERS: Provider[] = [
   // 2026-07-29), so caps fall to the neutral default. ⚠ defaultModel best-effort: the Kimi Code lineup is
   // k2.5/k2.6/k2.7-code/k3 and the row serves a live /models route, so the model picker is the correction path.
   { id: 'kimi', label: 'Kimi', baseUrl: 'https://api.kimi.com/coding', defaultModel: 'kimi-k2.7-code', apiKeyEnv: '', kind: 'kimi-oauth' },
+  // Antigravity = subscription Gemini/Claude backend reached by GOOGLE OAuth (no API key), on a third wire:
+  // a Gemini generateContent payload nested in a Cloud Code envelope. kind:'antigravity-oauth'. baseUrl is
+  // the DAILY host — verified answering (#186), with prod as the reference's fallback that was never needed.
+  // No catalogKey (models.dev carries no Antigravity provider); its lineup comes from the live
+  // fetchAvailableModels route, so the model picker is the correction path. ⚠ defaultModel is
+  // gemini-3.1-pro-low, NOT the `recommended: true` gemini-3.1-pro-high — that row is listed and 400s on
+  // every request shape tried (#186). The catalog is advisory: being listed does not make a row servable.
+  { id: 'antigravity', label: 'Antigravity', baseUrl: 'https://daily-cloudcode-pa.googleapis.com', defaultModel: 'gemini-3.1-pro-low', apiKeyEnv: '', kind: 'antigravity-oauth' },
   { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini', apiKeyEnv: 'OPENAI_API_KEY', catalogKey: 'openai' },
   { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile', apiKeyEnv: 'GROQ_API_KEY', catalogKey: 'groq' },
   { id: 'mistral', label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', defaultModel: 'codestral-latest', apiKeyEnv: 'MISTRAL_API_KEY', catalogKey: 'mistral' },

@@ -103,10 +103,13 @@ describe('SLASH_COMMANDS — the real palette', () => {
     expect(SLASH_COMMANDS.find((c) => c.name === 'modelids')?.args).toBe('[on|off]');
   });
 
-  // #96: /signin + /signout name the third OAuth door (Grok) alongside codex/anthropic.
-  it('lists xai in the /signin and /signout arg hints (#96)', () => {
-    expect(SLASH_COMMANDS.find((c) => c.name === 'signin')?.args).toBe('[codex|anthropic|xai]');
-    expect(SLASH_COMMANDS.find((c) => c.name === 'signout')?.args).toBe('[codex|anthropic|xai]');
+  // #96 / #170 / #188: /signin + /signout name EVERY OAuth door. The hint is the only place a user can
+  // discover the arg, so a door missing here is a door that effectively does not exist in the palette —
+  // which is what had happened to kimi, silently, because this pin still read the pre-#170 string.
+  it('lists every OAuth door in the /signin and /signout arg hints (#96, #170, #188)', () => {
+    const hint = '[codex|anthropic|xai|kimi|antigravity]';
+    expect(SLASH_COMMANDS.find((c) => c.name === 'signin')?.args).toBe(hint);
+    expect(SLASH_COMMANDS.find((c) => c.name === 'signout')?.args).toBe(hint);
   });
 
   // #122: /show-log opens the Bridge log Screen; no arguments.

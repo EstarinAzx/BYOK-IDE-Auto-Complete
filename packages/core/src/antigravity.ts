@@ -23,6 +23,7 @@
  */
 
 import { createHash } from 'crypto';
+import type { Provider } from './catalog';
 import type { BridgeStreamEvent } from './bridge';
 import type { ToolSpec, BridgeUsage } from './shared';
 import type { AnthropicTruncationReason } from './anthropic';
@@ -35,10 +36,69 @@ const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && 
 const clone = <T,>(v: T): T => structuredClone(v);
 const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
+// ----------------------------- The credential bundle (#188) ----------------------------- //
+
+/*
+ * Antigravity's credential is a Google OAuth bundle plus ONE extra field the other four kinds have no
+ * analogue for: projectId. Every request envelope carries a Cloud Code project, its absence is a hard 400
+ * at request-build time (#189), and it is not derivable from the token — it comes from a separate
+ * loadCodeAssist call. So it is stored WITH the tokens rather than re-fetched per turn.
+ *
+ * Singular, like every other kind. The reference keys credentials per email address and juggles several
+ * accounts behind one Provider; spec #185 explicitly does not adopt that — one signed-in account, one slice.
+ */
+export type AntigravityCreds = {
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;   // epoch ms; absent when the token response carried no expires_in
+  projectId?: string;   // cloudaicompanionProject, bootstrapped at sign-in (never hardcoded)
+};
+
+// Whether a catalog row is the Antigravity backend. Absent kind == 'openai-chat', so false for every
+// API-key row and for the other four OAuth kinds.
+export const isAntigravityProvider = (provider: Provider): boolean => provider.kind === 'antigravity-oauth';
+
+// Antigravity is "usable when signed in" — no API key, so usability is a bearer access token. The `{}`
+// sign-out tombstone and a refresh-only blob both read as signed-out. A projectId alone does NOT count:
+// it survives sign-out only as cached bootstrap, never as a credential.
+export const isAntigravitySignedIn = (creds: AntigravityCreds | undefined): boolean =>
+  !!creds && !!creds.accessToken;
+
+// Turn a Google OAuth token response into AntigravityCreds. expires_in (seconds, relative) becomes an
+// absolute expiresAt against the injected clock — `now` is a parameter so this stays pure. The typeof
+// guard is load-bearing: a string expires_in would stamp NaN, and NaN <= anything is false, so the token
+// would then never be judged stale and never refresh.
+export const tokensToAntigravityCreds = (
+  payload: { access_token?: string; refresh_token?: string; expires_in?: number },
+  now: number,
+): AntigravityCreds => ({
+  ...(payload.access_token ? { accessToken: payload.access_token } : {}),
+  ...(payload.refresh_token ? { refreshToken: payload.refresh_token } : {}),
+  ...(typeof payload.expires_in === 'number' ? { expiresAt: now + payload.expires_in * 1000 } : {}),
+});
+
+// Refresh 5 minutes BEFORE expiry (Google's hour-long tokens, Anthropic's skew rather than xAI's tighter
+// two minutes). No expiresAt → false: can't prove staleness. The skew lives HERE at the check, not baked
+// into expiresAt — so it is applied exactly once.
+const ANTIGRAVITY_TOKEN_REFRESH_SKEW_MS = 5 * 60_000;
+export const shouldRefreshAntigravityToken = (creds: { expiresAt?: number }, now: number): boolean =>
+  creds.expiresAt !== undefined && creds.expiresAt <= now + ANTIGRAVITY_TOKEN_REFRESH_SKEW_MS;
+
+// Read the Cloud Code project id out of a loadCodeAssist response. Anything unusable answers undefined so
+// the caller can retry the bootstrap — NEVER a hardcoded fallback: the id is per-account, so a wrong one is
+// a 403 on every turn. Real ids stay out of this repo; tests use a placeholder.
+export const parseAntigravityProject = (body: unknown): string | undefined =>
+  isObj(body) ? (text(body.cloudaicompanionProject) || undefined) : undefined;
+
 // ----------------------------- The request envelope ----------------------------- //
 
 // The literal userAgent FIELD the envelope carries (not the HTTP header). The upstream keys behaviour off it.
 export const ANTIGRAVITY_USER_AGENT_FIELD = 'antigravity';
+
+// The HTTP User-Agent header — a DIFFERENT thing from the envelope field above, and pinned: #186 confirmed
+// the upstream accepts client version 2.2.1, and the version is what gates the request. Shared by the
+// sign-in bootstrap (#188) and the turn paths (#189) so one edit moves both.
+export const ANTIGRAVITY_HTTP_USER_AGENT = 'antigravity/hub/2.2.1 darwin/arm64';
 
 // Request-id formats, as pure functions of an injected uuid/clock — #189 owns the minting, this layer owns
 // the shape. (These are envelope metadata, NOT tool ids; the binding rule is untouched.)
