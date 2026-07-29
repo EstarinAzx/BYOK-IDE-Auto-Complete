@@ -113,23 +113,35 @@ Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #16
 
 | # | Ticket | Label | Blocked by |
 |---|---|---|---|
-| **186** | Auth spike — access, PKCE, posture | `ready-for-human` | none — needs a human at a browser |
-| ~~187~~ | ~~Pure layer — envelope, tools, signatures, 429, SSE~~ | ✅ **`e04f53b`** | — |
-| **188** | Catalog row, kind, creds slice, `AntigravityAuth` | — | #186 |
+| ~~186~~ | ~~Auth spike~~ | ✅ **passed — access confirmed** | — |
+| ~~187~~ | ~~Pure layer — envelope, tools, signatures, 429, SSE~~ | ✅ **`e04f53b`** + `63453e0` | — |
+| **188** | Catalog row, kind, creds slice, `AntigravityAuth` | **`ready-for-agent`** | — |
 | **189** | Executor record + OpenAI door — first real turn | — | #188 |
 | **190** | Rate limits answer 429; cooldown from server horizon | — | #189 |
 | **191** | Anthropic door — Claude Code driven by Gemini | — | #189 |
 | **192** | Release — npm + TUI face, surfaces named | — | #190, #191 |
 
-**Why NOTHING carries `ready-for-agent` now.** `## Blocked by` is body text, not native links — a frontier
-query cannot see it, so **labels are the only real gate**. #187 was exempt from the spike because it is a pure
-transcription of the reference's own ~3,900-line test corpus — its correctness does not depend on account
-access. **Every remaining ticket touches the live wire**, so labelling one before #186 confirms access is
-exactly the #170 failure mode: complete, correct, and unusable.
+**#186 PASSED 2026-07-29 — access confirmed, gate lifted, #188 labelled.** The rule that put the gate there
+still governs the rest: `## Blocked by` is body text, not native links, so **labels are the only real gate**
+and exactly one ticket is armed at a time.
 
-**Re-arming order** (one step at a time): human runs #186 → label #188 → then #189 → then #190 **and** #191
-together → then #192, which closes #185. Access not confirmed → comment on #186, label nothing, leave #185
-dormant.
+**Re-arming order** (one step at a time): #188 lands → label #189 → then #190 **and** #191 together → then
+#192, which closes #185.
+
+**What #186 proved:** access confirmed (project `phonic-bonfire-bq1hc`), **PKCE S256 accepted** (no spec
+revision needed), refresh token received, pinned version `2.2.1` accepted, **daily host answered**, vision
+**and** PDF input both accepted (closing that open question), tool calling works streaming and non-streaming.
+Verified constants are a comment on #188; fixtures at `D:\scratch\antigravity-spike\out\`, outside the repo.
+
+**Two live findings that change the remaining tickets:**
+
+1. **The model catalog is advisory, not a guarantee.** 24 models listed, not the 13 the spec assumed — and
+   `gemini-3.1-pro-high` **400s on every request shape tried** while `gemini-3.1-pro-low` and
+   `gemini-3.6-flash-high` 200 on the identical body; `gemini-2.5-pro` returns 503 no-capacity. #188 must
+   tolerate a listed-but-unservable row.
+2. **⚠ Claude quota exhausted until `2026-07-30T20:55:48Z`.** Real ids are `claude-sonnet-4-6` and
+   `claude-opus-4-6-thinking` (`-4-6`, not `4.5`). #188–#190 unaffected (they run on Gemini); **#191 cannot
+   be verified live until it resets.**
 
 **What #187 hands the tickets downstream** (also recorded on the ticket):
 

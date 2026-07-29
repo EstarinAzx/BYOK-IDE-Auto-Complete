@@ -9,36 +9,53 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last session (2026-07-29): relay leg 1 landed #187 — the whole pure Antigravity layer — then stopped on a
-dry queue, exactly as designed.** At `e04f53b` on main (pushed) plus this session's `.context/` commit. No
-release cut, no release debt.
+**Last session (2026-07-29): #187 landed, then the #186 auth spike PASSED — access is confirmed and the
+queue is open again.** At `63453e0` on main (pushed). No release cut, no release debt.
 
-## queue empty
+## Queue: #188 is `ready-for-agent`
 
-**No ticket carries `ready-for-agent`.** That is deliberate, not an oversight — see the gate below. Running
-the relay again right now would find nothing and stop again.
+Run **`/relay N=1 /preset ticket-loop`**. It picks up #188 (catalog row, kind, creds slice,
+`AntigravityAuth`). The verified constants are posted as a comment on #188 — client id, callback, scopes,
+host, paths, User-Agent, loadCodeAssist body — all measured live, not read off the reference.
 
-## The one thread: #186, and it needs a human — ten minutes
+**Re-arm order after #188 lands:** #189 → then #190 **and** #191 together → then #192, which closes #185.
 
-**Run the #186 auth spike.** Browser OAuth on the Google account. Confirm Antigravity access exists, record
-the PKCE verdict, record whether the pinned client version was accepted, and save the captured
-request/response bodies (including one streaming turn) on the ticket. Those become the fixtures that replace
-#187's derived ones.
+## What #186 proved
 
-**Then, one step at a time:** #186 passes → label **#188** → then **#189** → then **#190** and **#191**
-together (independent of each other) → then **#192**, which closes #185. Re-arm the chain by re-issuing
-`/relay N=1 /preset ticket-loop` (the state file is `stop: true`; re-issuing re-inits it).
+| Question | Answer |
+|---|---|
+| Access | **confirmed** — project `phonic-bonfire-bq1hc` |
+| PKCE S256 | **accepted** — the spec's auth decision stands, no revision |
+| Refresh token | received (`access_type=offline` + `prompt=consent`) |
+| Pinned version `2.2.1` | **accepted** |
+| Daily host | **answered** — prod fallback never needed |
+| Vision + PDF input | both **accepted**, HTTP 200 — #185's open question is closed |
+| Tool calling | works, streaming and non-streaming |
 
-Access **not** confirmed → comment the finding on #186, label nothing, leave #185 dormant. **Do not flip
-labels hoping it works out.**
+Fixtures at `D:\scratch\antigravity-spike\out\` (outside the repo, disposable).
 
-## Why the queue is gated on a human
+## Two live findings that change how the next tickets are written
 
-`## Blocked by` is body text, not native tracker links — a frontier query cannot see it, so **labels are the
-only real gate**. #187 was exempt because it is a pure transcription of the reference's own ~3,900-line test
-corpus: no credentials, no account access, verifiable offline. **Every remaining ticket touches the live
-wire.** Labelling one before the spike lets the relay build the entire Provider before anyone confirms the
-account can reach it — which is exactly how **#170** ended up complete, correct, and unusable.
+1. **The model catalog is advisory, not a guarantee.** 24 models listed, not the 13 the spec assumed — and
+   **`gemini-3.1-pro-high` 400s on every request shape tried** while `gemini-3.1-pro-low` and
+   `gemini-3.6-flash-high` 200 on the identical body. `gemini-2.5-pro` returns 503 no-capacity. #188 must
+   tolerate a listed-but-unservable row. Known-good: `gemini-3.1-pro-low`, `gemini-2.5-flash`,
+   `gemini-3-flash`, `gemini-3.6-flash-low`, `gemini-3.6-flash-high`, `gemini-pro-agent`.
+
+2. **⚠ Claude quota on this account is exhausted until `2026-07-30T20:55:48Z`.** Real ids are
+   `claude-sonnet-4-6` and `claude-opus-4-6-thinking` (`-4-6`, not `4.5`). #188/#189/#190 are unaffected —
+   they run on Gemini — but **#191 cannot be verified live until the quota resets.**
+
+## The spike found a real bug in #187 — fixed in `63453e0`
+
+**Thinking tokens are billed output and ride their own `usageMetadata` field.** Reading
+`candidatesTokenCount` alone under-reported a reasoning turn by ~100x (candidates 1 vs thoughts 1123 on a
+vision turn). Now `candidates + thoughts`, checked against the upstream's own `totalTokenCount`, with both
+captured numbers as tests and verified by control. Same class as #165.
+
+Two more observations, recorded on #186: `usageMetadata` **repeats identically on every chunk** (so #187's
+terminal-only rule is right — forwarding each copy would double-count), and response parts carry
+`thoughtSignature` (~1.3 KB) that **#191** will need for thinking passthrough.
 
 ## What #187 landed
 
@@ -57,10 +74,13 @@ mapper onto `BridgeStreamEvent`. Credits and reasoning-replay stay out, as specc
 - `antigravity429Error` returns **`Antigravity API error 429: <reason>`** — #189/#190 must throw this shape.
 - `decideAntigravity429` keeps all four kinds **plus `retryAfterMs`** because **#190** needs the horizon.
 
-## The binding rule — still the highest-consequence thing here
+## The binding rule — now confirmed by the live wire
 
 **The port never mints opaque provider-side tool ids. The upstream's own `functionCall.id` passes through
 untouched.** Absent upstream ⇒ an **empty** id, never a minted one.
+
+#186 captured a real one: `"id": "5hp24qb7"`. The upstream **does** mint its own, so passing it through is
+right and there was never a need to invent one.
 
 This is no longer only a convention: **tests pin it, and the guard was verified by control** — minting a
 content-hash id when upstream sent none fails two of them. A leg that "improves" id handling now fails loudly
@@ -86,10 +106,10 @@ it**. A ⚠ comment sits at `mapSchema`; keep it.
 
 ## Waiting on the user
 
-- **#186** — the Antigravity auth spike above. The only thing unblocking the queue.
 - **Install `packages/vscode/wisp-1.10.1.vsix`** — that face is not on the marketplace, so the extension does
   not carry #182 until it is installed by hand.
 - **#170** — needs a **Kimi Code subscription**. The sign-in doubles as the unverified-constants check.
+- _(#186 is done — closed 2026-07-29, access confirmed.)_
 
 ## Landmines
 
