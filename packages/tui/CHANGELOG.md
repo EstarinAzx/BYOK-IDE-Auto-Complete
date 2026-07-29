@@ -6,6 +6,47 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.39] — 2026-07-29
+
+One fix, cut on its own because of what it costs to wait: #181 destroys data, and it landed
+just after the 2.0.38 cut. The extension already carries it (vsix 1.10.0), so this release
+closes the gap on the face with the most users — anyone running `wisp`, `wisp serve` or
+`claude-wisp` from npm.
+
+### Fixed
+
+- **A UTF-8 BOM in a store file no longer erases that store.** `~/.wisp/config.json` and
+  `auth.json` were read with a bare `JSON.parse`, which rejects a leading BOM — so the parse
+  threw, the whole store was discarded as corrupt above every field guard, and an empty
+  object was returned. That verdict was destructive rather than merely lossy, because both
+  stores are read-merge-write: the next patch was merged onto that empty object and written
+  back over the real file. Editing `config.json` in an editor that saves a BOM and then
+  changing a single setting erased every family route from disk; the same path on `auth.json`
+  plus one sign-in erased every stored API key and OAuth bundle. Silently, with no error. A
+  BOM is not corruption — it is valid UTF-8 and the *default* output of Notepad and
+  PowerShell 5.1's `Out-File`/`Set-Content -Encoding utf8`, so a hand-edited store arrives
+  with one routinely. It is now stripped before parsing. (#181)
+
+  Deliberately unchanged: a store that is genuinely unparseable still degrades to an empty
+  object rather than failing loud. That path is still destructive for the same read-merge-write
+  reason, and fixing it changes the contract of a pure function with six callers — tracked as
+  its own ticket (#182) rather than smuggled into a BOM fix.
+
+### Surfaces
+
+Which build carries which change — npm is one of three faces, and this release cuts only npm.
+
+- **npm `wisp-router` 2.0.39** (this release) — the fix above. It lives in `@wisp/core`'s
+  home-store parser, so it reaches every npm surface at once: the TUI, `wisp serve`, and the
+  `claude-wisp` Bridge launcher.
+- **The `wisp` VS Code extension (vsix)** — already has it. The extension bundles its own copy
+  of `@wisp/core`, so it needed its own build; **1.10.0** shipped this fix along with the rest
+  of the #164 harvest that 2.0.38 flagged as owed (#180). Nothing is owed to the vsix here.
+- **The `wisp-slot` Claude Code plugin** — unaffected by this fix, and no longer owed anything
+  either: **1.6.0** carries the reader half of #171 that 2.0.38 flagged, so the `ctx …%`
+  statusline badge now has both halves. Note that a plugin install is a *cache snapshot*, not
+  a live pointer — an existing user needs `/plugin update wisp-slot` to actually move.
+
 ## [2.0.38] — 2026-07-29
 
 The CLIProxyAPI harvest (#164) — eight tickets whose common thread is that the Bridge now
