@@ -7,11 +7,54 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-30 by Opus 5 (relay leg 5: #191 landed and verified live)._
-_At commit: `915d415` on main. **#192 is `ready-for-agent` — the chain is armed for leg 6, and #192 closes
-spec #185.**_
+_Last updated: 2026-07-30 by Opus 5 (relay leg 6: #192 cut as PR #198, held at the tag push)._
+_At commit: `5e96abc` on main; the release cut is `c49532c` on `ticket/192-antigravity-release`, **unmerged on
+purpose**. **#192 is `ready-for-human` and the agent queue is DRY — the relay chain stopped here.**_
 
 ## Current focus
+
+**#192 CUT, NOT PUBLISHED — PR #198 (`c49532c`) bumps the TUI package to 2.0.41 and writes its changelog.
+The `v2.0.41` tag is deliberately not pushed, and the PR is deliberately not merged.**
+
+Gate: **1009/1009 vitest**, `bun run compile` clean in **BOTH** packages. No code changed — everything being
+released is already on main (`e04f53b`, `63453e0`, `ba8dab3`, `c6f644a`, `6a7e0fe`, `915d415`).
+
+### Why it stopped
+
+An npm version **can never be republished**, and it is public. Every prior ticket in this spec had a worst case
+of "a merge to your own repo"; this one does not, so the tag is handed over rather than taken. Not merged
+either, on purpose: a release commit sitting on `main` untagged is a trap for the next agent, which would see
+`2.0.41` in `package.json`, `2.0.40` on npm, and reasonably conclude a tag push is owed.
+
+**Two commands, the user's to run:**
+
+```
+gh pr merge 198 --squash --repo EstarinAzx/Wisp-Router
+git checkout main && git pull && git tag v2.0.41 && git push origin v2.0.41
+```
+
+### The Surfaces check caught a wrong ticket premise
+
+#192's body says "the extension face gets nothing from this release." **It does.**
+`git log v2.0.40..main -- packages/vscode/` returns **`ba8dab3` (#188)** and **`c6f644a` (#189)**: the
+extension constructs `AntigravityAuth` to refresh the bundle and bootstrap the Cloud Code project, passes
+`antigravitySignedIn`/`antigravityCreds` into **its own** `createBridgeServer` — **that face hosts the Bridge
+too** — and renders the `antigravity-oauth` row with a truthful signed-in status. It bundles its own
+`@wisp/core`, so **no npm version delivers any of it**. Bump owed, filed as **#197** (vsix 1.11.0),
+deliberately **unlabelled** so no frontier query picks it before #192 lands.
+
+Full reasoning:
+[[2026-07-30-a-surfaces-section-is-checked-against-the-code-not-copied-from-the-ticket]]. `plugins/` was
+genuinely untouched, so `wisp-slot` staying at **1.6.0** is evidence-backed rather than assumed.
+
+### Still unmet — every one of these needs the publish
+
+Release workflow green on all four runners · published version verified **past the registry read** (real
+install, bins executed) · **2.0.40 installed as a control and failing** the check 2.0.41 passes · npm 404 on a
+just-published version treated as propagation lag · **spec #185 closed** · then label **#197**
+`ready-for-agent`.
+
+## Previously (relay leg 5)
 
 **#191 LANDED (`915d415`, PR #196) — the Anthropic door's fourth arm. Claude Code, driven by Gemini, through
 Antigravity.** Gate on merged main: **1009/1009 vitest** (991 before), `bun run compile` clean in **BOTH**
@@ -198,9 +241,15 @@ extension carries #182.
 
 ## State
 
-- **In flight:** nothing. Working tree clean on main at `915d415`, pushed; the #191 branch is merged and
-  deleted. **The relay chain ran legs 1–5 (#187, #188, #189, #190, #191) and is armed for leg 6 on #192 —
-  which closes spec #185.**
+- **In flight: PR #198, open and unmerged on purpose.** Branch `ticket/192-antigravity-release` at `c49532c`,
+  pushed. Working tree clean on main at `5e96abc`. **The relay chain ran legs 1–6 (#187, #188, #189, #190,
+  #191, #192) and STOPPED at leg 6** — #192 is `ready-for-human`, the agent queue is dry, and no leg 7 was
+  spawned.
+- **#192 ⏸ CUT, HELD (PR #198, `c49532c`)** — wisp-router **2.0.41**, the Antigravity release. Gate:
+  **1009/1009 vitest**, compile clean **both** packages. Two files only (version + changelog), matching every
+  prior release cut's shape. **The `v2.0.41` tag is not pushed and the PR is not merged** — npm cannot
+  republish a version, so the one irreversible act in this spec is the user's. Its `### Surfaces` check found
+  #192's own body wrong about the extension face; **#197** filed for the owed vsix 1.11.0 bump.
 - **#191 ✅ `915d415` (PR #196)** — the Anthropic door's fourth arm; Claude Code driven by Gemini. Gate on
   merged main: **1009/1009 vitest** (991 before), compile clean **both** packages. **Five** deliberate-break
   controls, each failing only its own tests. **Verified live** — a streamed turn, a tool round trip on the
@@ -264,7 +313,7 @@ Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #16
 #170 `d656686`, #171 `3e0125e`, #172 `49761d8`, #173 `55daebb`/`v2.0.38`), plus the follow-ups #181 `4ec1a81`,
 #180 `ab2235b` and #183 `819900b`/`v2.0.39`.
 
-**Spec #185 — Antigravity, seven tickets, FIVE landed:**
+**Spec #185 — Antigravity, seven tickets, SIX landed, the seventh cut and held:**
 
 | # | Ticket | Label | Blocked by |
 |---|---|---|---|
@@ -273,8 +322,18 @@ Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #16
 | ~~188~~ | ~~Catalog row, kind, creds slice, `AntigravityAuth`~~ | ✅ **`ba8dab3`** (PR #193) | — |
 | ~~189~~ | ~~Executor record + OpenAI door — first real turn~~ | ✅ **`c6f644a`** (PR #194) | — |
 | ~~190~~ | ~~Rate limits answer 429; cooldown from server horizon~~ | ✅ **`6a7e0fe`** (PR #195) | — |
-| **191** | Anthropic door — Claude Code driven by Gemini | **`ready-for-agent`** | — |
-| **192** | Release — npm + TUI face, surfaces named | — | #190, #191 |
+| ~~191~~ | ~~Anthropic door — Claude Code driven by Gemini~~ | ✅ **`915d415`** (PR #196) | — |
+| **192** | Release — npm + TUI face, surfaces named | ⏸ **`ready-for-human`** — PR #198 open, tag held | — |
+
+**Follow-up filed by #192:**
+
+| # | Ticket | Label | Blocked by |
+|---|---|---|---|
+| **197** | Antigravity reaches the extension face — vsix 1.11.0 bump owed | **none, deliberately** | #192 |
+
+**#197 is unlabelled on purpose.** `## Blocked by` is body text no frontier query can see, so labelling it now
+would hand the next leg the extension release before the npm cut it depends on had merged. Label it
+`ready-for-agent` **after** `v2.0.41` is published.
 
 **#186 PASSED 2026-07-29 — access confirmed, gate lifted, #188 labelled.** The rule that put the gate there
 still governs the rest: `## Blocked by` is body text, not native links, so **labels are the only real gate**
@@ -287,7 +346,15 @@ maintainer's explicit call. **#189 LANDED 2026-07-29** — squash-merged as **`c
 971/971 vitest, compile clean both packages, and verified **live** end to end after the user's
 `/signin antigravity`. **#190 LANDED 2026-07-30** — squash-merged as **`6a7e0fe`** via PR #195, closed.
 991/991 vitest, compile clean both packages, five deliberate-break controls, and a real quota-exhausted 429
-driven live. **#191 is the only armed ticket**; #192 closes the spec after it.
+driven live. **#191 LANDED 2026-07-30** — squash-merged as **`915d415`** via PR #196, closed. 1009/1009
+vitest, compile clean both packages, five deliberate-break controls, and verified live including a real Claude
+Code agent turn through `claude-wisp` answered by Gemini.
+
+**#192 CUT AND HELD 2026-07-30 (relay leg 6).** PR #198 (`c49532c`) bumps the TUI package to **2.0.41** and
+writes its changelog; gate **1009/1009** vitest, compile clean both packages. **Neither merged nor tagged** —
+an npm version can never be republished, so that act is the maintainer's. Relabelled `ready-for-human`, the
+agent queue went dry, and the relay chain stopped rather than spawning leg 7. Its `### Surfaces` check found
+#192's own body wrong about the extension face, and filed **#197** for the owed vsix bump.
 
 **Re-arming order** (one step at a time): #190 lands → #191 (already armed) → then #192, which closes #185.
 
@@ -349,21 +416,25 @@ Verified constants are a comment on #188; fixtures at `D:\scratch\antigravity-sp
 
 ## Pick up here
 
-**The agent queue is armed. Run `/relay N=1 /preset ticket-loop`.**
+**The agent queue is DRY. The next move is a human one: publish 2.0.41, or wave the hold off.**
 
-It takes the only unblocked `ready-for-agent` ticket — **#191** (the Anthropic door — Claude Code driven by
-Gemini) — then **#192**, which closes spec #185.
+Everything reversible in spec #185 is done. What is left is one irreversible act, and it is deliberately not
+an agent's to take:
 
-Three things to carry into #191 specifically:
+```
+gh pr merge 198 --squash --repo EstarinAzx/Wisp-Router
+git checkout main && git pull && git tag v2.0.41 && git push origin v2.0.41
+```
 
-- **The work is one missing arm, not a subsystem.** That door does not use the executor records at all:
-  `startProviderStream` has its own per-kind chain (codex → anthropic → xai → keyed) and Antigravity simply
-  is not in it, so `/v1/messages` answers `400 has no API key configured` today.
-  [[the-anthropic-door-does-not-use-the-executor-records]].
-- **The 429 answer comes for free.** Both doors answer through the shared `failProviderRequest`, which reads
-  `executorFor(provider).classify` — #190's classification is already door-neutral. Do **not** re-implement it.
-- **The door carries wire behaviour the records do not**: the #139 system split, the #156 diagnosis chain,
-  vision/documents and non-strict tools. That is why #167 left this door alone, and the arm must respect it.
+Then watch `release.yml` across all four runners, and finish #192's remaining criteria: install the published
+version into a scratch dir and **run the bins** (a registry read alone passes on a broken build), install
+**2.0.40 as a control** and confirm it **fails** a check 2.0.41 passes, treat an npm 404 on a just-published
+version as propagation lag (check the job log + dist-tags, retry). Then **close spec #185**, and label **#197**
+`ready-for-agent` so a later leg can cut the vsix.
+
+**If you would rather the chain just shipped it, say so** — the hold is a judgement call carried from leg 5,
+not something #192 asks for. Re-running `/relay N=1 /preset ticket-loop` alone will **not** resume: #192 is
+`ready-for-human`, so the frontier is empty until a label moves.
 
 One loose end that is **not** blocking: re-run a Claude-model turn after `2026-07-30T20:55:48Z` to close
 #189's last acceptance criterion. As of `2026-07-29T12:00Z` that quota is still exhausted — which is what let
@@ -376,7 +447,8 @@ subscription.
 ## Skills for next session
 
 - `/preset pick-up` — session door.
-- `/relay N=1 /preset ticket-loop` — **ran legs 1–4 (#187, #188, #189, #190); leg 5 is armed on #191.**
+- `/relay N=1 /preset ticket-loop` — **ran legs 1–6 (#187, #188, #189, #190, #191, #192) and stopped: #192 is
+  `ready-for-human` and the queue is dry.** Re-arm by publishing 2.0.41 and labelling #197.
 - `packages/tui:verify` — sandboxed CLI verification for TUI command surfaces (isolated `WISP_HOME`).
 - `grill-me` / `/preset init` — still the right shape for **#69**, the last ungroomed ticket.
 
