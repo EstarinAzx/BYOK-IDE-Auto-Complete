@@ -9,31 +9,28 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last session (2026-07-29): #183 shipped (`wisp-router@2.0.39` on npm, verified against a control), then
-#182 was fixed (`9fd63f0`, ADR-0004).** At `9fd63f0` on main. Nothing in flight, no `ready-for-agent` ticket.
+**Last session (2026-07-29): the store data-loss arc closed end to end.** #183 cut npm 2.0.39, #182 fixed the
+mechanism behind #181 (`9fd63f0`, ADR-0004), and #184 shipped it to both faces — **npm 2.0.40 + vsix
+1.10.1**. At `b672333` on main. Nothing in flight, no `ready-for-agent` ticket, no release debt.
 
-## The one open thread: #182 is fixed but shipped nowhere
+## There is no queued work
 
-`9fd63f0` stops the read-merge-write mechanism from erasing a store it could not parse — the half of #181
-that a BOM fix did not cover. It is a **data-loss fix sitting unreleased**, which is exactly the position
-#181 was in before #183.
+Ask the user what they want. Do not invent urgency, and do not restart the relay chain — with no
+`ready-for-agent` ticket it picks nothing, writes `queue empty`, stops.
 
-It lives in `@wisp/core`, so it reaches users only through **two** builds: an npm cut (`2.0.40`) **and** a
-vsix build, because the extension bundles its own copy of core. The `wisp-slot` plugin is untouched.
+The only outstanding action is the user's: **install `packages/vscode/wisp-1.10.1.vsix`**. That face is not
+on the marketplace, so the extension does not carry #182 until it is installed by hand.
 
-**This was deliberately not done.** "Do #182" did not authorize two outward-facing publishes — that is the
-user's call. Per the rule from #173, if the answer is yes, **file the owed pair as a ticket first**; an owed
-bump recorded only in prose evaporates. #183 is the template and is three commits back.
+Everything else open is waiting on time (**#163** — a stretch of clean use in the 217k–245k band, watching
+not working) or ungroomed (**#174** Antigravity, **#69** copilot-wisp; both want a grill or `/preset init`
+before they are tickets).
 
-If the answer is "not yet": nothing else is urgent. **#163** is waiting on time (a stretch of clean use in
-the 217k–245k band — watching, not working), **#174** and **#69** are ungroomed.
-
-## Released state
+## Released state — nothing owed
 
 | Face | Version | Missing |
 |---|---|---|
-| npm `wisp-router` | **2.0.39** | **#182** |
-| `wisp` vsix | **1.10.0** | **#182** — bundles its own `@wisp/core` |
+| npm `wisp-router` | **2.0.40** | nothing |
+| `wisp` vsix | **1.10.1** | nothing — but **packaged, not installed** |
 | `wisp-slot` plugin | **1.6.0** | nothing — untouched by #182 |
 
 ## Waiting on the user — down to one
@@ -57,8 +54,12 @@ and `/plugin update wisp-slot` (cache at 1.6.0). **#171 is confirmed live end-to
   any "return a result type instead" refactor, which would touch all 35.
 - **A fix release is not verified until the OLD version FAILS the same check.** Most natural checks pass on
   the broken build too — on #183 a plain *read* check was green on 2.0.38 and 2.0.39 alike, because the read
-  returned `{}` with exit 0. Install the previous published tarball as a control.
+  returned `{}` with exit 0. Install the previous published tarball as a control. Used twice now (#183, #184)
+  and it earned its keep both times.
   [[verifying-a-fix-release-needs-the-previous-version-as-a-control]].
+- **A vsix is evidence only when checked in the BUNDLE.** The extension bundles its own `@wisp/core`, so a
+  commit on main proves nothing about what an extension user runs. Unzip the `.vsix` and grep
+  `extension/dist/extension.js` for a string the fix introduced — that is what #184 did.
 - **npm can 404 a version its own publish job just succeeded on.** Propagation lag, not a broken release —
   check the job log for `+ wisp-router@<v>` and `npm view … dist-tags`, then retry. Hit this on #183.
 - **RUN `bun run compile` IN BOTH PACKAGES.** The root script only covers `packages/vscode`; `packages/tui`

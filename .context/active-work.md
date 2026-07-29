@@ -12,23 +12,22 @@ _At commit: `819900b` on main, pushed, tag `v2.0.39`. **Agent queue empty.**_
 
 ## Current focus
 
-**#182 is fixed on main and unreleased — that is the only open thread.** This session cut
-**npm `wisp-router` 2.0.39** (#183, closing the last of the harvest's release debt), then fixed **#182**
-(`9fd63f0`): the read-merge-write mechanism behind #181 no longer erases a store it could not parse.
+**Nothing open. The store data-loss arc is closed end to end.** This session cut **npm 2.0.39** (#183,
+clearing the harvest's last debt), fixed **#182** (`9fd63f0`, ADR-0004) — the read-merge-write mechanism
+behind #181 no longer erases a store it could not parse — then shipped it to both faces as **npm 2.0.40 +
+vsix 1.10.1** (#184).
 
 **What is released right now:**
 
 | Face | Version | Carries | Owed |
 |---|---|---|---|
-| npm `wisp-router` | **2.0.39** | the harvest **and** #181 | **#182** (`9fd63f0`, unreleased) |
-| `wisp` vsix | **1.10.0** | everything through #181 | **#182** — the vsix bundles its own `@wisp/core` |
+| npm `wisp-router` | **2.0.40** | the harvest, #181 **and** #182 | nothing |
+| `wisp` vsix | **1.10.1** | same — **packaged, NOT yet installed** | nothing |
 | `wisp-slot` plugin | **1.6.0** | #171's statusline reader | nothing — untouched by #182 |
 
-**#182 is fixed on main but shipped nowhere.** It touches `@wisp/core`, so the fix reaches users only
-through an npm cut *and* a vsix build — per
-[[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]], that owed pair should be **filed as a
-ticket, not left in prose**. Not yet filed: cutting two outward-facing releases was not authorized by "do
-#182", so it is the user's call.
+**No release debt.** The one loose end is an install, not a build: `packages/vscode/wisp-1.10.1.vsix` exists
+on disk but this face is not published to the marketplace, so the user must install it by hand before the
+extension carries #182.
 
 ## State
 
@@ -55,10 +54,18 @@ ticket, not left in prose**. Not yet filed: cutting two outward-facing releases 
     2026-07-29). All three OAuth kinds have now driven a turn through the unified `ProviderExecutor` records.
   - **#172 ✅** — `/test` in a throwaway `WISP_HOME` printed `/test: Codex (gpt-5.6-sol)` and streamed.
   - **#163 → diagnosis confirmed, ticket open.** The 502s were a usage-reporting bug, not a window bug.
-- **User action pending — down to one:**
+- **#182 ✅ `9fd63f0` (ADR-0004), shipped as #184** — `merge` refuses to write over a store that did not
+  parse. **Verified on the published artifacts with a control:** a truncated `config.json` plus an unrelated
+  `wisp routing set` is **overwritten on 2.0.39** (exit 0) and **left byte-identical on 2.0.40** (exit 1).
+  Re-ran #183's BOM harness on 2.0.40 to prove the other direction did not regress — a BOM'd store is
+  *usable*, so it must still write, and it does. The vsix was checked in the **bundle**, not the commit:
+  `dist/extension.js` inside `wisp-1.10.1.vsix` carries the refusal string and #181's BOM strip.
+- **User action pending:**
+  - **Install `packages/vscode/wisp-1.10.1.vsix`** — packaged this session, not published to the
+    marketplace, so the extension does not carry #182 until it is installed by hand.
   - **#170's two criteria** — needs a **Kimi Code subscription**; the sign-in doubles as the
     unverified-constants check (auth host, client id, endpoints were never verified offline and fail loud at
-    sign-in with the server's own words). Nothing else is waiting on the user.
+    sign-in with the server's own words).
   - _Done 2026-07-29:_ `/plugin update wisp-slot` (cache now 1.6.0, byte-identical to the repo copy) and the
     Grok turn. The VS Code reload / Kimi picker check is folded into #170 above — it cannot be finished
     without the subscription anyway.
@@ -73,21 +80,21 @@ Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #16
 
 | # | Ticket | Note |
 |---|---|---|
-| — | **Release #182 to npm + vsix** | **Not filed yet, and the real next move.** `9fd63f0` is a data-loss fix sitting unreleased — exactly the position #181 was in before #183. Needs the user's go: two outward-facing publishes. |
 | **163** | The 502 observation | Diagnosis confirmed. Open pending a stretch of clean use in the 217k–245k band. Closing it is *waiting*, not working. |
 | **174** | Antigravity Provider | Placeholder, ungroomed. Needs `/preset init` or a grill before it is a ticket. |
 | **69** | copilot-wisp launcher | Ungroomed. |
 
-**Closed this session:** #183 (`819900b`/`v2.0.39`) and #182 (`9fd63f0`, ADR-0004).
+**Closed this session:** #183 (`819900b`/`v2.0.39`), #182 (`9fd63f0`, ADR-0004), #184 (`d36688c`/`v2.0.40`
++ `b672333`).
 
 ## Pick up here
 
-**Decide whether to release #182**, and if yes, file the owed pair as a ticket first (the rule from #173).
-It is a data-loss fix in `@wisp/core`, so it needs **both** an npm cut (`2.0.40`) and a vsix build — the
-extension bundles its own core copy. Mechanics are established and fresh: #183 is the template, three commits
-back.
+**Nothing is queued and nothing is owed.** Ask the user what they want; do not invent urgency.
 
-If the answer is "not yet", nothing else is urgent — #163 is waiting on time, #174 and #69 are ungroomed.
+The only outstanding action is theirs: **install `packages/vscode/wisp-1.10.1.vsix`** so the extension
+actually carries #182 (this face is not on the marketplace). Everything else open is either waiting on time
+(**#163**) or ungroomed (**#174**, **#69**) — both of the latter want a grill or `/preset init` before they
+are tickets.
 
 Do **not** restart the relay chain expecting work — with no `ready-for-agent` ticket it will pick nothing,
 write `queue empty`, and stop.
