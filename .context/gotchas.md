@@ -66,6 +66,7 @@ Non-obvious traps. One file per trap in `gotchas/`. A flat list.
 - [[npm-spam-filter-a-green-publish-can-vanish-minutes-later]] — npm spam filter: a green publish can vanish minutes later
 - [[github-runners-macos-13-is-a-zombie-label-opentui-selects-is]] — GitHub runners: macos-13 is a zombie label; opentui select's ▶ is ambiguous-width
 - [[both-oauth-providers-ship-quota-headers-codex-rejects-gpt-5-3-codex]] — Both OAuth Providers ship quota headers (units differ) — and the Codex OAuth path rejects `gpt-5.3-codex` (#171)
+- [[widening-a-client-stream-event-union-breaks-else-narrowing-vitest]] — Widening a client stream-event union breaks `else` narrowing at 6 sites — `tsc` catches it, Vitest does not (#165)
 
 ## Related
 
