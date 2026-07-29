@@ -8,7 +8,7 @@ import {
   classifyCodexError, classifyCodexErrorMessage,
   decodeJwtPayload, parseChatgptAccountId, shouldRefreshCodexToken,
   parseCodexAuthJson, codexReasoning, standardEffortToCodex, codexModelCaps, CODEX_MODELS, codexModelsFrom,
-  toCodexResponsesTools, reduceResponsesToolCalls,
+  toCodexResponsesTools, reduceResponsesToolCalls, PROVIDERS,
   type Provider, type EditMessage, type CodexResponsesEvent,
 } from '../src/catalog';
 import { codexStream } from '../src/codexClient';
@@ -409,6 +409,21 @@ describe('CODEX_MODELS', () => {
   it('is a non-empty curated list including a current Codex coding model', () => {
     expect(CODEX_MODELS.length).toBeGreaterThan(0);
     expect(CODEX_MODELS).toContain('gpt-5.3-codex');
+  });
+
+  // #172. The "defaultModel must stay a member" rule was a comment in codex.ts that nothing checked, and
+  // the row's default was separately an id the ChatGPT-account path REFUSES — a fresh sign-in that never
+  // picked a model sent a request the backend 400s. Both halves are asserted against the REAL row here.
+  // The accepted set is a whitelist of ids verified by live probe (2026-07-29), not a guess: the account
+  // path is pickier than the model list, so a new default has to be probed before it lands here.
+  // Note this restriction is account-path-only — 'gpt-5.3-codex' stays a valid id for API-key callers,
+  // stays in CODEX_MODELS above, and stays in the codexModelCaps tiering.
+  const ACCOUNT_PATH_ACCEPTS = ['gpt-5.6-sol', 'gpt-5.4'];
+
+  it("contains the codex row's default, and that default is one the ChatGPT-account path accepts", () => {
+    const codexRow = PROVIDERS.find((p) => p.id === 'codex')!;
+    expect(CODEX_MODELS).toContain(codexRow.defaultModel);
+    expect(ACCOUNT_PATH_ACCEPTS).toContain(codexRow.defaultModel);
   });
 });
 
