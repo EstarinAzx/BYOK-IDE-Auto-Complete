@@ -6,6 +6,41 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.40] — 2026-07-29
+
+The other half of 2.0.39. That release stopped a **BOM** from destroying a store; this one stops
+**anything we cannot read** from destroying it. Same mechanism, rarer trigger, same outcome.
+
+### Fixed
+
+- **A store file Wisp cannot parse is no longer overwritten.** `~/.wisp/config.json` and `auth.json` are
+  read-merge-write: the file is read, your change is merged into it, and the whole thing is written back.
+  When the read failed, it produced an *empty* result rather than an error — so the write put "empty plus
+  your one change" back over the file, and everything else in it was gone. Not ignored: **erased**. 2.0.39
+  fixed the commonest cause of that failed read (a byte-order mark); the mechanism behind it stayed live for
+  any other cause — a write interrupted by a crash, a truncated file, a typo from hand-editing.
+
+  The write now refuses. A store holding content that cannot be parsed is never overwritten; you get a loud
+  error naming the file instead, and the file is left exactly as it was, so whatever is in it can still be
+  recovered. Reading stays permissive, so `wisp` still starts and routes on defaults with a broken config —
+  you simply cannot *save* over it until it is repaired or moved aside. A missing or empty store is not this
+  case and still writes normally, so first run is unaffected. (#182, ADR-0004)
+
+  Note the shape of the failure this replaces: previously a corrupt `auth.json` plus one sign-in silently
+  destroyed every other API key and OAuth token you had stored. Now the sign-in fails and the tokens stay on
+  disk.
+
+### Surfaces
+
+Which build carries which change — npm is one of three faces, and this release cuts only npm.
+
+- **npm `wisp-router` 2.0.40** (this release) — the fix above, in `@wisp/core`'s home-store layer, so it
+  reaches the TUI, `wisp serve` and the `claude-wisp` Bridge launcher together.
+- **The `wisp` VS Code extension (vsix) — a matching bump is owed and is cut alongside this one as 1.10.1.**
+  The extension bundles its own copy of `@wisp/core`, so no npm version can deliver this to a picker or
+  native-chat user. Tracked with this release under #184.
+- **The `wisp-slot` Claude Code plugin** — untouched by #182 and nothing is owed. It stays at **1.6.0**.
+
 ## [2.0.39] — 2026-07-29
 
 One fix, cut on its own because of what it costs to wait: #181 destroys data, and it landed
