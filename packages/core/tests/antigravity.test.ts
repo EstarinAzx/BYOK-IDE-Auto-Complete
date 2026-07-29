@@ -698,11 +698,38 @@ describe('antigravityStreamEvents', () => {
     expect(events).toEqual([{ type: 'text', text: 'bare' }]);
   });
 
-  it('drops thought parts — they are not answer text', async () => {
+  /*
+   * #191: a thought part is NOT answer text — but it is not nothing either. It rides the thinking channel,
+   * which the Anthropic door renders and the OpenAI door drops (that door reads only text/tool_call). #189
+   * dropped it here because no door consumed it yet; the door's arm is what makes it observable.
+   */
+  it('sends thought parts down the thinking channel, never the answer channel', async () => {
     const events = await collect(antigravityStreamEvents(feed([
       { response: { candidates: [{ content: { parts: [{ text: 'thinking aloud', thought: true }, { text: 'answer' }] } }] } },
     ])));
+    expect(events).toEqual([{ type: 'thinking', text: 'thinking aloud' }, { type: 'text', text: 'answer' }]);
+  });
+
+  // An empty thought part carries nothing to render — emitting it would open a thinking block for no text.
+  it('ignores an empty thought part', async () => {
+    const events = await collect(antigravityStreamEvents(feed([
+      { response: { candidates: [{ content: { parts: [{ text: '', thought: true }, { text: 'answer' }] } }] } },
+    ])));
     expect(events).toEqual([{ type: 'text', text: 'answer' }]);
+  });
+
+  /*
+   * The signature is deliberately NOT forwarded. `thoughtSignature` is this wire's REPLAY token, and an
+   * Anthropic `thinking.signature` means a different thing on a different wire; the only consumer would be a
+   * replay path that does not exist (AntigravityTurn has no rawContent channel, so a replayed block is
+   * dropped before it reaches the payload builder). An empty signature is what the Anthropic OAuth wire
+   * already sends through this same encoder, so the door is on proven ground.
+   */
+  it('does not forward a thought signature as an Anthropic thinking signature', async () => {
+    const events = await collect(antigravityStreamEvents(feed([
+      { response: { candidates: [{ content: { parts: [{ text: 'reasoning', thought: true, thoughtSignature: 'CtIBAbc123==' }] } }] } },
+    ])));
+    expect(events).toEqual([{ type: 'thinking', text: 'reasoning' }]);
   });
 
   it('retains usage metadata ONLY on the terminal chunk', async () => {

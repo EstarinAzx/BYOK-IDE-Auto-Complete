@@ -305,6 +305,35 @@ describe('buildAntigravityPayload', () => {
     expect(out.request.contents[0].parts[1]).toEqual({ inlineData: { mimeType: 'image/png', data: 'AAA' } });
   });
 
+  /*
+   * #191: the Anthropic door normalizes `document` blocks into their own channel, and this wire has no
+   * separate one — a PDF is an inlineData part exactly like an image, distinguished only by mimeType. Left
+   * unwired, a Claude Code attach would reach the door and vanish before the payload, which is the same
+   * silent-vision hole the door's Anthropic arm once had.
+   */
+  it('carries documents as inlineData parts, after the images', () => {
+    const out = buildAntigravityPayload({ messages: [
+      { role: 'user', content: 'read this',
+        images: [{ mimeType: 'image/png', dataBase64: 'AAA' }],
+        documents: [{ mimeType: 'application/pdf', dataBase64: 'JVBER' }] },
+    ] });
+    expect(out.request.contents[0].parts).toEqual([
+      { text: 'read this' },
+      { inlineData: { mimeType: 'image/png', data: 'AAA' } },
+      { inlineData: { mimeType: 'application/pdf', data: 'JVBER' } },
+    ]);
+  });
+
+  // A document with no text still has something to send — the attach must not be dropped with the turn.
+  it('sends a document-only turn', () => {
+    const out = buildAntigravityPayload({ messages: [
+      { role: 'user', content: '', documents: [{ mimeType: 'application/pdf', dataBase64: 'JVBER' }] },
+    ] });
+    expect(out.request.contents).toEqual([
+      { role: 'user', parts: [{ inlineData: { mimeType: 'application/pdf', data: 'JVBER' } }] },
+    ]);
+  });
+
   it('drops an empty turn rather than sending a part-less content', () => {
     expect(buildAntigravityPayload({ messages: [{ role: 'user', content: '' }] }).request.contents).toEqual([]);
   });

@@ -6,7 +6,7 @@ import * as http from 'http';
 import type { AddressInfo } from 'net';
 import { createBridgeServer, type BridgeDeps } from '../src/bridgeServer';
 import { MAX_PROVIDER_ATTEMPTS, TRANSIENT_FAILURES_BEFORE_COOLDOWN, TRANSIENT_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS } from '../src/routing';
-import { ANTIGRAVITY_QUOTA_EXHAUSTED_CODE } from '../src/catalog';
+import { ANTIGRAVITY_QUOTA_EXHAUSTED_CODE, antigravityImageRefusal } from '../src/catalog';
 import type { Provider } from '../src/catalog';
 
 // The Grok catalog row — id 'xai', the subscription-proxy base (grok-build routes there).
@@ -62,6 +62,17 @@ const post = (port: number, path: string, payload: unknown): Promise<{ status: n
     );
     req.on('error', reject);
     req.write(data);
+    req.end();
+  });
+
+// GET over node http, with extra headers so the Anthropic door's header selector can be exercised.
+const get = (port: number, path: string, headers: Record<string, string> = {}): Promise<{ status: number; body: string }> =>
+  new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: '127.0.0.1', port, path, method: 'GET', headers: { Authorization: 'Bearer secret', ...headers } },
+      (res) => { let body = ''; res.setEncoding('utf8'); res.on('data', (c) => (body += c)); res.on('end', () => resolve({ status: res.statusCode ?? 0, body })); },
+    );
+    req.on('error', reject);
     req.end();
   });
 
@@ -483,14 +494,9 @@ describe('Bridge — Antigravity rate limits (#190)', () => {
   });
 
   /*
-   * NOT COVERED ON THE ANTHROPIC DOOR, AND NOT A #190 GAP. That door does not shape requests through the
-   * executor records at all — startProviderStream carries its own per-kind chain (codex → anthropic → xai →
-   * keyed) and has no Antigravity arm, so `/v1/messages` on this Provider falls through to the keyed tail and
-   * answers `400 has no API key configured` before any 429 can happen. That arm is #191's whole subject.
-   *
-   * The classification itself is already door-neutral: BOTH doors answer through the one shared
-   * failProviderRequest, which reads executorFor(provider).classify. So #191 gets the 429 for free the moment
-   * it wires the arm — there is nothing for it to re-do here, only an arm to add.
+   * The Anthropic door's own 429 lives in the #191 block below, where the arm that reaches it was added.
+   * Nothing about the classification is per-door: BOTH doors answer through the one shared
+   * failProviderRequest, which reads executorFor(provider).classify — so wiring #191's arm was all it took.
    */
 
   // At or above the instant-retry threshold the rate limit is the client's business, not a gateway fault.
@@ -541,5 +547,285 @@ describe('Bridge — Antigravity rate limits (#190)', () => {
     await runServer(antigravityDeps({ log: (m) => lines.push(m) }), async (port) => { await chat(port); });
     const cooled = lines.find((l) => l.includes('#190') && l.includes('cooling down'));
     expect(cooled).toContain(`${Math.round(DEFAULT_COOLDOWN_SECONDS / 60)}m`);
+  });
+});
+
+// ---------------- #191: the Anthropic door's Antigravity arm — Claude Code driven by Gemini ---------------- //
+
+/*
+ * The Anthropic door does NOT shape requests through the executor records: startProviderStream carries its
+ * own hand-rolled per-kind chain, because the door owns wire behaviour the records cannot express (the #139
+ * system split, the #156 diagnosis chain, vision/documents, non-strict tools). Before this ticket that chain
+ * ran codex → anthropic → xai → keyed, so an Antigravity Target fell through to the keyed tail and answered
+ * `400 has no API key configured` — a missing arm wearing a config mistake's error message.
+ *
+ * Every test here drives the REAL listener over `/v1/messages`, because the gap was unit-invisible by
+ * construction: every OpenAI-door test passes with the arm absent.
+ */
+describe('Bridge — Antigravity on the Anthropic door (#191)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const ANTIGRAVITY: Provider = {
+    id: 'antigravity', label: 'Antigravity', baseUrl: 'https://daily-cloudcode-pa.googleapis.com',
+    defaultModel: 'gemini-3.1-pro-low', apiKeyEnv: '', kind: 'antigravity-oauth',
+  };
+
+  // projectId is a PLACEHOLDER — a real Cloud Code project id is account-identifying (see .context/decisions).
+  const deps = (over: Partial<BridgeDeps> = {}): BridgeDeps => makeDeps({
+    providers: [ANTIGRAVITY],
+    xaiSignedIn: async () => false,
+    xaiCreds: async () => undefined,
+    antigravitySignedIn: async () => true,
+    antigravityCreds: async () => ({ accessToken: 'tok', projectId: 'example-project-1' }),
+    activeProviderId: () => 'antigravity',
+    ...over,
+  });
+
+  /*
+   * The separator the upstream really sends. NOT '\n\n' — #189 shipped a green suite over a fixture that had
+   * been retyped rather than copied, normalising CRLF to LF, and the first live turn answered EMPTY at 200
+   * because every frame was dropped. Keep these frames CRLF.
+   */
+  const FRAME = '\r\n\r\n';
+  const sse = (...frames: string[]) =>
+    new Response(frames.join(FRAME) + FRAME, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+
+  const textFrames = [
+    'data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"thought":true,"text":"weighing it up"},{"text":"Hello from Gemini"}]}}]}}',
+    'data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":""}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":3,"thoughtsTokenCount":7}}}',
+  ];
+
+  // The captured tool-call wire (#189's real capture): the upstream's own functionCall.id, never minted.
+  const toolFrames = [
+    'data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"thoughtSignature":"EpUFCpIF","functionCall":{"name":"get_weather","args":{"city":"Paris"},"id":"noxjacvf"}}]}}]}}',
+    'data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":""}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":48,"candidatesTokenCount":16,"thoughtsTokenCount":138}}}',
+  ];
+
+  const messages = (port: number, over: Record<string, unknown> = {}) =>
+    post(port, '/v1/messages', { model: 'antigravity', max_tokens: 100, stream: true, messages: [{ role: 'user', content: 'hi' }], ...over });
+
+  // ----------------------------- A turn completes ----------------------------- //
+
+  it('streams a Gemini turn through the Anthropic door', async () => {
+    vi.stubGlobal('fetch', async () => sse(...textFrames));
+    await runServer(deps(), async (port) => {
+      const { status, body } = await messages(port);
+      expect(status).toBe(200);
+      expect(body).toContain('Hello from Gemini');
+      expect(body).toContain('"type":"text_delta"');
+    });
+  });
+
+  /*
+   * Thinking surfaces where the door supports it — as a thinking block, NOT folded into the answer. The
+   * check that matters is the second one: reasoning text reaching the client as answer text would read as
+   * the model rambling its scratchpad into the reply.
+   */
+  it('surfaces thinking as a thinking block, never as answer text', async () => {
+    vi.stubGlobal('fetch', async () => sse(...textFrames));
+    await runServer(deps(), async (port) => {
+      const { body } = await messages(port);
+      expect(body).toContain('"type":"thinking_delta"');
+      expect(body).toContain('weighing it up');
+      // the reasoning is in a thinking_delta; no text_delta ever carries it
+      const textDeltas = body.split('\n').filter((l) => l.includes('"type":"text_delta"'));
+      expect(textDeltas.join('')).not.toContain('weighing it up');
+    });
+  });
+
+  // Tool calling end to end: a tool_use block carrying the UPSTREAM's own id (never a minted one).
+  it('round-trips a tool call through this door, keeping the upstream id', async () => {
+    vi.stubGlobal('fetch', async () => sse(...toolFrames));
+    await runServer(deps(), async (port) => {
+      const { status, body } = await messages(port, {
+        tools: [{ name: 'get_weather', description: 'weather', input_schema: { type: 'object', properties: { city: { type: 'string' } } } }],
+      });
+      expect(status).toBe(200);
+      expect(body).toContain('"type":"tool_use"');
+      expect(body).toContain('"id":"noxjacvf"');
+      expect(body).toContain('get_weather');
+      expect(body).toContain('"stop_reason":"tool_use"');
+    });
+  });
+
+  // The tools the door forwards reach the wire as functionDeclarations — Claude Code's schemas, cleaned.
+  it('forwards the door\'s tools to the wire as function declarations', async () => {
+    let sent: any;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => { sent = JSON.parse(String(init.body)); return sse(...toolFrames); });
+    await runServer(deps(), async (port) => {
+      await messages(port, { tools: [{ name: 'get_weather', description: 'weather', input_schema: { type: 'object', properties: { city: { type: 'string' } } } }] });
+    });
+    expect(sent.request.tools[0].functionDeclarations[0].name).toBe('get_weather');
+  });
+
+  // ----------------------------- What the door carries that the record does not ----------------------------- //
+
+  /*
+   * The door normalizes images AND documents into their own channels; this wire has one attachment shape, so
+   * both land as inlineData parts. #186 answered the open question with a live yes to each, and leaving
+   * documents unwired would repeat the door's old silent-vision hole with PDFs.
+   */
+  it('carries both an image and a document to the wire as inlineData parts', async () => {
+    let sent: any;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => { sent = JSON.parse(String(init.body)); return sse(...textFrames); });
+    await runServer(deps(), async (port) => {
+      await messages(port, { messages: [{ role: 'user', content: [
+        { type: 'text', text: 'what are these' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAA' } },
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBER' } },
+      ] }] });
+    });
+    const parts = sent.request.contents[0].parts;
+    expect(parts).toContainEqual({ inlineData: { mimeType: 'image/png', data: 'AAA' } });
+    expect(parts).toContainEqual({ inlineData: { mimeType: 'application/pdf', data: 'JVBER' } });
+  });
+
+  /*
+   * The FULL system rides, not systemSplit.stable. The Anthropic arm one branch up prefers `stable` because
+   * the split places a CACHE BREAKPOINT — and this wire has no breakpoint to place, so taking `stable` alone
+   * would silently drop the volatile tail (the mid-session <system-reminder> append) from every request.
+   */
+  it('sends the whole system prompt, including the volatile tail past the cache marker', async () => {
+    let sent: any;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => { sent = JSON.parse(String(init.body)); return sse(...textFrames); });
+    await runServer(deps(), async (port) => {
+      await messages(port, { system: [
+        { type: 'text', text: 'STABLE RULES', cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: 'VOLATILE REMINDER' },
+      ] });
+    });
+    const system = JSON.stringify(sent.request.systemInstruction);
+    expect(system).toContain('STABLE RULES');
+    expect(system).toContain('VOLATILE REMINDER');
+  });
+
+  // ----------------------------- Refusals, before anything opens ----------------------------- //
+
+  it('answers a signed-out Antigravity Target with 401 before any SSE head', async () => {
+    await runServer(deps({ antigravityCreds: async () => undefined }), async (port) => {
+      const { status, body } = await messages(port);
+      expect(status).toBe(401);
+      expect(body).not.toContain('data:'); // an error, not a silent event-stream
+    });
+  });
+
+  // The same refusal string as the OpenAI door's record — one reason, both doors, or the model's absence
+  // becomes a mystery on whichever door words it differently.
+  it('refuses the image model here too, with the same reason', async () => {
+    await runServer(deps({ modelMap: () => ({ antigravity: 'gemini-3.1-flash-image' }) }), async (port) => {
+      const { status, body } = await messages(port);
+      expect(status).toBe(400);
+      expect(JSON.parse(body).error.message).toBe(antigravityImageRefusal('gemini-3.1-flash-image'));
+    });
+  });
+
+  // ----------------------------- Routing: a family route and an Alias both answer ----------------------------- //
+
+  it('answers through a family route pointing at an Antigravity Target', async () => {
+    vi.stubGlobal('fetch', async () => sse(...textFrames));
+    await runServer(deps({
+      routingMap: () => ({ families: { sonnet: { providerId: 'antigravity', model: 'gemini-3.1-pro-low' } }, aliases: [] }),
+    }), async (port) => {
+      const { status, body } = await post(port, '/v1/messages', { model: 'claude-sonnet-4-5', max_tokens: 100, stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(200);
+      expect(body).toContain('Hello from Gemini');
+    });
+  });
+
+  it('answers through an Alias pointing at an Antigravity Target, with the Alias\'s pinned model', async () => {
+    let sent: any;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => { sent = JSON.parse(String(init.body)); return sse(...textFrames); });
+    await runServer(deps({
+      routingMap: () => ({ families: {}, aliases: [{ name: 'gem', target: { providerId: 'antigravity', model: 'gemini-3-flash' } }] }),
+    }), async (port) => {
+      const { status, body } = await post(port, '/v1/messages', { model: 'claude-wisp-gem', max_tokens: 100, stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(200);
+      expect(body).toContain('Hello from Gemini');
+    });
+    expect(sent.model).toBe('gemini-3-flash'); // the Alias's pin beat the Provider's panel model
+  });
+
+  // The door's own discovery list: Claude Code's /model picker reads THIS, and it aliases ids claude-wisp-<id>.
+  it('lists a signed-in Antigravity in the door\'s own flavour', async () => {
+    await runServer(deps(), async (port) => {
+      const { status, body } = await get(port, '/v1/models', { 'anthropic-version': '2023-06-01' });
+      expect(status).toBe(200);
+      expect(JSON.parse(body).data.map((m: { id: string }) => m.id)).toContain('claude-wisp-antigravity');
+    });
+  });
+
+  // ----------------------------- Failure: the 429, the retry boundary, the error frame ----------------------------- //
+
+  const quota429 = () => new Response(JSON.stringify({
+    error: {
+      code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Resource has been exhausted',
+      details: [
+        { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'QUOTA_EXHAUSTED' },
+        { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '1h' },
+      ],
+    },
+  }), { status: 429 });
+
+  /*
+   * #190's classification is door-neutral — both doors answer through the one shared failProviderRequest,
+   * which reads executorFor(provider).classify. This is the pin that the arm inherits it rather than
+   * re-implementing it: the arm contains no 429 handling at all.
+   */
+  it('answers a spent quota window with 429 on this door too, for free', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => { calls += 1; return quota429(); });
+    await runServer(deps(), async (port) => {
+      const { status, body } = await messages(port);
+      expect(status).toBe(429);
+      expect(JSON.parse(body).error.type).toBe('rate_limit_error');
+    });
+    expect(calls).toBe(2); // ONE attempt — a 429 walks both hosts before it surfaces; no retries spent
+  });
+
+  /*
+   * The door's retry boundary, matched not widened: the eager BASE pass retries a transient failure, because
+   * nothing has been delivered yet, and MAX_PROVIDER_ATTEMPTS bounds it.
+   *
+   * One call per attempt, not two: only a 429 and the CAPACITY 503 (recognized by its body) walk to the
+   * second host — a generic 503 surfaces on the first, so the host chain does not multiply this budget.
+   */
+  it('retries a transient failure on the base pass, within the door\'s existing budget', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => { calls += 1; return new Response('upstream is down', { status: 503 }); });
+    await runServer(deps(), async (port) => {
+      expect((await messages(port)).status).toBe(502);
+    });
+    expect(calls).toBe(MAX_PROVIDER_ATTEMPTS);
+  });
+
+  /*
+   * The other side of that boundary, and the reason the arm must not open its own retry: once the first
+   * event is out the turn is committed. A failure after it is answered, never restarted — a retry here would
+   * replay delivered content. ONE upstream call, and the door's error frame rather than a truncated stream.
+   */
+  it('emits the door\'s error frame on a mid-stream failure, and never restarts the turn', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      calls += 1;
+      // The frame must be READ before the error: controller.error() discards whatever is still queued, so
+      // enqueueing and erroring in the same tick would deliver nothing and fail before the head instead.
+      let delivered = false;
+      const body = new ReadableStream<Uint8Array>({
+        pull(c) {
+          if (delivered) return c.error(new Error('socket hang up'));
+          delivered = true;
+          c.enqueue(new TextEncoder().encode(`data: {"response":{"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}}${FRAME}`));
+        },
+      });
+      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    });
+    await runServer(deps(), async (port) => {
+      const { status, body } = await messages(port);
+      expect(status).toBe(200);          // the head was already out — the failure cannot change it
+      expect(body).toContain('partial'); // delivered content is kept, never discarded
+      expect(body).toContain('event: error');
+      expect(body).toContain('socket hang up');
+    });
+    expect(calls).toBe(1); // the bounded retry stops at the first delivered event
   });
 });
