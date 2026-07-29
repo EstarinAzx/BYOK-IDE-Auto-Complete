@@ -37,7 +37,7 @@ import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
 import { xaiStream } from './xaiClient';
 import {
   parseOpenAiChatRequest, buildModelsList, textChunk, toolCallChunk, finalChunk, sseLine, SSE_DONE,
-  type ChunkMeta, type FinishReason, type BridgeChatRequest, type BridgeStreamEvent,
+  type ChunkMeta, type BridgeChatRequest, type BridgeStreamEvent,
 } from './bridge';
 import {
   parseAnthropicMessagesRequest, buildAnthropicModelsList, createAnthropicSseEncoder, buildAnthropicMessageResponse, anthropicErrorFrame,
@@ -191,18 +191,6 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // babysit the Routing map). One instance per Bridge host, like the diagnosis chain below.
   const cooldowns = createProviderCooldowns();
 
-  // #166: classify a failed Codex turn into the condition the backend actually reported, so the door answers
-  // with a status the client can act on — an exceeded window as a 400 (Claude Code compacts) instead of a 502
-  // (Claude Code retries a request that cannot succeed). The log line names the classified code so the four
-  // cases are tellable apart in operation. A non-Codex Provider, or a body matching none of the conditions →
-  // undefined, and the caller keeps its 502: an unknown failure must stay a gateway error.
-  const classifyProviderError = (provider: Provider, err: unknown): CodexErrorClass | undefined => {
-    if (!isCodexProvider(provider)) return undefined;
-    const classified = classifyCodexErrorMessage(String(err));
-    if (classified) deps.log(`[bridge] ${provider.id} failure classified code=${classified.code} -> HTTP ${classified.status} (#166)`);
-    return classified;
-  };
-
   // Record a provider error against the cooldown store; a recognized usage-limit 429 logs the horizon once.
   const noteProviderError = (providerId: string, err: unknown): void => {
     const seconds = cooldowns.noteUsageLimit(providerId, String(err));
@@ -246,286 +234,12 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       deps.aliasOnlyModels(),
     ));
 
-  // POST /v1/chat/completions for the `codex` Provider — the Responses stream behind the ChatGPT sign-in,
-  // rendered back through the SAME bridge.ts SSE emitters the keyed path uses (so the wire shape is identical).
-  // No API key: creds come from the OAuth seam (codexAuth via deps), so a signed-out state is a clean 401, not
-  // a crash. Mirrors chatProvider.ts's Codex branch — only the in/out edges differ (HTTP body, not vscode parts).
-  const handleCodexChat = async (parsed: BridgeChatRequest, provider: Provider, pinnedModel: string | undefined, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
-    const creds = await deps.codexCreds();
-    if (!creds) return sendError(res, 401, `provider '${provider.id}' is not signed in`);
+  // ----------------------------- Provider streams (shared by both doors) ----------------------------- //
 
-    // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
-    const modelId = pinnedModel ?? resolveModel(deps.modelMap(), provider);
-    const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
-    // bridge.ts lifts system OUT of the turns; Codex consumes it as `instructions`, so re-attach it as the
-    // leading system message buildCodexResponsesBody folds into instructions (its only role:'system' source).
-    const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
-    const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-    const tools = toCodexResponsesTools(parsed.tools);
-
-    const controller = new AbortController();
-    req.on('close', () => controller.abort());
-
-    const meta: ChunkMeta = { id: `chatcmpl-${crypto.randomBytes(12).toString('hex')}`, model: parsed.model, created: Math.floor(Date.now() / 1000) };
-    // codexStream yields text fragments live and the assembled tool calls at stream end (whole), so unlike the
-    // chat-completions path there are no fragments to reduce — collect the calls and emit each as one chunk.
-    const calls: AssembledToolCall[] = [];
-    try {
-      // #166: primed, so an upstream rejection throws BEFORE the 200 head below and the catch still has a
-      // status to answer with.
-      const upstream = await primeStream(codexStream({ creds, baseUrl, model: modelId, messages, effort: standardEffortToCodex(deps.effort()), tools, toolChoice: 'auto', signal: controller.signal }));
-      if (parsed.stream) {
-        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-        for await (const ev of upstream) {
-          if (ev.type === 'text') { if (ev.value) res.write(sseLine(textChunk(ev.value, meta))); }
-          else if (ev.type === 'toolCall') calls.push(ev.call);
-          // #165: usage events carry no wire content and this door has no meter channel — skip, never
-          // treat "not text" as "must be a tool call".
-        }
-        calls.forEach((call, i) => res.write(sseLine(toolCallChunk(call, i, meta))));
-        res.write(sseLine(finalChunk(calls.length ? 'tool_calls' : 'stop', meta)));
-        res.write(SSE_DONE);
-        res.end();
-      } else {
-        // Non-streaming client: drain the same stream into one chat.completion object.
-        let text = '';
-        for await (const ev of upstream) {
-          if (ev.type === 'text') text += ev.value;
-          else if (ev.type === 'toolCall') calls.push(ev.call);
-          // #165: usage events carry no wire content and this door has no meter channel — skip, never
-          // treat "not text" as "must be a tool call".
-        }
-        sendJson(res, 200, buildCompletion(meta, text, calls));
-      }
-    } catch (err) {
-      if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
-      deps.log(`[bridge] error ${provider.id} ${String(err)}`);
-      noteProviderError(provider.id, err);
-      // A signed-out / refresh-failed Codex throws here — a clean 502 (or end if the SSE head is already out).
-      // #166: a classified failure answers with its own status instead, so the client is told what to do.
-      const classified = classifyProviderError(provider, err);
-      if (res.headersSent) res.end();
-      else if (classified) sendError(res, classified.status, classified.message, classified.type);
-      else sendError(res, 502, `provider request failed: ${String(err)}`);
-    }
-  };
-
-  // POST /v1/chat/completions for the `anthropic` Provider — the Messages SSE stream behind the Claude.ai
-  // sign-in, rendered back through the SAME bridge.ts SSE emitters the keyed/Codex paths use (identical wire
-  // shape). No API key: creds come from the OAuth seam (anthropicAuth via deps), so a signed-out state is a
-  // clean 401, and refresh failure mid-stream a 502. Mirrors handleCodexChat — only the cores differ.
-  const handleAnthropicChat = async (parsed: BridgeChatRequest, provider: Provider, pinnedModel: string | undefined, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
-    const creds = await deps.anthropicCreds();
-    if (!creds) return sendError(res, 401, `provider '${provider.id}' is not signed in`);
-
-    // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
-    const modelId = pinnedModel ?? resolveModel(deps.modelMap(), provider);
-    const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
-    // bridge.ts lifts system OUT of the turns; buildAnthropicMessagesBody lifts a role:'system' message back
-    // to the top-level `system`, so re-attach it as the leading system message. Images are dropped (the chat
-    // path's toAnthropicMessages drops them too — Anthropic image support is a separate follow-up).
-    const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, toolCalls: t.toolCalls, toolResults: t.toolResults }));
-    const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-    const tools = toAnthropicTools(parsed.tools);
-
-    const controller = new AbortController();
-    req.on('close', () => controller.abort());
-
-    const meta: ChunkMeta = { id: `chatcmpl-${crypto.randomBytes(12).toString('hex')}`, model: parsed.model, created: Math.floor(Date.now() / 1000) };
-    // anthropicStream yields text fragments live and the assembled tool calls at stream end (whole) — same
-    // shape as codexStream, so the rendering is identical: collect the calls, emit each as one chunk.
-    const calls: AssembledToolCall[] = [];
-    try {
-      const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort: deps.effort(), tools, toolChoice: 'auto', signal: controller.signal });
-      if (parsed.stream) {
-        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-        for await (const ev of upstream) {
-          // Thinking passthrough events are Anthropic-door vocabulary — this OpenAI door drops them.
-          if (ev.type === 'text') { if (ev.value) res.write(sseLine(textChunk(ev.value, meta))); }
-          else if (ev.type === 'toolCall') calls.push(ev.call);
-        }
-        calls.forEach((call, i) => res.write(sseLine(toolCallChunk(call, i, meta))));
-        res.write(sseLine(finalChunk(calls.length ? 'tool_calls' : 'stop', meta)));
-        res.write(SSE_DONE);
-        res.end();
-      } else {
-        // Non-streaming client: drain the same stream into one chat.completion object.
-        let text = '';
-        for await (const ev of upstream) {
-          if (ev.type === 'text') text += ev.value;
-          else if (ev.type === 'toolCall') calls.push(ev.call);
-        }
-        sendJson(res, 200, buildCompletion(meta, text, calls));
-      }
-    } catch (err) {
-      if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
-      deps.log(`[bridge] error ${provider.id} ${String(err)}`);
-      noteProviderError(provider.id, err);
-      // A signed-out / refresh-failed Anthropic throws here — a clean 502 (or end if the SSE head is already out).
-      if (res.headersSent) res.end(); else sendError(res, 502, `provider request failed: ${String(err)}`);
-    }
-  };
-
-  // POST /v1/chat/completions for the `xai` (Grok) Provider — the Responses stream behind the xAI sign-in,
-  // rendered through the SAME bridge.ts SSE emitters. A Codex twin: no API key (creds from the OAuth seam), so
-  // a signed-out state is a clean 401, not an empty envelope. Mirrors handleCodexChat — only the client differs.
-  const handleXaiChat = async (parsed: BridgeChatRequest, provider: Provider, pinnedModel: string | undefined, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
-    const creds = await deps.xaiCreds?.();
-    if (!creds) return sendError(res, 401, `provider '${provider.id}' is not signed in`);
-
-    // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
-    const modelId = pinnedModel ?? resolveModel(deps.modelMap(), provider);
-    const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
-    // bridge.ts lifts system OUT of the turns; buildCodexResponsesBody folds a leading role:'system' back into
-    // `instructions`, so re-attach it. Images ride along (grok-4.5 is multimodal).
-    const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
-    const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-    // effort stays the shared EffortLevel — xaiReasoning folds max→xhigh + gates per model (NOT standardEffortToCodex).
-    const tools = toCodexResponsesTools(parsed.tools);
-
-    const controller = new AbortController();
-    req.on('close', () => controller.abort());
-
-    const meta: ChunkMeta = { id: `chatcmpl-${crypto.randomBytes(12).toString('hex')}`, model: parsed.model, created: Math.floor(Date.now() / 1000) };
-    const calls: AssembledToolCall[] = [];
-    try {
-      const upstream = xaiStream({ creds, baseUrl, model: modelId, messages, effort: deps.effort(), tools, toolChoice: 'auto', signal: controller.signal });
-      if (parsed.stream) {
-        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-        for await (const ev of upstream) {
-          if (ev.type === 'text') { if (ev.value) res.write(sseLine(textChunk(ev.value, meta))); }
-          else if (ev.type === 'toolCall') calls.push(ev.call);
-          // #165: usage events carry no wire content and this door has no meter channel — skip, never
-          // treat "not text" as "must be a tool call".
-        }
-        calls.forEach((call, i) => res.write(sseLine(toolCallChunk(call, i, meta))));
-        res.write(sseLine(finalChunk(calls.length ? 'tool_calls' : 'stop', meta)));
-        res.write(SSE_DONE);
-        res.end();
-      } else {
-        // Non-streaming client: drain the same stream into one chat.completion object.
-        let text = '';
-        for await (const ev of upstream) {
-          if (ev.type === 'text') text += ev.value;
-          else if (ev.type === 'toolCall') calls.push(ev.call);
-          // #165: usage events carry no wire content and this door has no meter channel — skip, never
-          // treat "not text" as "must be a tool call".
-        }
-        sendJson(res, 200, buildCompletion(meta, text, calls));
-      }
-    } catch (err) {
-      if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
-      deps.log(`[bridge] error ${provider.id} ${String(err)}`);
-      noteProviderError(provider.id, err);
-      // A signed-out / refresh-failed Grok throws here — a clean 502 (or end if the SSE head is already out).
-      if (res.headersSent) res.end(); else sendError(res, 502, `provider request failed: ${String(err)}`);
-    }
-  };
-
-  // POST /v1/chat/completions — parse → route to a keyed Provider → send via the OpenAI SDK → render the reply
-  // back through bridge.ts's SSE emitters (or one chat.completion object when stream:false).
-  const handleChat = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
-    let body: unknown;
-    try { body = JSON.parse(await readBody(req)); } catch { return sendError(res, 400, 'request body is not valid JSON'); }
-
-    const parsed = parseOpenAiChatRequest(body as Parameters<typeof parseOpenAiChatRequest>[0]);
-    // The translator DEGRADES on malformed input (never throws): a body that yields no turns is a deliberate
-    // 400 here, not a crash — don't lean on try/catch for this control flow.
-    if (!parsed.turns.length) return sendError(res, 400, 'no messages to send');
-
-    // The Routing map (#51) picks the answering Provider: a Provider id routes to it (curl can address any
-    // Provider explicitly), an Alias/Family hit routes to its Target, and anything else — notably the
-    // resolved model NAME Copilot CLI sends as COPILOT_MODEL (#b) — keeps the ACTIVE Provider fallback.
-    // The map + panel model are read live per request, so a mid-session edit applies without a relaunch.
-    const route = routeFor(parsed.model);
-    if (!route) return sendError(res, 404, `unknown provider '${parsed.model}'`);
-    const { provider, pinnedModel } = route;
-    // The OAuth Providers route through their own streams (no API key): Codex → Responses (#39),
-    // Anthropic → Messages (#40).
-    if (isCodexProvider(provider)) return handleCodexChat(parsed, provider, pinnedModel, req, res);
-    if (isAnthropicProvider(provider)) return handleAnthropicChat(parsed, provider, pinnedModel, req, res);
-    if (isXaiProvider(provider)) return handleXaiChat(parsed, provider, pinnedModel, req, res);
-    const client = await deps.clientFor(provider);
-    if (!client) return sendError(res, 400, `provider '${provider.id}' has no API key configured`);
-
-    // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
-    const modelId = pinnedModel ?? resolveModel(deps.modelMap(), provider);
-    // bridge.ts keeps system OUT of the turns; the OpenAI path re-prepends it as the leading system message.
-    const base = buildOpenAiChatMessages(parsed.turns);
-    const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...base] : base;
-    const tools = toOpenAiTools(parsed.tools);
-
-    // Bridge the client hanging up to an AbortController so the upstream call dies with the request.
-    const controller = new AbortController();
-    req.on('close', () => controller.abort());
-
-    try {
-      const upstream = await client.chat.completions.create({
-        model: modelId,
-        messages,
-        stream: true,
-        ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}),
-      }, { signal: controller.signal });
-
-      const meta: ChunkMeta = { id: `chatcmpl-${crypto.randomBytes(12).toString('hex')}`, model: parsed.model, created: Math.floor(Date.now() / 1000) };
-      // Tool calls stream as fragments across chunks; collect them and assemble once the stream ends (whole),
-      // exactly as the LM Chat Provider path does — bridge.ts then folds each into one tool_calls delta.
-      const toolDeltas: ToolCallDelta[] = [];
-
-      if (parsed.stream) {
-        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-        for await (const chunk of upstream) {
-          const choice = chunk.choices[0];
-          const delta = choice?.delta?.content ?? '';
-          if (delta) res.write(sseLine(textChunk(delta, meta)));
-          for (const tc of choice?.delta?.tool_calls ?? []) toolDeltas.push({ index: tc.index, id: tc.id, name: tc.function?.name, args: tc.function?.arguments });
-        }
-        assembleToolCalls(toolDeltas).forEach((call, i) => res.write(sseLine(toolCallChunk(call, i, meta))));
-        const finish: FinishReason = toolDeltas.length ? 'tool_calls' : 'stop';
-        res.write(sseLine(finalChunk(finish, meta)));
-        res.write(SSE_DONE);
-        res.end();
-      } else {
-        // Non-streaming client: drain the same upstream stream and answer with one chat.completion object.
-        let text = '';
-        for await (const chunk of upstream) {
-          const choice = chunk.choices[0];
-          text += choice?.delta?.content ?? '';
-          for (const tc of choice?.delta?.tool_calls ?? []) toolDeltas.push({ index: tc.index, id: tc.id, name: tc.function?.name, args: tc.function?.arguments });
-        }
-        sendJson(res, 200, buildCompletion(meta, text, assembleToolCalls(toolDeltas)));
-      }
-    } catch (err) {
-      if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
-      deps.log(`[bridge] error ${provider.id} ${String(err)}`);
-      noteProviderError(provider.id, err);
-      // Once the SSE head is out there's no status left to set — just end; otherwise a clean 502.
-      if (res.headersSent) res.end(); else sendError(res, 502, `provider request failed: ${String(err)}`);
-    }
-  };
-
-  // ----------------------------- The Anthropic door (POST /v1/messages, GET /v1/models) ----------------------------- //
-
-  // Anthropic-door traffic is told apart from OpenAI-door traffic on the shared routes by the headers only an
-  // Anthropic client sends. Slice #44 verified `anthropic-version || x-api-key` cleanly separates them (a
-  // Bearer-only OpenAI client hits neither), so this is the live door selector.
-  const isAnthropicFlavored = (req: http.IncomingMessage): boolean =>
-    !!(req.headers['anthropic-version'] || req.headers['x-api-key']);
-
-  // Map a Codex/Anthropic provider stream (text fragments live, whole tool calls at end) onto the door-neutral
-  // BridgeStreamEvent both doors render from. Empty text fragments are dropped (nothing to stream). The
-  // thinking passthrough events only the Anthropic upstream produces map to their bridge twins — the
-  // Anthropic door's encoder renders them; no other consumer of this map ever receives them.
-  // #156: previous_message_id chain — remembers each Anthropic response's message id per conversation so
-  // the next request can name it and the server's cache diagnosis has a compare target. One instance per
-  // Bridge host; only the Anthropic arm below reads/writes it.
-  const diagnosisChain = createAnthropicDiagnosisChain();
-
-  // #162: the growth tracker — same per-conversation keying as the chain, remembers read+creation so
-  // the next turn can tell healthy incremental growth from a real partial re-bill. Only the Anthropic
-  // door's cache-health log consults it.
-  const growthTracker = createAnthropicCacheGrowthTracker();
-
+  // Map a Codex/Anthropic/Grok provider stream (text fragments live, whole tool calls at end) onto the
+  // door-neutral BridgeStreamEvent both doors render from. Empty text fragments are dropped (nothing to
+  // stream). The thinking passthrough events only the Anthropic upstream produces map to their bridge twins —
+  // the Anthropic door's encoder renders them; the OpenAI door, which has no thinking vocabulary, drops them.
   const mapOAuthStream = async function* (
     upstream: AsyncIterable<AnthropicStreamEvent>,
     onDiagnosis?: (messageId: string) => void,
@@ -560,10 +274,241 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     for (const call of assembleToolCalls(toolDeltas)) yield { type: 'tool_call', call };
   };
 
+  // ----------------------------- The ProviderExecutor record (#167) ----------------------------- //
+
+  /*
+   * The OpenAI door used to carry one chat handler PER Provider kind — codex, anthropic and xai each a
+   * near-copy of the next, with the keyed path inline as a fourth — and the same gateway-error catch block
+   * pasted at every one. A new backend meant a new handler, and #168's retry would have been written four
+   * times over. One record per kind replaces them: what it answers for, how to open the upstream, and how to
+   * read a failure. Everything a door does around that — priming, rendering, the error answer — is shared.
+   *
+   * Deliberately minimal (the spec's call): no class hierarchy, no translator matrix. Each record's open()
+   * keeps its own request shaping, because that is the ONLY part that genuinely differs per backend.
+   */
+  type ExecutorStart =
+    | { ok: false; status: number; message: string }
+    | { ok: true; events: AsyncIterable<BridgeStreamEvent> };
+
+  type ExecutorArgs = {
+    parsed: BridgeChatRequest;
+    provider: Provider;
+    model: string;      // the resolved model id (a routed Target's pinned model already applied)
+    baseUrl: string;
+    signal: AbortSignal;
+  };
+
+  type ProviderExecutor = {
+    id: string;                                    // the record's own name — the Provider KIND it answers for
+    matches: (provider: Provider) => boolean;
+    // Resolve credentials/client and open the upstream as door-neutral events. The creds check is EAGER, so a
+    // signed-out (401) / keyless (400) Provider is answered before any SSE head is written.
+    open: (args: ExecutorArgs) => Promise<ExecutorStart>;
+    // #166: read a failed turn as the condition the backend actually reported, so the door answers with a
+    // status the client can act on. Codex is the only backend whose wire is parsed today; every other record
+    // returns undefined and its caller keeps the 502 — an unknown failure must stay a gateway error.
+    classify: (err: unknown) => CodexErrorClass | undefined;
+  };
+
+  const signedOut = (provider: Provider): ExecutorStart => ({ ok: false, status: 401, message: `provider '${provider.id}' is not signed in` });
+
+  // The keyed record answers for any Provider with an API key, so it matches everything and is LAST — the
+  // three OAuth kinds claim their rows first. Adding a backend means adding a row here, not a handler.
+  const keyedExecutor: ProviderExecutor = {
+    id: 'keyed',
+    matches: () => true,
+    classify: () => undefined,
+    open: async ({ parsed, provider, model, signal }) => {
+      const client = await deps.clientFor(provider);
+      if (!client) return { ok: false, status: 400, message: `provider '${provider.id}' has no API key configured` };
+      // bridge.ts keeps system OUT of the turns; the OpenAI path re-prepends it as the leading system message.
+      const base = buildOpenAiChatMessages(parsed.turns);
+      const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...base] : base;
+      const tools = toOpenAiTools(parsed.tools);
+      const upstream = await client.chat.completions.create(
+        { model, messages, stream: true, ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}) },
+        { signal },
+      );
+      return { ok: true, events: mapKeyedStream(upstream) };
+    },
+  };
+
+  const providerExecutors: ProviderExecutor[] = [
+    {
+      // The Responses stream behind the ChatGPT sign-in (#39). No API key: creds come from the OAuth seam
+      // (codexAuth via deps), so a signed-out state is a clean 401, not a crash.
+      id: 'codex',
+      matches: isCodexProvider,
+      classify: (err) => classifyCodexErrorMessage(String(err)),
+      open: async ({ parsed, provider, model, baseUrl, signal }) => {
+        const creds = await deps.codexCreds();
+        if (!creds) return signedOut(provider);
+        // bridge.ts lifts system OUT of the turns; Codex consumes it as `instructions`, so re-attach it as the
+        // leading system message buildCodexResponsesBody folds into instructions (its only role:'system' source).
+        const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+        const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
+        const upstream = codexStream({ creds, baseUrl, model, messages, effort: standardEffortToCodex(deps.effort()), tools: toCodexResponsesTools(parsed.tools), toolChoice: 'auto', signal });
+        return { ok: true, events: mapOAuthStream(upstream) };
+      },
+    },
+    {
+      // The Messages SSE stream behind the Claude.ai sign-in (#40). Same "usable when signed in" shape as Codex.
+      id: 'anthropic',
+      matches: isAnthropicProvider,
+      classify: () => undefined,
+      open: async ({ parsed, provider, model, baseUrl, signal }) => {
+        const creds = await deps.anthropicCreds();
+        if (!creds) return signedOut(provider);
+        // bridge.ts lifts system OUT of the turns; buildAnthropicMessagesBody lifts a role:'system' message back
+        // to the top-level `system`, so re-attach it as the leading system message. Images are dropped on THIS
+        // door (its Anthropic arm always has been — the /v1/messages door is where vision is wired).
+        const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+        const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
+        const upstream = anthropicStream({ creds, baseUrl, model, messages, effort: deps.effort(), tools: toAnthropicTools(parsed.tools), toolChoice: 'auto', signal });
+        return { ok: true, events: mapOAuthStream(upstream) };
+      },
+    },
+    {
+      // Grok (#95) — a Codex twin on the Responses wire, but its own effort ladder: xaiReasoning folds
+      // max→xhigh + gates per model, so the shared EffortLevel rides raw (NOT standardEffortToCodex).
+      id: 'xai',
+      matches: isXaiProvider,
+      classify: () => undefined,
+      open: async ({ parsed, provider, model, baseUrl, signal }) => {
+        const creds = await deps.xaiCreds?.();
+        if (!creds) return signedOut(provider);
+        // Images ride along (grok-4.5 is multimodal).
+        const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+        const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
+        const upstream = xaiStream({ creds, baseUrl, model, messages, effort: deps.effort(), tools: toCodexResponsesTools(parsed.tools), toolChoice: 'auto', signal });
+        return { ok: true, events: mapOAuthStream(upstream) };
+      },
+    },
+    keyedExecutor,
+  ];
+
+  // The record answering for a Provider. keyedExecutor matches everything, so the lookup always lands — the
+  // `??` is the type-level restatement of that, not a real fallback.
+  const executorFor = (provider: Provider): ProviderExecutor =>
+    providerExecutors.find((e) => e.matches(provider)) ?? keyedExecutor;
+
+  // The ONE gateway-error answer, shared by both doors (#167 — this used to be five copies). An aborted
+  // request is the client hanging up, not a failure. A failure the Provider's record classifies answers with
+  // its own status (#166), so Claude Code compacts instead of retrying a request that cannot succeed; anything
+  // unrecognised stays a 502. Once a head is out there is no status left to set, so the caller's mid-stream
+  // frame (the Anthropic door's `error` event) runs instead and the response just ends.
+  const failProviderRequest = (
+    res: http.ServerResponse,
+    provider: Provider,
+    err: unknown,
+    controller: AbortController,
+    executor: ProviderExecutor,
+    midStreamFrame?: (message: string) => string,
+  ): void => {
+    if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
+    deps.log(`[bridge] error ${provider.id} ${String(err)}`);
+    noteProviderError(provider.id, err);
+    // The log line names the classified code so the four cases are tellable apart in operation.
+    const classified = executor.classify(err);
+    if (classified) deps.log(`[bridge] ${provider.id} failure classified code=${classified.code} -> HTTP ${classified.status} (#166)`);
+    if (res.headersSent) { if (midStreamFrame) res.write(midStreamFrame(String(err))); res.end(); return; }
+    if (classified) return sendError(res, classified.status, classified.message, classified.type);
+    sendError(res, 502, `provider request failed: ${String(err)}`);
+  };
+
+  // POST /v1/chat/completions — ONE handler for every Provider (#167). Parse → route → the answering
+  // Provider's record opens the upstream as BridgeStreamEvents → render back through bridge.ts's SSE emitters
+  // (or one chat.completion object when stream:false). Kinds differ only inside their record's open().
+  const handleChat = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    let body: unknown;
+    try { body = JSON.parse(await readBody(req)); } catch { return sendError(res, 400, 'request body is not valid JSON'); }
+
+    const parsed = parseOpenAiChatRequest(body as Parameters<typeof parseOpenAiChatRequest>[0]);
+    // The translator DEGRADES on malformed input (never throws): a body that yields no turns is a deliberate
+    // 400 here, not a crash — don't lean on try/catch for this control flow.
+    if (!parsed.turns.length) return sendError(res, 400, 'no messages to send');
+
+    // The Routing map (#51) picks the answering Provider: a Provider id routes to it (curl can address any
+    // Provider explicitly), an Alias/Family hit routes to its Target, and anything else — notably the
+    // resolved model NAME Copilot CLI sends as COPILOT_MODEL (#b) — keeps the ACTIVE Provider fallback.
+    // The map + panel model are read live per request, so a mid-session edit applies without a relaunch.
+    const route = routeFor(parsed.model);
+    if (!route) return sendError(res, 404, `unknown provider '${parsed.model}'`);
+    const { provider, pinnedModel } = route;
+    const executor = executorFor(provider);
+
+    // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
+    const model = pinnedModel ?? resolveModel(deps.modelMap(), provider);
+    const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
+
+    // Bridge the client hanging up to an AbortController so the upstream call dies with the request.
+    const controller = new AbortController();
+    req.on('close', () => controller.abort());
+
+    try {
+      const started = await executor.open({ parsed, provider, model, baseUrl, signal: controller.signal });
+      if (!started.ok) return sendError(res, started.status, started.message);
+
+      const meta: ChunkMeta = { id: `chatcmpl-${crypto.randomBytes(12).toString('hex')}`, model: parsed.model, created: Math.floor(Date.now() / 1000) };
+      // Tool calls arrive whole (the maps assemble streamed fragments before yielding), so each becomes one
+      // chunk — bridge.ts then folds it into a tool_calls delta.
+      const calls: AssembledToolCall[] = [];
+      if (parsed.stream) {
+        // #166: primed, so an upstream rejection throws BEFORE the 200 head below and the catch still has a
+        // status to answer with. Uniform across every record now — only the Codex path primed before, so the
+        // other three wrote the head first and locked every pre-stream failure into a 200 with an empty body.
+        const upstream = await primeStream(started.events);
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+        for await (const ev of upstream) {
+          if (ev.type === 'text') res.write(sseLine(textChunk(ev.text, meta)));
+          else if (ev.type === 'tool_call') calls.push(ev.call);
+          // Every other BridgeStreamEvent member is Anthropic-door vocabulary — thinking passthrough, usage,
+          // the cache diagnosis, truncation, the advisor frames. This door has no channel for any of them and
+          // drops them, exactly as its per-kind handlers did; never read "not text" as "must be a tool call".
+        }
+        calls.forEach((call, i) => res.write(sseLine(toolCallChunk(call, i, meta))));
+        res.write(sseLine(finalChunk(calls.length ? 'tool_calls' : 'stop', meta)));
+        res.write(SSE_DONE);
+        res.end();
+      } else {
+        // Non-streaming client: drain the same stream into one chat.completion object.
+        let text = '';
+        for await (const ev of started.events) {
+          if (ev.type === 'text') text += ev.text;
+          else if (ev.type === 'tool_call') calls.push(ev.call);
+        }
+        sendJson(res, 200, buildCompletion(meta, text, calls));
+      }
+    } catch (err) {
+      failProviderRequest(res, provider, err, controller, executor);
+    }
+  };
+
+  // ----------------------------- The Anthropic door (POST /v1/messages, GET /v1/models) ----------------------------- //
+
+  // Anthropic-door traffic is told apart from OpenAI-door traffic on the shared routes by the headers only an
+  // Anthropic client sends. Slice #44 verified `anthropic-version || x-api-key` cleanly separates them (a
+  // Bearer-only OpenAI client hits neither), so this is the live door selector.
+  const isAnthropicFlavored = (req: http.IncomingMessage): boolean =>
+    !!(req.headers['anthropic-version'] || req.headers['x-api-key']);
+
+  // #156: previous_message_id chain — remembers each Anthropic response's message id per conversation so
+  // the next request can name it and the server's cache diagnosis has a compare target. One instance per
+  // Bridge host; only the Anthropic arm below reads/writes it.
+  const diagnosisChain = createAnthropicDiagnosisChain();
+
+  // #162: the growth tracker — same per-conversation keying as the chain, remembers read+creation so
+  // the next turn can tell healthy incremental growth from a real partial re-bill. Only the Anthropic
+  // door's cache-health log consults it.
+  const growthTracker = createAnthropicCacheGrowthTracker();
+
   // Resolve a normalized request + routed Provider to a BridgeStreamEvent stream, doing the creds/client check
-  // EAGERLY so a signed-out (401) / keyless (400) provider is caught before any SSE head is written. The three
-  // provider kinds mirror the OpenAI door's own senders (handleChat/handleCodexChat/handleAnthropicChat).
-  // ponytail: send params match those senders (tool_choice 'auto'); the forced tool_choice + temperature #45
+  // EAGERLY so a signed-out (401) / keyless (400) provider is caught before any SSE head is written. Same four
+  // kinds as the OpenAI door's executor table, but NOT that table: this door's arms carry request shaping the
+  // records deliberately don't have — the #139 stable/volatile system split, the #156 diagnosis chain, vision,
+  // and non-strict tools (Claude Code's rich schemas). Folding them together would move those onto the other
+  // door's wire, so the shared piece is the error answer, not the request.
+  // ponytail: send params match the records (tool_choice 'auto'); the forced tool_choice + temperature #45
   // carries on `parsed` are not yet threaded to the backend (each backend's tool_choice API differs) — the
   // background tip call degrades to a no-op, as slice #44 observed. Wire them through if that call must fire.
   const startProviderStream = async (
@@ -785,17 +730,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         }
       }
     } catch (err) {
-      if (controller.signal.aborted) { res.end(); return; } // client hung up — normal, not a failure
-      deps.log(`[bridge] error ${provider.id} ${String(err)}`);
-      noteProviderError(provider.id, err);
-      // Head already out (mid-stream failure) → write a proper Anthropic `error` event so Claude Code shows the
-      // real message instead of "empty or malformed"; otherwise a clean 502.
-      // #166: this door IS Claude Code's route, so it is where a wrong 502 caused the retry loop — a classified
-      // failure answers with its own status. Mid-stream the head is gone, so the frame stays as it was.
-      const classified = classifyProviderError(provider, err);
-      if (res.headersSent) { res.write(anthropicErrorFrame(String(err))); res.end(); }
-      else if (classified) sendError(res, classified.status, classified.message, classified.type);
-      else sendError(res, 502, `provider request failed: ${String(err)}`);
+      // Head already out (mid-stream failure) → the shared answer writes a proper Anthropic `error` event so
+      // Claude Code shows the real message instead of "empty or malformed"; otherwise a clean status.
+      failProviderRequest(res, provider, err, controller, executorFor(provider), anthropicErrorFrame);
     }
   };
 
