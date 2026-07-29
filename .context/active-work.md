@@ -7,21 +7,36 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-29 by Opus 5 (grooming session: #174 → spec #185 + tickets #186–#192)._
-_At commit: `9208613` on main. **Agent queue holds exactly one ticket: #187.**_
+_Last updated: 2026-07-29 by Opus 5 (relay leg 1: #187 landed, queue dry)._
+_At commit: `e04f53b` on main. **Agent queue is EMPTY — #186 needs a human before anything else is labelled.**_
 
 ## Current focus
 
-**#174 is groomed. Spec #185, tickets #186–#192, nothing implemented.** An eight-question grill settled the
-narrow-port scope; the full reasoning is in
-[[2026-07-29-antigravity-narrow-port-never-mint-opaque-tool-ids]]. Headline: ~1,200–1,500 TS lines against
-the reference's 5,643 non-test Go lines, both Bridge doors, all 13 models, credits **and** reasoning-replay
-out — the latter safe **only** under the binding rule that the port never mints opaque provider-side tool ids.
+**#187 is landed (`e04f53b`). Spec #185's whole credential-free half is in.** `packages/core/src/antigravity.ts`
+(806 lines) + `packages/core/tests/antigravity.test.ts` (78 tests), exported through the `catalog.ts` barrel
+like every other pure Provider core. Gate: **868/868 vitest (783 before), `bun run compile` clean in BOTH
+packages.**
 
-Reference clone refreshed at `D:\scratch\CLIProxyAPI` (shallow, `c9417c8`, re-clonable).
+It needed no credentials and did not wait on the spike — it is a transcription of the reference's own
+~3,900-line test corpus. What landed: the Cloud Code envelope, the content-derived session id, the
+model-family fork table, path-scoped schema cleaning (two cleaners), the fourth tool builder, the four
+signature/pairing pieces, the stateless 429 classifier, and the SSE mapper onto `BridgeStreamEvent`.
 
-**Ticket #186 (auth spike) is `ready-for-human` and gates everything live.** #187 (the pure layer) is the
-only `ready-for-agent` ticket, deliberately — see Queue below.
+**Both load-bearing rules were verified with controls, not just green ticks:**
+
+- **The binding rule holds and is guarded.** Minting a content-hash id when upstream sent none — the exact
+  "stable synthetic ids" change the spec warns about — **fails two tests**. Absent upstream id ⇒ **empty**
+  id, never a minted one.
+- **History preservation has TWO protections here, where the reference had one** — path scoping *plus* a
+  walker that descends only schema positions. Control: scope alone does **not** corrupt history; a generic
+  deep walk applied whole-document **does**, failing both arms. So the change that re-arms the reference's
+  production bug is *"simplify the walker"*, and no single test catches it.
+  [[the-schema-cleaner-is-safe-because-of-its-walker-not-only-its-scope]].
+
+Reference clone still at `D:\scratch\CLIProxyAPI` (shallow, `c9417c8`, re-clonable).
+
+**Ticket #186 (auth spike) is `ready-for-human` and now gates EVERYTHING remaining.** Nothing else carries
+`ready-for-agent` — see Queue below.
 
 ### Previously (release arc, closed)
 
@@ -44,9 +59,12 @@ extension carries #182.
 
 ## State
 
-- **In flight:** nothing implemented. Working tree clean on main. **Relay chain re-seeded and armed**
-  (`.claude/relay/ticket-loop.md`, `stop: false`, leg 1) — but armed for **exactly one leg**: it will land
-  #187, find the queue dry, write `queue empty`, and stop. That is correct, not a failure.
+- **In flight:** nothing. Working tree clean on main at `e04f53b`, pushed. **The relay chain ran its one leg
+  and stopped on a dry queue** (`.claude/relay/ticket-loop.md`, `stop: true`, leg 1) — the designed ending,
+  not a failure. Re-arm by labelling the next ticket and re-running `/relay N=1 /preset ticket-loop`.
+- **#187 ✅ `e04f53b`** — the pure Antigravity layer. Gate before the merge: **868/868 vitest**, `bun run
+  compile` clean in **both** packages. Verified with two deliberate-break controls (binding rule, history
+  corruption) — a green run alone would not have distinguished the safe implementation from the unsafe one.
 - **#183 ✅ `819900b` / `v2.0.39`** — release green on all four native runners + publish; `latest` is 2.0.39.
   Gate before the cut: **783/783 tests, `bun run compile` clean in both packages.**
   - **Verified past the registry read, with a control.** The same BOM'd `config.json` plus one unrelated
@@ -91,27 +109,41 @@ Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #16
 #170 `d656686`, #171 `3e0125e`, #172 `49761d8`, #173 `55daebb`/`v2.0.38`), plus the follow-ups #181 `4ec1a81`,
 #180 `ab2235b` and #183 `819900b`/`v2.0.39`.
 
-**Spec #185 — Antigravity, seven tickets, none started:**
+**Spec #185 — Antigravity, seven tickets, ONE landed:**
 
 | # | Ticket | Label | Blocked by |
 |---|---|---|---|
 | **186** | Auth spike — access, PKCE, posture | `ready-for-human` | none — needs a human at a browser |
-| **187** | Pure layer — envelope, tools, signatures, 429 classifier, SSE mapper | **`ready-for-agent`** | none |
+| ~~187~~ | ~~Pure layer — envelope, tools, signatures, 429, SSE~~ | ✅ **`e04f53b`** | — |
 | **188** | Catalog row, kind, creds slice, `AntigravityAuth` | — | #186 |
-| **189** | Executor record + OpenAI door — first real turn | — | #188, #187 |
+| **189** | Executor record + OpenAI door — first real turn | — | #188 |
 | **190** | Rate limits answer 429; cooldown from server horizon | — | #189 |
 | **191** | Anthropic door — Claude Code driven by Gemini | — | #189 |
 | **192** | Release — npm + TUI face, surfaces named | — | #190, #191 |
 
-**Why only #187 carries `ready-for-agent`.** `## Blocked by` is body text, not native links — a frontier
-query cannot see it, so **labels are the only real gate**. Labelling #188 onward now would let the relay build
-the whole Provider before anyone confirms this account has Antigravity access, which is exactly the #170
-failure mode. #187 is exempt because it is a pure transcription of the reference's own ~3,900-line test corpus:
-its correctness does not depend on account access and it needs zero credentials to verify.
+**Why NOTHING carries `ready-for-agent` now.** `## Blocked by` is body text, not native links — a frontier
+query cannot see it, so **labels are the only real gate**. #187 was exempt from the spike because it is a pure
+transcription of the reference's own ~3,900-line test corpus — its correctness does not depend on account
+access. **Every remaining ticket touches the live wire**, so labelling one before #186 confirms access is
+exactly the #170 failure mode: complete, correct, and unusable.
 
 **Re-arming order** (one step at a time): human runs #186 → label #188 → then #189 → then #190 **and** #191
 together → then #192, which closes #185. Access not confirmed → comment on #186, label nothing, leave #185
 dormant.
+
+**What #187 hands the tickets downstream** (also recorded on the ticket):
+
+- `antigravityStableSessionId` returns **`undefined`** when the payload carries no anchor text. The reference
+  falls back to a random session id; a random value cannot live in a pure layer, so **#189 supplies it**.
+- Request ids are **injected**, not minted: `antigravityRequestId(uuid)` / `antigravityImageRequestId(nowMs,
+  uuid)` keep the upstream's two formats as pure functions. #189 owns the uuid/clock.
+- `antigravity429Error` returns **`Antigravity API error 429: <reason>`** deliberately — anything else gets
+  **zero** retries from `isTransientProviderError`. #189/#190 must throw this exact shape.
+- `decideAntigravity429` keeps all four reference kinds **plus `retryAfterMs`**, because that is what **#190**
+  needs to write a cooldown horizon. `antigravity429Error` is only the thin "declines below the instant-retry
+  threshold" view over it.
+- `BridgeStreamEvent` is imported **as a type only**, so `bridge -> catalog` stays the sole runtime edge and
+  the module graph does not cycle (the `xai.ts` pattern).
 
 **Still open, unrelated:**
 
@@ -121,17 +153,23 @@ dormant.
 | **174** | Antigravity placeholder | **Groomed** → #185. Left open as the tracking issue until #185 closes. |
 | **69** | copilot-wisp launcher | Ungroomed. |
 
-**Closed in the previous session:** #183 (`819900b`/`v2.0.39`), #182 (`9fd63f0`, ADR-0004), #184
+**Closed this session:** #187 (`e04f53b`).
+**Closed previously:** #183 (`819900b`/`v2.0.39`), #182 (`9fd63f0`, ADR-0004), #184
 (`d36688c`/`v2.0.40` + `b672333`).
 
 ## Pick up here
 
-**Two independent threads. They do not block each other.**
+**One thread, and it needs a human. The agent queue is dry by design.**
 
 1. **Human: run the #186 auth spike.** Browser OAuth on the Google account, confirm Antigravity access,
    record the PKCE verdict and the posture verdict, save the captured request/response fixtures on the
-   ticket. This gates every live-wire ticket. Ten minutes.
-2. **Agent: start the relay** — `/relay N=1 /preset ticket-loop`. It lands #187 and stops on a dry queue.
+   ticket. This gates every remaining ticket. Ten minutes.
+2. **Then, and only then:** label **#188** `ready-for-agent` and re-run `/relay N=1 /preset ticket-loop`
+   (flip `stop: false` in `.claude/relay/ticket-loop.md`, or just re-issue the command — a stopped chain
+   re-inits). One ticket per re-arm, in the order above.
+
+Access **not** confirmed → comment the finding on #186, label nothing, leave #185 dormant. Do not flip
+labels hoping it works out.
 
 Two user actions still outstanding from before: **install `packages/vscode/wisp-1.10.1.vsix`** (that face is
 not on the marketplace, so it does not carry #182 until installed by hand), and **#170** needs a Kimi Code
@@ -140,7 +178,8 @@ subscription.
 ## Skills for next session
 
 - `/preset pick-up` — session door.
-- `/relay N=1 /preset ticket-loop` — armed, one leg (#187). Re-arm by flipping labels in the order above.
+- `/relay N=1 /preset ticket-loop` — **ran leg 1 (#187), stopped on a dry queue.** Re-arm by labelling the
+  next ticket in the order above, then re-issuing the command.
 - `packages/tui:verify` — sandboxed CLI verification for TUI command surfaces (isolated `WISP_HOME`).
 - `grill-me` / `/preset init` — still the right shape for **#69**, the last ungroomed ticket.
 

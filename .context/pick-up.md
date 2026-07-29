@@ -9,87 +9,108 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last session (2026-07-29): #174 got groomed. Spec #185, tickets #186–#192. Nothing implemented.** An
-eight-question grill settled the Antigravity scope; full reasoning in
-[[2026-07-29-antigravity-narrow-port-never-mint-opaque-tool-ids]]. No code was written, no release cut, no
-release debt. At `9208613` on main plus this session's `.context/` commit.
+**Last session (2026-07-29): relay leg 1 landed #187 — the whole pure Antigravity layer — then stopped on a
+dry queue, exactly as designed.** At `e04f53b` on main (pushed) plus this session's `.context/` commit. No
+release cut, no release debt.
 
-## Two threads. They do not block each other.
+## queue empty
 
-**1 — Human, ten minutes: run the #186 auth spike.** Browser OAuth on the Google account. Confirm Antigravity
-access exists, record the PKCE verdict, record whether the pinned client version was accepted, and save the
-captured request/response bodies (including one streaming turn) on the ticket. Those become #187's fixtures.
+**No ticket carries `ready-for-agent`.** That is deliberate, not an oversight — see the gate below. Running
+the relay again right now would find nothing and stop again.
 
-This gates every live-wire ticket. Access not confirmed → comment the finding on #186, label nothing, leave
-#185 dormant. Do **not** flip labels hoping it works out.
+## The one thread: #186, and it needs a human — ten minutes
 
-**2 — Agent: `/relay N=1 /preset ticket-loop`.** Armed and re-seeded (`.claude/relay/ticket-loop.md`,
-`stop: false`, leg 1). It lands **#187** and stops on a dry queue. That is correct, not a failure.
+**Run the #186 auth spike.** Browser OAuth on the Google account. Confirm Antigravity access exists, record
+the PKCE verdict, record whether the pinned client version was accepted, and save the captured
+request/response bodies (including one streaming turn) on the ticket. Those become the fixtures that replace
+#187's derived ones.
 
-## The queue is deliberately one ticket deep
+**Then, one step at a time:** #186 passes → label **#188** → then **#189** → then **#190** and **#191**
+together (independent of each other) → then **#192**, which closes #185. Re-arm the chain by re-issuing
+`/relay N=1 /preset ticket-loop` (the state file is `stop: true`; re-issuing re-inits it).
 
-Only **#187** carries `ready-for-agent`. **#186** carries `ready-for-human`. The other five are bare.
+Access **not** confirmed → comment the finding on #186, label nothing, leave #185 dormant. **Do not flip
+labels hoping it works out.**
 
-`## Blocked by` is body text, not native links — a frontier query cannot see it, so **labels are the only
-real gate**. Labelling #188 onward now would let the relay build the entire Provider before anyone confirms
-the account has access. That is exactly how **#170** ended up complete, correct, and unusable.
+## Why the queue is gated on a human
 
-#187 is exempt because it is a pure transcription of the reference's own ~3,900-line test corpus — its
-correctness does not depend on account access, and it needs zero credentials to verify.
+`## Blocked by` is body text, not native tracker links — a frontier query cannot see it, so **labels are the
+only real gate**. #187 was exempt because it is a pure transcription of the reference's own ~3,900-line test
+corpus: no credentials, no account access, verifiable offline. **Every remaining ticket touches the live
+wire.** Labelling one before the spike lets the relay build the entire Provider before anyone confirms the
+account can reach it — which is exactly how **#170** ended up complete, correct, and unusable.
 
-**Re-arming order, one step at a time:** #186 passes → label **#188** → then **#189** → then **#190** and
-**#191** together (independent of each other) → then **#192**, which closes #185.
+## What #187 landed
 
-## The binding rule — do not let a leg "improve" this
+`packages/core/src/antigravity.ts` (806 lines) + `packages/core/tests/antigravity.test.ts` (78 tests),
+exported through the `catalog.ts` barrel like every other pure Provider core. Gate: **868/868 vitest** (783
+before), `bun run compile` clean in **BOTH** packages.
+
+The envelope, the content-derived session id, the model-family fork table, path-scoped schema cleaning (two
+cleaners), the fourth tool builder, the four signature/pairing pieces, the stateless 429 classifier, the SSE
+mapper onto `BridgeStreamEvent`. Credits and reasoning-replay stay out, as specced.
+
+**Seams the next tickets inherit** — full list in [[active-work]]:
+
+- `antigravityStableSessionId` returns **`undefined`** with no anchor text; **#189** owns the random fallback
+  (it cannot live in a pure layer).
+- `antigravity429Error` returns **`Antigravity API error 429: <reason>`** — #189/#190 must throw this shape.
+- `decideAntigravity429` keeps all four kinds **plus `retryAfterMs`** because **#190** needs the horizon.
+
+## The binding rule — still the highest-consequence thing here
 
 **The port never mints opaque provider-side tool ids. The upstream's own `functionCall.id` passes through
-untouched.**
+untouched.** Absent upstream ⇒ an **empty** id, never a minted one.
 
-Two-thirds of the reference's 1,980-line reasoning-replay subsystem exists to service ids that are
-content-hash **lookup keys into a replay ledger**. Minting them without building the ledger makes every one a
-dangling pointer. This single rule is what makes omitting that subsystem safe. A change that generates
-"stable synthetic ids" breaks the foundation **silently** — nothing fails at compile time, and the damage
-shows up as mangled tool history several turns later.
+This is no longer only a convention: **tests pin it, and the guard was verified by control** — minting a
+content-hash id when upstream sent none fails two of them. A leg that "improves" id handling now fails loudly
+instead of silently. Do not weaken those tests to make a change pass.
+
+## New landmine from this session
+
+**The schema cleaner is safe because of its WALKER, not only its scope.**
+[[the-schema-cleaner-is-safe-because-of-its-walker-not-only-its-scope]]. Two protections where the reference
+had one: path scoping, plus a walker that descends only schema positions and so cannot reach
+`request.contents` at all. Measured by control — scope alone does **not** corrupt history; a **generic deep
+walk applied whole-document does**, failing both arms of the history test. So the change that re-arms the
+reference's production bug is *"simplify `mapSchema` to a generic deep walk"*, and **no single test catches
+it**. A ⚠ comment sits at `mapSchema`; keep it.
 
 ## Released state — nothing owed
 
 | Face | Version | Missing |
 |---|---|---|
-| npm `wisp-router` | **2.0.40** | nothing |
+| npm `wisp-router` | **2.0.40** | nothing — #187 is unreleased core, no face owes a bump yet (#192 ships it) |
 | `wisp` vsix | **1.10.1** | nothing — but **packaged, not installed** |
 | `wisp-slot` plugin | **1.6.0** | nothing |
 
 ## Waiting on the user
 
+- **#186** — the Antigravity auth spike above. The only thing unblocking the queue.
 - **Install `packages/vscode/wisp-1.10.1.vsix`** — that face is not on the marketplace, so the extension does
   not carry #182 until it is installed by hand.
 - **#170** — needs a **Kimi Code subscription**. The sign-in doubles as the unverified-constants check.
-- **#186** — the Antigravity auth spike above.
 
 ## Landmines
 
-New this session (Antigravity):
+Antigravity (carried forward, all still live):
 
-- **The binding rule above.** Highest-consequence, zero compile-time protection.
+- **The binding rule + the schema-walker rule above.**
 - **Antigravity is a THIRD wire**, not OpenAI- or Anthropic-shaped: Gemini `generateContent` nested in a
-  bespoke Cloud Code envelope. It needs a third stream mapper, a fourth tool builder, a `BridgeDeps`
-  widening, **and** its own branch in the Anthropic door's chain — that door deliberately refuses the
-  executor record. "Just add a record" is wrong.
+  bespoke Cloud Code envelope. It still needs a third stream mapper wiring, a fourth tool builder (**landed**),
+  a `BridgeDeps` widening, **and** its own branch in the Anthropic door's chain — that door deliberately
+  refuses the executor record. "Just add a record" is wrong.
 - **The retryability contract is a string.** `isTransientProviderError` regexes `String(err)` for
-  `API error (429|500|502|503|504)`. A client that throws any other shape silently receives **zero** retries
-  and nobody notices until a blip becomes a user-visible failure. Throw
-  `` `Antigravity API error ${status}: ${body}` ``.
-- **Schema cleaning applies only at schema paths.** The reference records that whole-document cleaning
-  silently corrupted conversation history — keys like `title`/`format`/`default`/`const` also occur inside
-  replayed function-call arguments.
+  `API error (429|500|502|503|504)`. #187 exports the correct shape; #189/#190 must actually throw it.
+- **Schema cleaning applies only at schema paths** — see the walker note above.
 - **The session id is content-derived, not a nonce.** A random-per-request implementation looks fine and
-  loses upstream cache behaviour.
+  loses upstream cache behaviour. #187 pins this; #189's fallback must stay the *fallback*.
 - **#190 edits `routing.ts`, which every Provider shares.** Its two cooldown channels are separate on purpose
   so a blip cannot write a long horizon and a long quota window cannot be shortened by a blip. Preserve that.
 - **Credits' cooldown ledger is harmful with one credential** — the reference consults it *before sending*,
-  so a single benched credential 429s itself. It is out of scope; do not helpfully port it.
+  so a single benched credential 429s itself. Out of scope; do not helpfully port it.
 
-Carried forward:
+Carried forward, general:
 
 - **A store file that does not parse is no longer overwritten — `merge` refuses (#182, ADR-0004).** Both
   stores are read-merge-write, so any *new* "degrade to `{}`" in this layer is destructive by default. The
@@ -97,7 +118,8 @@ Carried forward:
 - **`writeConfig` / `writeAuth` can throw, and always could.** ~35 call sites already tolerate it. Resist any
   "return a result type instead" refactor.
 - **A fix release is not verified until the OLD version FAILS the same check.**
-  [[verifying-a-fix-release-needs-the-previous-version-as-a-control]].
+  [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]. #187 applied the same discipline to
+  code: break the rule on purpose, confirm the test fails.
 - **A vsix is evidence only when checked in the BUNDLE** — unzip it and grep `extension/dist/extension.js`.
 - **npm can 404 a version its own publish job just succeeded on.** Propagation lag; check the job log, retry.
 - **RUN `bun run compile` IN BOTH PACKAGES.** The root script only covers `packages/vscode`. The test gate is
@@ -128,6 +150,7 @@ repo).
 
 - [[active-work]]
 - [[overview]]
+- [[the-schema-cleaner-is-safe-because-of-its-walker-not-only-its-scope]]
 - [[2026-07-29-antigravity-narrow-port-never-mint-opaque-tool-ids]]
 - [[2026-07-29-retry-wraps-priming-cooldown-channels-are-separate-maps]]
 - [[2026-07-29-two-doors-share-the-error-answer-not-the-request]]
