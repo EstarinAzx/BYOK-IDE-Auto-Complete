@@ -7,8 +7,9 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-29 by Opus 5 (relay leg 9 — #173 landed; **spec #164 complete**)._
-_At commit: `55daebb` on main, pushed, tag `v2.0.38`. **The agent queue is empty.**_
+_Last updated: 2026-07-29 by Opus 5 (relay leg 9 — #173 landed; **spec #164 complete**; then live
+verification + #181 fixed with the user present)._
+_At commit: `4ec1a81` on main, pushed. Released: tag `v2.0.38`. **The agent queue is empty.**_
 
 ## Current focus
 
@@ -99,16 +100,22 @@ Spec #164 complete. All nine tickets shipped:
 | # | Ticket | Why it needs a human |
 |---|---|---|
 | **180** | Ship the harvest to the vsix + `wisp-slot` plugin | Two more outward-facing publishes #173 never authorized; one criterion (install the `.vsix` in a real host) is unreachable unattended. Flip to `ready-for-agent` to pre-stage the bumps, changelogs and `bun run package`. |
-| **181** | BOM in `config.json` silently empties the whole config | Small and agent-doable; the open question filed with it is a design call — tolerate the BOM or **fail loud**? Today it does neither. |
+| ~~181~~ | ~~BOM in `config.json` silently empties the whole config~~ | **DONE — `4ec1a81`** (turned out to be silent data *loss*: read-merge-write wrote the empty result back over the real file). |
+| **182** | A genuinely unparseable store still silently resets | The remaining half of #181 — same mechanism, rarer trigger. Needs a design call; the promising shape is refusing to **write** over contents that did not parse, rather than making the pure parsers throw. Not urgent. |
 | **163** | The 502 observation | **Diagnosis confirmed live** (#165's usage now flows). Stays open until a stretch of use shows no refusal in the 217k–245k band — absence of a 15-occurrence cluster can't be proven in one session. |
 | **69** | copilot-wisp launcher | Ungroomed. |
 
 ## Pick up here
 
-**No agent work is queued.** The big live check is **done and passed** (#165, #171). What is left is small:
-one bridged turn on a **keyed** Provider for #169 (a `glm` or `deepseek` alias), and a fresh Codex sign-in
-for #172. Then triage #180 and #181 — both are `ready-for-human` only to stop the relay auto-grabbing them,
-and #181 in particular is a small, safe, agent-sized fix the moment you flip its label.
+**No agent work is queued.** The live checks are **done and passed** (#165, #171, #169) and **#181 is
+fixed**. What is left:
+
+- **#172** — the only live check outstanding, and it needs a *genuinely fresh* Codex sign-in (one that never
+  opens the model picker), not another turn. Lowest stakes of the batch: a wrong default fails loud with a
+  400 naming the model, and the whitelist test now catches a bad default before it ships.
+- **#180** — the vsix + `wisp-slot` bumps. **Now carries #181's fix too**, which is a data-loss fix, so the
+  case for shipping it is stronger than it was at cut time.
+- **#182** — the remaining half of #181. Not urgent.
 
 Do **not** restart the relay chain expecting work: with no `ready-for-agent` ticket it will pick nothing,
 write `queue empty`, and stop.

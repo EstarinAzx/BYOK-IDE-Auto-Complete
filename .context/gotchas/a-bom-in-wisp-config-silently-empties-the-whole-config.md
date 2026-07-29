@@ -54,9 +54,20 @@ If a routing map "isn't taking", check the BOM **before** suspecting the code. N
 *does* carry a BOM and parses fine — Bun's own JSON loader tolerates it, so BOM-tolerance elsewhere in the
 repo is not evidence this path tolerates it.
 
-**Status.** Filed as **#181** (`ready-for-human`), pre-existing — not introduced by the 2.0.38 cut. Suggested
-fix is stripping a leading `﻿` in the one `parseObject` seam plus a round-trip test; the open question
-filed with it is whether an unparseable config should instead **fail loud**, since today it does neither.
+**Status — FIXED in `4ec1a81` (#181), on main, not yet released.** `parseObject` strips a leading BOM before
+parsing. Ships on npm in the next `wisp-router` cut; reaches the vsix only via #180.
+
+**The severity was worse than first written, and the reason is worth keeping.** Both stores are
+**read-merge-write** (`writeConfig` = `merge(file, readConfig(), patch)`), so the `{}` was not merely *used*
+in place of the config — it was **merged with the next patch and written back over the real file**. Measured
+pre-fix: a config with two family routes and an alias became `{"effort":"low"}` on disk after one settings
+change; `auth.json` became `{"anthropic":{…}}` after one sign-in, erasing every API key and OAuth bundle.
+So the user story was not "my routes didn't apply" but "my routes and credentials were deleted, silently, one
+change later".
+
+**Still open as #182:** a *genuinely* unparseable store (truncated write, real typo) still degrades to `{}`
+and can still be overwritten the same way — same mechanism, rarer trigger. The promising shape there is to
+refuse to **write** over contents that did not parse, rather than to make the pure parsers throw.
 
 ## Related
 

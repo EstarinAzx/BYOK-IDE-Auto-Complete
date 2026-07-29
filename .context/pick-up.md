@@ -50,19 +50,24 @@ Also still open by hand: **#167's** manual criterion (one turn each through Code
 **#170's** two criteria (needs a Kimi Code subscription — `wisp` → `/signin kimi`; the sign-in doubles as the
 unverified-constants check).
 
-## Then triage the two tickets this leg filed
+## #181 is fixed. What is left after it
 
-Both are `ready-for-human` **only to stop the relay auto-grabbing them**, not because they are hard:
+**#181 — DONE, `4ec1a81` on main.** It was worse than filed: both stores are **read-merge-write**, so the
+empty parse result was written back over the real file. A BOM'd `config.json` plus one settings change
+erased every family route; a BOM'd `auth.json` plus one sign-in erased every API key and OAuth bundle.
+One-line BOM strip in `parseObject`; 783/783 tests (+4, including a read-merge-write regression per store).
+**On main, not released** — ships in the next npm cut, reaches the vsix only via #180.
 
-- **#180 — ship the harvest to the vsix + `wisp-slot` plugin.** Both bumps are **owed**. The vsix bundles its
-  own `@wisp/core`, so #170's Kimi row, #172's corrected Codex default, #165's chat-path guard and #171's
-  `recordStatus` reach **no** extension user on any npm version. The plugin carries #171's *reader* half, and
-  `3e0125e` changed `wisp-statusline.js` without bumping `plugin.json` — so **1.5.0 means two different
-  things**. Flip to `ready-for-agent` to pre-stage the bumps, changelogs and `bun run package`; the install
-  step still needs you.
-- **#181 — a BOM in `~/.wisp/config.json` silently empties the whole config.** Small, safe, agent-sized. It
-  carries one design question worth answering first: tolerate the BOM, or **fail loud** on an unparseable
-  config? Today it does neither.
+- **#180 — ship the harvest to the vsix + `wisp-slot` plugin.** Both bumps **owed**. The vsix bundles its own
+  `@wisp/core`, so #170's Kimi row, #172's corrected Codex default, #165's chat-path guard, #171's
+  `recordStatus` — **and now #181's data-loss fix** — reach no extension user on any npm version. The plugin
+  carries #171's *reader* half, and `3e0125e` changed `wisp-statusline.js` without bumping `plugin.json`, so
+  **1.5.0 means two different things**. `ready-for-human` only because it is two outward-facing publishes and
+  the install step needs a human; flip the label to pre-stage the bumps, changelogs and `bun run package`.
+- **#182 — a genuinely unparseable store still silently resets.** The remaining half of #181: same
+  read-merge-write mechanism, rarer trigger. Deliberately not folded into #181 — making the pure parsers
+  throw changes a contract with six callers. The shape worth exploring is refusing to **write** over
+  contents that did not parse. Not urgent.
 
 ## Landmines
 
@@ -74,9 +79,13 @@ Both are `ready-for-human` **only to stop the relay auto-grabbing them**, not be
   `### Surfaces` section — keep it, and **file the owed bump as a ticket in the same pass**, because an owed
   bump recorded only in prose evaporates.
   [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]].
-- **Never seed a sandbox `WISP_HOME` from PowerShell `Out-File -Encoding utf8`** — it writes a BOM, and a BOM
-  makes Wisp discard the *entire* config while still exiting 0 with plausible output. It looks exactly like a
-  broken feature. [[a-bom-in-wisp-config-silently-empties-the-whole-config]].
+- **A store file that does not parse is not merely ignored — it gets OVERWRITTEN.** Both stores are
+  read-merge-write, so an empty parse result is merged with the next patch and written back, erasing the
+  real file. That is what made #181 data loss rather than a nuisance, and it is still live for genuinely
+  corrupt files (#182). Treat any "degrade to `{}`" in this layer as destructive by default.
+  [[a-bom-in-wisp-config-silently-empties-the-whole-config]]. *(The BOM trigger itself is fixed in
+  `4ec1a81`, so PowerShell-seeded sandbox configs now work — but on **main only**, not in any released
+  binary, so an `npm i -g wisp-router` build still has the old behaviour until the next cut.)*
 - **A release tag must equal `packages/tui/package.json`'s version** or the workflow never matches. Assert it
   before pushing the tag — a wrong tag is annoying to unwind.
 - **Release cuts are a direct commit on main, not a PR** (`b25e862`, now `55daebb`): `CHANGELOG.md` +
