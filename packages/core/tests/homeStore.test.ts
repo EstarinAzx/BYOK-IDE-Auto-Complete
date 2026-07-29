@@ -51,6 +51,25 @@ describe('config read/write', () => {
     expect(h.configExists()).toBe(true);
   });
 
+  // #181: writeConfig is read-merge-write, so ANY read that silently degrades to {} does not merely ignore
+  // the file — the next settings change persists {} + patch over it and the real config is gone from disk.
+  // A UTF-8 BOM is the realistic way in: Notepad and PowerShell 5.1's `Out-File -Encoding utf8` write one.
+  test('a BOM-prefixed config survives being read AND the next write (#181)', () => {
+    const h = home();
+    const original = {
+      provider: 'codex',
+      routing: { families: { opus: { providerId: 'anthropic', model: 'claude-opus-5' } }, aliases: [] },
+    };
+    h.writeConfig(original);
+    // Simulate the user opening config.json in an editor that saves UTF-8 with a BOM.
+    const path = join(dir, '.wisp', 'config.json');
+    writeFileSync(path, '﻿' + readFileSync(path, 'utf8'), 'utf8');
+
+    expect(h.readConfig()).toEqual(original);
+    h.writeConfig({ effort: 'low' }); // any ordinary settings change
+    expect(h.readConfig()).toEqual({ ...original, effort: 'low' });
+  });
+
   test('an undefined patch value deletes the field on disk', () => {
     const h = home();
     h.writeConfig({ provider: 'groq', customBaseUrl: 'https://x' });
@@ -85,6 +104,20 @@ describe('auth read/write', () => {
     h.writeAuth({ keys: { groq: 'gk' } });
     expect(h.readAuth()).toEqual({ keys: { groq: 'gk' } });
     expect(h.authExists()).toBe(true);
+  });
+
+  // #181, the higher-stakes half: writeAuth is read-merge-write too, so a BOM plus a single sign-in used to
+  // wipe every stored API key and OAuth bundle off disk.
+  test('a BOM-prefixed auth store survives a read AND a subsequent sign-in (#181)', () => {
+    const h = home();
+    const original = { keys: { groq: 'gk-real', openai: 'sk-real' }, codex: { accessToken: 'at', refreshToken: 'rt' } };
+    h.writeAuth(original);
+    const path = join(dir, '.wisp', 'auth.json');
+    writeFileSync(path, '﻿' + readFileSync(path, 'utf8'), 'utf8');
+
+    expect(h.readAuth()).toEqual(original);
+    h.writeAuth({ anthropic: { accessToken: 'new-signin' } });
+    expect(h.readAuth()).toEqual({ ...original, anthropic: { accessToken: 'new-signin' } });
   });
 
   test('auth.json is owner-only on POSIX (Windows relies on the profile ACL)', () => {

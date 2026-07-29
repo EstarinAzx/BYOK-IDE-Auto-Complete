@@ -29,6 +29,15 @@ describe('parseWispConfig', () => {
     expect(parseWispConfig('null')).toEqual({});
   });
 
+  // A UTF-8 BOM is valid UTF-8 and is what Notepad and PowerShell 5.1's `Out-File -Encoding utf8` write
+  // by default, so a hand-edited config arrives with one routinely. JSON.parse rejects it, which used to
+  // sink the ENTIRE config to {} above every field guard — and because writeConfig is read-merge-write,
+  // the next settings change then persisted that {} over the user's real file (#181).
+  test('a leading UTF-8 BOM is tolerated, not treated as corruption', () => {
+    const cfg: WispConfig = { provider: 'codex', effort: 'high' };
+    expect(parseWispConfig('﻿' + serializeWispStore(cfg))).toEqual(cfg);
+  });
+
   test('valid fields survive a parse round-trip', () => {
     const cfg: WispConfig = {
       provider: 'groq',
@@ -93,6 +102,12 @@ describe('parseWispAuth', () => {
     expect(parseWispAuth(undefined)).toEqual({});
     expect(parseWispAuth('oops{')).toEqual({});
     expect(parseWispAuth('123')).toEqual({});
+  });
+
+  // Same trap as the config side, higher stakes: auth.json holds every API key and OAuth bundle (#181).
+  test('a leading UTF-8 BOM is tolerated, not treated as corruption', () => {
+    const auth: WispAuth = { keys: { groq: 'gk-123' }, bridgeSecret: 'sec' };
+    expect(parseWispAuth('﻿' + serializeWispStore(auth))).toEqual(auth);
   });
 
   test('valid fields survive a parse round-trip', () => {

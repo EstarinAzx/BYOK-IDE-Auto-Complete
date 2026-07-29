@@ -55,10 +55,17 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
 // JSON text → plain object, or undefined for anything unusable (corrupt, non-object, empty).
+//
+// The BOM strip is load-bearing, not cosmetic (#181). A UTF-8 BOM is valid UTF-8 and is what Notepad and
+// PowerShell 5.1's `Out-File`/`Set-Content -Encoding utf8` prepend by default, so a hand-edited store
+// arrives with one routinely — but JSON.parse rejects it, which read a perfectly good file as corrupt.
+// That verdict is destructive here rather than merely lossy: both stores are read-merge-write, so the
+// {} this returned was merged with the next patch and written back, erasing the user's real config (every
+// family route) or auth (every API key and OAuth bundle) from disk on their next settings change or sign-in.
 const parseObject = (raw: string | undefined | null): Record<string, unknown> | undefined => {
   if (!raw) return undefined;
   try {
-    const parsed: unknown = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw.replace(/^﻿/, ''));
     return isRecord(parsed) ? parsed : undefined;
   } catch { return undefined; }
 };
