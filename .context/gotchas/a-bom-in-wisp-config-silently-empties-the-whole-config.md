@@ -54,8 +54,14 @@ If a routing map "isn't taking", check the BOM **before** suspecting the code. N
 *does* carry a BOM and parses fine — Bun's own JSON loader tolerates it, so BOM-tolerance elsewhere in the
 repo is not evidence this path tolerates it.
 
-**Status — FIXED in `4ec1a81` (#181), on main, not yet released.** `parseObject` strips a leading BOM before
-parsing. Ships on npm in the next `wisp-router` cut; reaches the vsix only via #180.
+**Status — FIXED in `4ec1a81` (#181) and RELEASED on every face.** `parseObject` strips a leading BOM before
+parsing. Shipped to the vsix in **1.10.0** (#180) and to npm in **`wisp-router` 2.0.39** (#183).
+
+Verified end-to-end against the *published* artifacts, not just the source: the same BOM'd config plus one
+unrelated `wisp routing set haiku codex/gpt-5.6-sol` erases `provider`, `effort` and the pre-existing `opus`
+route on installed **2.0.38**, and preserves all three on installed **2.0.39**. Running the old version as a
+control is the part that matters — see
+[[verifying-a-fix-release-needs-the-previous-version-as-a-control]].
 
 **The severity was worse than first written, and the reason is worth keeping.** Both stores are
 **read-merge-write** (`writeConfig` = `merge(file, readConfig(), patch)`), so the `{}` was not merely *used*

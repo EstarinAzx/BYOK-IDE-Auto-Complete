@@ -9,57 +9,62 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last session (2026-07-29): spec #164 shipped to all three faces, every live check passed, one real bug
-found and fixed.** Relay leg 9 landed #173 (`wisp-router@2.0.38` on npm); then, with the user present, the
-whole harvest was verified against real bridged sessions, **#181** was found and fixed, and **#180** cut the
-vsix and plugin. At `ab2235b` on main.
+**Last session (2026-07-29): #183 shipped — `wisp-router@2.0.39` is on npm, verified against a control.**
+That was the last piece of release debt. All three faces now carry every shipped fix, the tracker has no
+`ready-for-agent` ticket, and nothing is in flight. At `819900b` on main, tag `v2.0.39`.
 
-## The one next task: #183 — cut npm 2.0.39
+## There is no forced next task
 
-**Why it is the priority.** #181 is a **data-loss** fix that landed *after* the 2.0.38 cut. It went out in
-vsix 1.10.0, but the npm face — the one with the most users — still has the bug: a BOM in
-`~/.wisp/config.json` (what Notepad and PowerShell's `Out-File -Encoding utf8` write **by default**) makes
-Wisp read it as empty, and because the stores are **read-merge-write**, the next settings change writes that
-emptiness back over the real file. Routing map gone. Same path on `auth.json` + one sign-in = every API key
-and OAuth token gone. Silently.
+This is the first session in the arc that opens with a genuinely empty queue. Do not invent urgency, and do
+not restart the relay chain — with no `ready-for-agent` ticket it picks nothing, writes `queue empty`, stops.
 
-Mechanically identical to #173, which is fresh in the tracker:
+**Ask the user what they want.** If they have no preference, the best default is **#182**.
 
-- Bump `packages/tui/package.json` → `2.0.39`; **tag `v2.0.39` must equal it exactly** or the workflow never
-  fires (the workflow asserts this too, but a bad tag is annoying to unwind — assert before pushing).
-- Changelog entry with a **`### Surfaces`** section (the convention 2.0.38 started).
-- **Direct commit on main, no PR** (`b25e862`, `55daebb`) touching only `CHANGELOG.md` + `package.json`. CI
-  stamps the npm shell + platform package versions from the tag.
-- **Verify past the registry read**: install it and confirm a **BOM'd config survives a subsequent write**.
-  A plain read test would pass on 2.0.38 too — the write is where the bug actually was.
+### Why #182 is the default
 
-## What is released, and what each face is missing
+It is the remaining half of #181. A BOM is fixed, but a *genuinely* unparseable store (truncated write, real
+typo) still degrades to `{}` — and because both stores are **read-merge-write**, that `{}` is merged with the
+next patch and written back over the real file. Same data loss, rarer trigger.
+
+**It is a design call before it is code.** Do not open an editor first. The pure parsers have six callers and
+a total contract (`string → object`, never throws); making them throw changes all six. The shape worth
+exploring is refusing to **write** over contents that did not parse — that is a `writeConfig`/`writeAuth`
+question, not a `parseObject` one. Route it through a grill or `/preset init`, not `/preset scope`.
+
+The rest of the queue is either waiting on time (**#163** — needs a stretch of clean use in the 217k–245k
+band, which is watching, not working) or ungroomed (**#174** Antigravity, **#69** copilot-wisp).
+
+## Released state — nothing is owed
 
 | Face | Version | Missing |
 |---|---|---|
-| npm `wisp-router` | 2.0.38 | **#181** → that is #183 |
-| `wisp` vsix | 1.10.0 | nothing — installed as `esarinazx.wisp@1.10.0` |
-| `wisp-slot` plugin | 1.6.0 | nothing pushed; **the user's install is a stale cache snapshot** |
+| npm `wisp-router` | **2.0.39** | nothing |
+| `wisp` vsix | **1.10.0** | nothing — installed as `esarinazx.wisp@1.10.0` |
+| `wisp-slot` plugin | **1.6.0** | nothing pushed; **the user's install is a stale cache snapshot** |
 
-## Waiting on the user (not blockers)
+## Waiting on the user (not blockers, unchanged)
 
 - **Reload VS Code** → confirm **Kimi** in the picker / native chat + its panel sign-in state.
 - **`/plugin update wisp-slot`** → the dev-machine install is a **cache snapshot** at commit `b45c43c4`
-  (2026-07-25), *not* a live pointer at the checkout. Verified: its `wisp-statusline.js` has **zero**
-  references to `status.json`/`contextPercent`/`meters`. So the `ctx …%` badge will not appear until it
-  updates. (The cached `slot` **skill** is current — 8 `wisp snapshot` refs, no stale lease-file ones.)
+  (2026-07-25), *not* a live pointer at the checkout. The `ctx …%` badge will not appear until it updates.
 - **#167's last third** — a **Grok** turn (`/test grok`). Codex and Anthropic already covered.
 - **#170** — needs a Kimi Code subscription.
 
 ## Landmines
 
 - **A store file that does not parse is not ignored — it is OVERWRITTEN.** Both stores are read-merge-write,
-  so an empty parse result is merged with the next patch and written back. That is what made #181 data loss
-  rather than a nuisance, and it is **still live for genuinely corrupt files (#182)**. Treat any "degrade to
-  `{}`" in this layer as destructive by default.
+  so an empty parse result is merged with the next patch and written back. This is exactly #182 and it is
+  **still live**. Treat any "degrade to `{}`" in this layer as destructive by default.
   [[a-bom-in-wisp-config-silently-empties-the-whole-config]].
+- **A fix release is not verified until the OLD version FAILS the same check.** Most natural checks pass on
+  the broken build too — on #183 a plain *read* check was green on 2.0.38 and 2.0.39 alike, because the read
+  returned `{}` with exit 0. Install the previous published tarball as a control.
+  [[verifying-a-fix-release-needs-the-previous-version-as-a-control]].
+- **npm can 404 a version its own publish job just succeeded on.** Propagation lag, not a broken release —
+  check the job log for `+ wisp-router@<v>` and `npm view … dist-tags`, then retry. Hit this on #183.
 - **RUN `bun run compile` IN BOTH PACKAGES.** The root script only covers `packages/vscode`; `packages/tui`
-  has its own (`tsc -p ./`). Vitest typechecks neither.
+  has its own (`tsc -p ./`). Vitest typechecks neither. Also: the test gate is **`bun run test`** (vitest) —
+  bare `bun test` runs Bun's own runner instead and reports ~53 bogus failures on `vi.stubGlobal`.
   [[widening-a-client-stream-event-union-breaks-else-narrowing-vitest]].
 - **npm is one of THREE faces**, and the vsix bundles its own `@wisp/core`. Every release entry carries a
   `### Surfaces` section — keep it, and **file an owed bump as a ticket in the same pass**; prose evaporates.
@@ -69,36 +74,28 @@ Mechanically identical to #173, which is fresh in the tracker:
 - **Never verify usage from `status.json`.** It is global, and a bridged reader's own turn overwrites it. Use
   the per-session Claude Code transcript, folded by `message.id`.
   [[status-json-is-global-so-it-cannot-observe-another-session]].
-- **A logout/login does NOT test a `defaultModel` change.** Sign-out clears `auth.json`; the picked model
-  lives in `config.json` and survives, and `resolveModel` is `modelMap[id] || defaultModel`. Routing entries
-  pin a model too. Only a home with **no `models.<id>` entry** exercises it.
-- **A model list is not an accepted list.** Changing a Codex default means **probing first**, then widening
-  the whitelist — [[2026-07-29-a-model-list-is-not-an-accepted-list-whitelist-the-probed-ids]].
-- **Don't widen `BridgeStreamEvent` casually.** The Anthropic encoder's `push()` reads an unrecognized event
-  as a **client tool call** — an unhandled member invents a `tool_use` block instead of degrading.
-  [[2026-07-29-quota-is-a-side-channel-not-a-bridge-stream-event]].
-- **Anthropic quota is a FRACTION (0.22), Codex an INTEGER percent (7).** Normalized in `status.ts` — do not
-  re-normalize downstream. Never filter headers by keyword regex.
 - **`## Blocked by` on the harvest tickets is body text, not native links** — GraphQL `blockedBy` returns
   empty even for a genuinely blocked ticket.
   [[harvest-tickets-carry-body-text-blockers-not-native-links]].
 - **`.context/` commits go to main, never a ticket branch.**
 
-## Loose thread noticed, not touched
+## Loose threads noticed, not touched
 
 `packages/vscode/src/chatProvider.ts` — #165's Anthropic branch has a **duplicated**
-`if (ev.type !== 'toolCall') continue;`. Dead, not wrong: it compiles and behaves identically. Noted on #180
-(now closed) — worth deleting next time that file is open.
+`if (ev.type !== 'toolCall') continue;`. Dead, not wrong: it compiles and behaves identically. Worth deleting
+next time that file is open. (Still untouched — this session never opened it.)
+
+`packages/tui/package.json` itself starts with a **UTF-8 BOM**. Harmless today — Bun's `.json()` tolerates it
+and the release workflow reads the version through exactly that path — but it is a live tripwire if anything
+ever reads that file with a bare `JSON.parse`.
 
 ## Related
 
 - [[active-work]]
 - [[overview]]
-- [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
+- [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]
 - [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
+- [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
 - [[status-json-is-global-so-it-cannot-observe-another-session]]
-- [[2026-07-29-quota-is-a-side-channel-not-a-bridge-stream-event]]
-- [[2026-07-29-a-model-list-is-not-an-accepted-list-whitelist-the-probed-ids]]
 - [[harvest-tickets-carry-body-text-blockers-not-native-links]]
 - [[widening-a-client-stream-event-union-breaks-else-narrowing-vitest]]
-- [[cc-transcript-rows-are-blocks-not-messages]]

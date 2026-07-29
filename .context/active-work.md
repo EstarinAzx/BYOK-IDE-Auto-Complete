@@ -7,48 +7,44 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-29 by Opus 5 (relay leg 9 → then a live verification + fix session with the user)._
-_At commit: `ab2235b` on main, pushed. **Agent queue empty.**_
+_Last updated: 2026-07-29 by Opus 5 (release session: #183, the npm cut)._
+_At commit: `819900b` on main, pushed, tag `v2.0.39`. **Agent queue empty.**_
 
 ## Current focus
 
-**Spec #164 (the CLIProxyAPI harvest) is complete, shipped to all three faces, and every live check passed.**
-Nine tickets landed across nine relay legs; then, with the user present, the whole batch was verified against
-real bridged sessions, one real bug was found and fixed, and the two non-npm faces were cut.
+**Nothing is in flight, and for the first time in this arc no face is missing a shipped fix.** Spec #164 (the
+CLIProxyAPI harvest) closed last session; this session cut **npm `wisp-router` 2.0.39** (#183), which carried
+#181's data-loss fix to the last face that lacked it.
 
 **What is released right now:**
 
 | Face | Version | Carries |
 |---|---|---|
-| npm `wisp-router` | **2.0.38** | the harvest — but **NOT #181's data-loss fix** (landed after the cut) → **#183** |
+| npm `wisp-router` | **2.0.39** | the harvest **and** #181. Nothing owed |
 | `wisp` vsix | **1.10.0** | everything, including #181. Installed locally as `esarinazx.wisp@1.10.0` |
 | `wisp-slot` plugin | **1.6.0** | #171's statusline reader. Pushed — the user must `/plugin update` |
 
-**The single most important open item is #183** — cut npm 2.0.39. Until then the face with the most users
-still has a bug that erases `config.json` / `auth.json`.
+No release debt. The next piece of work is a **choice**, not a queue item — see *Queue*.
 
 ## State
 
 - **In flight:** nothing. Working tree clean on main. **Relay chain stopped** (`stop: true`), queue dry.
-- **Live verification — all green, on the published 2.0.38:**
-  - **#165 ✅** — 7/7 Codex-served turns reported non-zero usage. `cacheW=0` throughout while `cacheR` grew =
-    the Responses-wire fingerprint, so the numbers are genuinely the Codex mapping. Read from the Claude Code
-    **transcript** (per-session, durable), folded by `message.id`.
+- **#183 ✅ `819900b` / `v2.0.39`** — release green on all four native runners + publish; `latest` is 2.0.39.
+  Gate before the cut: **783/783 tests, `bun run compile` clean in both packages.**
+  - **Verified past the registry read, with a control.** The same BOM'd `config.json` plus one unrelated
+    `wisp routing set haiku codex/gpt-5.6-sol`, run against the *published* tarballs: **2.0.38 erased**
+    `provider`, `effort` and the pre-existing `opus` route; **2.0.39 kept all three**. The control failing is
+    the load-bearing half — a plain *read* check is green on both, because pre-fix the read returned `{}` with
+    exit 0. [[verifying-a-fix-release-needs-the-previous-version-as-a-control]].
+- **Live verification of the harvest — all green** (done last session against published 2.0.38):
+  - **#165 ✅** — 7/7 Codex-served turns reported non-zero usage; `cacheW=0` while `cacheR` grew = the
+    Responses-wire fingerprint. Read from the per-session Claude Code **transcript**, folded by `message.id`.
   - **#169 ✅** — 2/2 keyed turns (`glm`, `deepseek` → **OpenCode Go**) reported usage; no 400 on
     `stream_options`. ⚠ Both aliases hit the **same Provider row** — one backend verified, not nine.
-  - **#171 ✅ (writer)** — `status.json` carried `211214/1000000 → 21%` and meters `5h 55% · 7d 27%`, i.e.
-    Anthropic **fractions** correctly normalized to 0..100.
-  - **#172 ✅** — `/test` in a throwaway `WISP_HOME` holding only `{"provider":"codex"}` printed
-    `/test: Codex (gpt-5.6-sol)` and streamed. Self-verifying: the real machine pins `gpt-5.6-terra`.
+  - **#171 ✅ (writer)** — `status.json` carried `211214/1000000 → 21%` and meters `5h 55% · 7d 27%`.
+  - **#172 ✅** — `/test` in a throwaway `WISP_HOME` printed `/test: Codex (gpt-5.6-sol)` and streamed.
   - **#163 → diagnosis confirmed, ticket open.** The 502s were a usage-reporting bug, not a window bug.
-    Closing needs a stretch of use with no refusal in the 217k–245k band.
-- **Fixed this session:**
-  - **#181 ✅ `4ec1a81`** — a UTF-8 BOM made `parseObject` return `{}`, and since both stores are
-    **read-merge-write**, the next patch was written back **over the real file**. Measured: a config with two
-    families + an alias became `{"effort":"low"}`; `auth.json` lost every key and OAuth bundle after one
-    sign-in. One-line BOM strip; 783/783 (+4, including a read-merge-write regression per store).
-  - **#180 ✅ `ab2235b`** — vsix 1.9.0 → **1.10.0** (packaged + installed) and `wisp-slot` 1.5.0 → **1.6.0**.
-- **User action pending:**
+- **User action pending (unchanged — none block anything):**
   - **Reload VS Code**, confirm **Kimi** in the picker / native chat and its panel sign-in state.
   - **`/plugin update wisp-slot`** — the install is a **cache snapshot** pinned at `b45c43c4` (2026-07-25),
     not a live pointer at the checkout, so the `ctx …%` badge will not appear until it updates.
@@ -59,22 +55,25 @@ still has a bug that erases `config.json` / `auth.json`.
 ## Queue
 
 Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #168 `89f94c5`, #169 `7b8d73d`,
-#170 `d656686`, #171 `3e0125e`, #172 `49761d8`, #173 `55daebb`/`v2.0.38`).
+#170 `d656686`, #171 `3e0125e`, #172 `49761d8`, #173 `55daebb`/`v2.0.38`), plus the follow-ups #181 `4ec1a81`,
+#180 `ab2235b` and #183 `819900b`/`v2.0.39`.
 
-**Open — no `ready-for-agent` ticket exists:**
+**Open — no `ready-for-agent` ticket exists. Nothing is urgent; pick by appetite:**
 
 | # | Ticket | Note |
 |---|---|---|
-| **183** | **Cut npm 2.0.39 — carry #181 to npm** | **The priority.** npm users still have the data-loss bug. Mechanically identical to #173. |
-| **182** | A genuinely unparseable store still silently resets | The remaining half of #181 — same read-merge-write mechanism, rarer trigger. Needs a design call; the promising shape is refusing to **write** over contents that did not parse. |
-| **163** | The 502 observation | Diagnosis confirmed. Open pending a stretch of clean use. |
-| **174** | Antigravity Provider | Placeholder, ungroomed. |
+| **182** | A genuinely unparseable store still silently resets | The remaining half of #181 — same read-merge-write mechanism, rarer trigger. **Needs a design call before code**; the promising shape is refusing to **write** over contents that did not parse. The best-understood item here. |
+| **163** | The 502 observation | Diagnosis confirmed. Open pending a stretch of clean use in the 217k–245k band. Closing it is *waiting*, not working. |
+| **174** | Antigravity Provider | Placeholder, ungroomed. Needs `/preset init` or a grill before it is a ticket. |
 | **69** | copilot-wisp launcher | Ungroomed. |
 
 ## Pick up here
 
-**#183.** It is a release cut with established mechanics and it closes a real user-facing hole. Everything
-else can wait.
+**No forced move.** The release debt that drove the last three sessions is paid.
+
+Best default is **#182** — it is the only open item with a known mechanism and a real user cost, and it is a
+*design* question first (fail loud vs. refuse-to-write), so it wants a grill or a short spec before code, not
+a ticket-loop. Everything else is either waiting on time (#163) or ungroomed (#174, #69).
 
 Do **not** restart the relay chain expecting work — with no `ready-for-agent` ticket it will pick nothing,
 write `queue empty`, and stop.
@@ -82,17 +81,19 @@ write `queue empty`, and stop.
 ## Skills for next session
 
 - `/preset pick-up` — session door.
-- `packages/tui:verify` — sandboxed CLI verification for TUI command surfaces.
+- `packages/tui:verify` — sandboxed CLI verification for TUI command surfaces (isolated `WISP_HOME`).
+- `grill-me` / `/preset init` — the right shape for #182's design call and for grooming #174.
 - `/relay N=1 /preset ticket-loop` — only after something is labelled `ready-for-agent`.
 
 ## Open questions
 
+- **Tolerate or fail loud on a genuinely corrupt store?** #182, and now the top open question. Today Wisp
+  does neither — it discards and overwrites. The shape worth exploring is refusing to *write*, not making the
+  pure parsers throw (six callers depend on the current total contract).
 - **Do the 502s actually stop?** #163. Watch for refusals in the 217k–245k band. Compaction should now fire,
   so that band may simply stop being reached — that is the fix working, not evidence going missing.
-- **Tolerate or fail loud on a genuinely corrupt store?** #182. Today Wisp does neither — it discards and
-  overwrites. The shape worth exploring is refusing to *write*, not making the pure parsers throw.
-- **Does `auth.json` share every config failure mode?** Same read path and same read-merge-write shape;
-  the BOM case is now proven and fixed for both, the corrupt case is not.
+- **Does `auth.json` share every config failure mode?** Same read path and same read-merge-write shape; the
+  BOM case is now proven and fixed for both, the corrupt case is not.
 - **Does any keyed backend reject `stream_options`?** **OpenCode Go accepts it** (#169, verified). Still
   unexercised: OpenAI, Groq, Mistral, OpenRouter, Ollama, Ollama Cloud, KiloCode, Cline, Custom. A rejection
   is a **400 naming `stream_options`** — loud, not silent — and the fix is a per-row opt-out flag.
@@ -115,4 +116,5 @@ write `queue empty`, and stop.
 - [[gotchas]]
 - [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
 - [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
+- [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]
 - [[status-json-is-global-so-it-cannot-observe-another-session]]
