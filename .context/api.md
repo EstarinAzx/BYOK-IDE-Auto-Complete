@@ -1,7 +1,7 @@
 ---
 type: api
 project: wisp
-updated: 2026-07-17
+updated: 2026-07-29
 tags: [context, api, vscode]
 ---
 
@@ -65,7 +65,11 @@ model-map/baseUrl getters + async `keyFor`/`clientFor`); `extension.ts` owns sec
   - **keyed** (openai-chat) → OpenAI SDK `chat.completions.create` (`stream:true`, system re-prepended).
   - **`codex`** (#39) → `handleCodexChat`: `codexStream` (Responses SSE) on `codexAuth.current()` creds +
     `standardEffortToCodex(effort)` + `toCodexResponsesTools`, `parsed.system` re-attached as a leading
-    `role:'system'` message (→ `instructions`). No creds → **401**; stream throw → **502**.
+    `role:'system'` message (→ `instructions`). No creds → **401**; stream throw → **502**, *unless*
+    `classifyCodexError` recognises the body (#166): context too large / bad thinking signature / previous
+    response not found → **400**, auth unavailable → **401**, each with an `error.type` on the body and the
+    classified code in the log. The stream is **primed** before the SSE head so a pre-stream failure still has
+    a status to answer with — see [[a-door-commits-its-200-head-before-the-upstream-request-has-run]].
   - **`anthropic`** (#40) → `handleAnthropicChat`: `anthropicStream` (Messages SSE) on `anthropicAuth.current()`
     creds + **raw** `effort` (the body builder maps it via `anthropicThinkingEffort`) + `toAnthropicTools`,
     `parsed.system` re-attached as a leading `role:'system'` message (body builder lifts it to top-level
