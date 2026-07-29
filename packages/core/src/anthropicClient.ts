@@ -17,10 +17,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { AnthropicCreds, buildAnthropicMessagesBody, anthropicUserId, mintAnthropicDeviceId, anthropicTextDelta, anthropicUsage, anthropicDiagnosis, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type BridgeUsage, type EffortLevel, type AnthropicCacheMissReason, type AnthropicTruncationReason } from './catalog';
+import { AnthropicCreds, buildAnthropicMessagesBody, anthropicUserId, mintAnthropicDeviceId, anthropicTextDelta, anthropicUsage, anthropicDiagnosis, reduceAnthropicToolCalls, anthropicTruncationReason, anthropicModelCaps, parseSseBlock, parseAnthropicQuota, type AnthropicMessage, type AnthropicTool, type AssembledToolCall, type BridgeUsage, type EffortLevel, type AnthropicCacheMissReason, type AnthropicTruncationReason, type QuotaMeter } from './catalog';
 import { sseBlocks } from './codexClient';
 
-type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; systemSuffix?: string; previousMessageId?: string; signal?: AbortSignal };
+// onQuota (#171): the side channel for the response's utilization headers — see the codexClient twin. Quota
+// is telemetry, not wire content, so it deliberately does NOT join AnthropicStreamEvent.
+type AnthropicRequestArgs = { creds: AnthropicCreds; baseUrl: string; model: string; messages: AnthropicMessage[]; tools?: AnthropicTool[]; toolChoice?: 'auto' | 'any'; effort?: EffortLevel; systemSuffix?: string; previousMessageId?: string; signal?: AbortSignal; onQuota?: (meters: QuotaMeter[]) => void };
 
 // What anthropicStream yields — an answer-text fragment, or a fully-assembled tool call (#30 agent mode).
 // The native-chat consumer maps these to LanguageModelTextPart / LanguageModelToolCallPart.
@@ -172,6 +174,12 @@ const anthropicMessagesRequest = async (args: AnthropicRequestArgs & { stream?: 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`Anthropic API error ${res.status}${body.trim() ? `: ${body.trim().slice(0, 500)}` : '.'}`);
+  }
+  // #171: utilization rides the response HEAD — readable before any SSE byte. No meters reported → no call,
+  // so the reader shows nothing rather than a synthesized 0%.
+  if (args.onQuota) {
+    const meters = parseAnthropicQuota(res.headers);
+    if (meters.length) args.onQuota(meters);
   }
   return res;
 };

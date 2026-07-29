@@ -29,8 +29,9 @@ import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
   toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, isCodexProvider, isAnthropicProvider, isXaiProvider,
   anthropicCacheOutcome, anthropicDiagnosisStale, createAnthropicDiagnosisChain, createAnthropicCacheGrowthTracker,
-  classifyCodexErrorMessage,
+  classifyCodexErrorMessage, buildStatus,
   type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type EffortLevel, type BridgeUsage, type AnthropicCacheMissReason, type CodexErrorClass,
+  type QuotaMeter, type WispStatus,
 } from './catalog';
 import { codexStream } from './codexClient';
 import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
@@ -88,6 +89,10 @@ export type BridgeDeps = {
   port: () => number;                                             // 127.0.0.1 listen port (wisp.bridge.port)
   accessSecret: () => string;                                     // required Bearer on every request
   log: (message: string) => void;
+  // #171: persist the statusline snapshot after a bridged turn (the face writes ~/.wisp/status.json). OPTIONAL
+  // — a host that omits it simply produces no live statusline, never an error, and the Bridge never reads it
+  // back: this is write-only telemetry consumed by an out-of-process script.
+  recordStatus?: (status: WispStatus) => void;
 };
 
 // A local process that already holds the secret is the threat model (per the PRD security note), but an
@@ -567,8 +572,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // ponytail: send params match the records (tool_choice 'auto'); the forced tool_choice + temperature #45
   // carries on `parsed` are not yet threaded to the backend (each backend's tool_choice API differs) — the
   // background tip call degrades to a no-op, as slice #44 observed. Wire them through if that call must fire.
+  // onQuota (#171) is threaded ONLY by the door's base pass — the reviewer sub-call and advisor continuations
+  // spend from the same account, but the snapshot describes the user's turn, so the last writer must be it.
   const startProviderStream = async (
     parsed: BridgeAnthropicRequest, provider: Provider, pinnedModel: string | undefined, controller: AbortController,
+    onQuota?: (meters: QuotaMeter[]) => void,
   ): Promise<{ ok: false; status: number; message: string } | { ok: true; events: AsyncIterable<BridgeStreamEvent>; model: string }> => {
     // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
     const modelId = pinnedModel ?? resolveModel(deps.modelMap(), provider);
@@ -583,7 +591,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
       // Non-strict tools: the door forwards an external client's toolset, and Codex strict mode rejects the
       // rich schemas Claude Code's tools carry (dynamic maps / propertyNames). strict:false passes them through.
-      const upstream = codexStream({ creds, baseUrl, model: modelId, messages, effort: standardEffortToCodex(effort), tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', signal: controller.signal });
+      const upstream = codexStream({ creds, baseUrl, model: modelId, messages, effort: standardEffortToCodex(effort), tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', signal: controller.signal, onQuota });
       return { ok: true, events: mapOAuthStream(upstream), model: modelId };
     }
     if (isAnthropicProvider(provider)) {
@@ -604,7 +612,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // parsed.tools already, so each prefix variant chains its own previous message) — advisor
       // continuation passes chain through here too.
       const tools = toAnthropicTools(parsed.tools);
-      const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools, toolChoice: 'auto', systemSuffix: parsed.systemSplit?.volatile || undefined, previousMessageId: diagnosisChain.previousIdFor(modelId, messages, tools), signal: controller.signal });
+      const upstream = anthropicStream({ creds, baseUrl, model: modelId, messages, effort, tools, toolChoice: 'auto', systemSuffix: parsed.systemSplit?.volatile || undefined, previousMessageId: diagnosisChain.previousIdFor(modelId, messages, tools), signal: controller.signal, onQuota });
       return { ok: true, events: mapOAuthStream(upstream, (id) => diagnosisChain.record(modelId, messages, id, tools)), model: modelId };
     }
     if (isXaiProvider(provider)) {
@@ -667,6 +675,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     // and the reviewer sub-call routes the picker's advisor model through the Routing map (Stage 4). Absent
     // an advisor tool this whole block is skipped and the door behaves exactly as before.
     const advisorTools = parsed.advisor ? [...parsed.tools, advisorToolSpec()] : parsed.tools;
+    // #171: the base pass's quota headers, captured off the response head (see the clients' onQuota). Stays
+    // undefined for a Provider that reports none — the snapshot then carries no meters at all.
+    let quotaMeters: QuotaMeter[] | undefined;
     // The reviewer: hand the advisor Target the conversation + the review instruction, no tools, drain its
     // text as the advice. Its own model route is the picker's choice (claude-wisp- stripped like body.model),
     // falling back to the base route so the Target advises itself when no separate advisor model resolves.
@@ -695,7 +706,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // pass is retried — an advisor continuation pass below is mid-conversation, so content has already been
       // delivered and re-opening it would discard the turn.
       const result = await openPrimed(provider, executorFor(provider), controller, () =>
-        startProviderStream({ ...parsed, tools: advisorTools }, provider, route.pinnedModel, controller));
+        startProviderStream({ ...parsed, tools: advisorTools }, provider, route.pinnedModel, controller, (m) => { quotaMeters = m; }));
       if (!result.ok) return sendError(res, result.status, result.message);
 
       // The event source: with an advisor tool, the door plays the server role via runAdvisorLoop (the first
@@ -753,6 +764,13 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       ensureStarted();
       res.write(enc.finish());
       res.end();
+      // #171: the statusline snapshot — the turn's real cost + the account's utilization, for the bridged
+      // Claude Code session's badge. Written from THIS door only: it is the route Claude Code takes, and the
+      // statusline exists nowhere else. lastUsage absent (a Provider that reports none) → buildStatus omits
+      // every context field rather than writing a zero.
+      // ponytail: streaming path only. The non-streaming branch above is Claude Code's /model validation
+      // probe, not a turn — recording it would overwrite a real reading with a probe's.
+      deps.recordStatus?.(buildStatus({ now: Date.now(), provider, model: result.model, usage: lastUsage, meters: quotaMeters }));
       // Cache-health check (#111 regression guard): only the Anthropic OAuth path reports real cache tokens,
       // and only a probable MISS or PARTIAL is worth a line — a healthy hit/fresh turn stays silent so the
       // log isn't noise.
