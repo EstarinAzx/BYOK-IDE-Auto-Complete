@@ -36,7 +36,7 @@ import { codexStream } from './codexClient';
 import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
 import { xaiStream } from './xaiClient';
 import {
-  parseOpenAiChatRequest, buildModelsList, textChunk, toolCallChunk, finalChunk, sseLine, SSE_DONE,
+  parseOpenAiChatRequest, buildModelsList, textChunk, toolCallChunk, finalChunk, sseLine, SSE_DONE, chatCompletionsUsage,
   type ChunkMeta, type BridgeChatRequest, type BridgeStreamEvent,
 } from './bridge';
 import {
@@ -281,7 +281,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // Map a keyed OpenAI-SDK stream onto BridgeStreamEvent. Tool calls arrive as fragments across chunks, so they
   // buffer and assemble whole once the stream ends (the same shape the LM Chat Provider path folds). Structural
   // chunk type (not the SDK's) keeps this in the module's hand-rolled-shape style.
-  type KeyedChunk = { choices?: { delta?: { content?: string | null; tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[] };
+  // #169: `usage` rides the stream's FINAL chunk, and only when the request opted in. That chunk carries an
+  // EMPTY choices array, so the delta reads below already skip it — the mapping is purely additive.
+  type KeyedChunk = { choices?: { delta?: { content?: string | null; tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[]; usage?: unknown };
   const mapKeyedStream = async function* (upstream: AsyncIterable<KeyedChunk>): AsyncGenerator<BridgeStreamEvent> {
     const toolDeltas: ToolCallDelta[] = [];
     for await (const chunk of upstream) {
@@ -289,6 +291,10 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const delta = choice?.delta?.content ?? '';
       if (delta) yield { type: 'text', text: delta };
       for (const tc of choice?.delta?.tool_calls ?? []) toolDeltas.push({ index: tc.index, id: tc.id, name: tc.function?.name, args: tc.function?.arguments });
+      // No usage on the chunk → no event at all. A Provider that ignores the opt-in must finish clean, and a
+      // synthesized zero is the bug #165 exists to kill (see chatCompletionsUsage).
+      const usage = chatCompletionsUsage(chunk);
+      if (usage) yield { type: 'usage', usage };
     }
     for (const call of assembleToolCalls(toolDeltas)) yield { type: 'tool_call', call };
   };
@@ -344,8 +350,10 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const base = buildOpenAiChatMessages(parsed.turns);
       const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...base] : base;
       const tools = toOpenAiTools(parsed.tools);
+      // #169: stream_options is the opt-in — a chat-completions stream reports NO usage without it. The door
+      // always streams upstream (even when the client asked stream:false), so the flag is unconditional too.
       const upstream = await client.chat.completions.create(
-        { model, messages, stream: true, ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}) },
+        { model, messages, stream: true, stream_options: { include_usage: true }, ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}) },
         { signal },
       );
       return { ok: true, events: mapKeyedStream(upstream) };
@@ -613,8 +621,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const base = buildOpenAiChatMessages(parsed.turns);
     const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...base] : base;
     const tools = toOpenAiTools(parsed.tools);
+    // #169: same opt-in as the OpenAI door's keyed executor — this is the tail Claude Code actually goes through.
     const upstream = await client.chat.completions.create(
-      { model: modelId, messages, stream: true, ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}) },
+      { model: modelId, messages, stream: true, stream_options: { include_usage: true }, ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}) },
       { signal: controller.signal },
     );
     return { ok: true, events: mapKeyedStream(upstream), model: modelId };

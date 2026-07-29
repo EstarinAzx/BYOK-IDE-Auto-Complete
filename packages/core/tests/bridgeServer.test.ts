@@ -330,3 +330,92 @@ describe('Bridge — transient retry and cooldown (#168)', () => {
     expect(cooled).toContain(`${TRANSIENT_COOLDOWN_SECONDS}s`);
   });
 });
+
+// ---------------- #169: API-key Providers report real token usage ---------------- //
+
+// A plain OpenAI-compatible catalog row — no `kind`, so it falls through to the keyed executor.
+const KEYED: Provider = { id: 'opencode-go', label: 'OpenCode Go', baseUrl: 'https://opencode.ai/zen/go/v1', defaultModel: 'gpt-x', apiKeyEnv: 'OPENCODE_API_KEY' };
+
+// A stand-in for the OpenAI SDK client `deps.clientFor` hands back: yields the given chunks and records the
+// request body, so a test can assert BOTH what was asked for and what came back.
+const keyedClient = (chunks: unknown[], seen: { body?: any } = {}) => ({
+  seen,
+  client: {
+    chat: {
+      completions: {
+        create: async (body: any) => {
+          seen.body = body;
+          return (async function* () { for (const c of chunks) yield c; })();
+        },
+      },
+    },
+  } as any,
+});
+
+// One text chunk, then the terminal usage chunk an opted-in stream sends — note its EMPTY choices array.
+const KEYED_TEXT = { choices: [{ delta: { content: 'Hello from the key' } }] };
+const KEYED_USAGE = { choices: [], usage: { prompt_tokens: 1000, prompt_tokens_details: { cached_tokens: 800 }, completion_tokens: 300 } };
+
+const keyedDeps = (chunks: unknown[], seen: { body?: any } = {}): BridgeDeps => {
+  const { client } = keyedClient(chunks, seen);
+  return makeDeps({ providers: [KEYED], activeProviderId: () => 'opencode-go', clientFor: async () => client });
+};
+
+describe('Bridge — API-key Provider usage (#169)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // The opt-in itself: chat-completions streams omit usage entirely unless the request asks for it, so both
+  // keyed call sites must send stream_options. The OpenAI door's executor is the first of the two.
+  it('asks for usage on the keyed stream from the OpenAI door', async () => {
+    const seen: { body?: any } = {};
+    await runServer(keyedDeps([KEYED_TEXT, KEYED_USAGE], seen), async (port) => {
+      await post(port, '/v1/chat/completions', { model: 'opencode-go', stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(seen.body.stream_options).toEqual({ include_usage: true });
+    });
+  });
+
+  // The second call site — startProviderStream's keyed tail, which is what Claude Code actually goes through.
+  it('asks for usage on the keyed stream from the Anthropic door', async () => {
+    const seen: { body?: any } = {};
+    await runServer(keyedDeps([KEYED_TEXT, KEYED_USAGE], seen), async (port) => {
+      await post(port, '/v1/messages', { model: 'opencode-go', max_tokens: 100, stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(seen.body.stream_options).toEqual({ include_usage: true });
+    });
+  });
+
+  // The payoff: the final chunk's counts reach the client as real numbers, split by #165's convention —
+  // cached prompt tokens in cache-read, the uncached remainder in input. Only the Anthropic door forwards
+  // usage to the client, so this is the door the criterion is read through.
+  it('reports the real counts on the Anthropic door, cached tokens split into cache-read', async () => {
+    await runServer(keyedDeps([KEYED_TEXT, KEYED_USAGE]), async (port) => {
+      const { status, body } = await post(port, '/v1/messages', { model: 'opencode-go', max_tokens: 100, stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(200);
+      expect(body).toContain('Hello from the key');
+      const delta = body.split('\n').filter((l) => l.startsWith('data: ')).map((l) => JSON.parse(l.slice(6))).find((d) => d.type === 'message_delta');
+      expect(delta.usage).toMatchObject({ input_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 800, output_tokens: 300 });
+    });
+  });
+
+  // A Provider that IGNORES the opt-in sends no usage chunk at all. The turn must still complete cleanly, and
+  // no usage event may be synthesized — the counts stay the encoder's zeroed default rather than a fake.
+  it('completes cleanly with no usage event when the Provider ignores the opt-in', async () => {
+    await runServer(keyedDeps([KEYED_TEXT]), async (port) => {
+      const { status, body } = await post(port, '/v1/messages', { model: 'opencode-go', max_tokens: 100, stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(200);
+      expect(body).toContain('Hello from the key');
+      const delta = body.split('\n').filter((l) => l.startsWith('data: ')).map((l) => JSON.parse(l.slice(6))).find((d) => d.type === 'message_delta');
+      expect(delta.usage).toEqual({ output_tokens: 0 });
+    });
+  });
+
+  // The usage chunk carries an EMPTY choices array; a reader that assumes every chunk has a choice would
+  // mangle it. Nothing about the non-streaming reply may change — same text, same JSON shape as before.
+  it('leaves a non-streaming keyed reply unaffected', async () => {
+    await runServer(keyedDeps([KEYED_TEXT, KEYED_USAGE]), async (port) => {
+      const { status, body } = await post(port, '/v1/chat/completions', { model: 'opencode-go', stream: false, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(200);
+      expect(body).not.toContain('event:');
+      expect(JSON.parse(body).choices[0].message.content).toBe('Hello from the key');
+    });
+  });
+});

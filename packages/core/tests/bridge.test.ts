@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseOpenAiChatRequest,
   textChunk, toolCallChunk, finalChunk, sseLine, SSE_DONE,
-  buildModelsList,
+  buildModelsList, chatCompletionsUsage,
 } from '../src/bridge';
 import type { ChatModelInfo } from '../src/catalog';
 
@@ -295,5 +295,52 @@ describe('buildModelsList', () => {
     const list = buildModelsList([modelInfo('codex')], ['sol', 'lite']);
     expect(list.data.map((m) => m.id)).toEqual(['codex', 'sol', 'lite']);
     expect(list.data[1]).toEqual({ id: 'sol', object: 'model', created: 0, owned_by: 'wisp' });
+  });
+});
+
+// #169: the chat-completions→Bridge usage mapping — the sibling of responsesUsage (#165) for the OTHER wire.
+// Same target shape and same conventions; only the source field names differ (prompt_/completion_ instead of
+// input_/output_). The keyed path reports usage only on an opted-in stream, and only on its final chunk.
+describe('chatCompletionsUsage (#169)', () => {
+  // The mapping proper: cached prompt tokens move to cache-read, the prompt total loses them, completion
+  // passes through as output.
+  it('maps a chat-completions usage block onto the Anthropic-shaped BridgeUsage', () => {
+    expect(chatCompletionsUsage({ usage: { prompt_tokens: 1000, prompt_tokens_details: { cached_tokens: 800 }, completion_tokens: 300 } }))
+      .toEqual({ input_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 800, output_tokens: 300 });
+  });
+
+  // The chat-completions protocol has no cache-WRITE concept either, so that tier is always zero.
+  it('always reports zero cache-creation tokens', () => {
+    expect(chatCompletionsUsage({ usage: { prompt_tokens: 50, completion_tokens: 10 } })?.cache_creation_input_tokens).toBe(0);
+  });
+
+  // The all-cached edge: cached === the prompt total, so uncached input is 0.
+  it('reports zero uncached input when the whole prompt was cached', () => {
+    expect(chatCompletionsUsage({ usage: { prompt_tokens: 700, prompt_tokens_details: { cached_tokens: 700 }, completion_tokens: 5 } }))
+      .toMatchObject({ input_tokens: 0, cache_read_input_tokens: 700 });
+  });
+
+  // Defensive, same as #165: a backend reporting cached > total must not produce a negative meter reading.
+  it('never lets uncached input go negative', () => {
+    expect(chatCompletionsUsage({ usage: { prompt_tokens: 100, prompt_tokens_details: { cached_tokens: 250 }, completion_tokens: 1 } })?.input_tokens).toBe(0);
+  });
+
+  // No details block → nothing was cached; the prompt total is entirely uncached.
+  it('treats a missing details block as nothing cached', () => {
+    expect(chatCompletionsUsage({ usage: { prompt_tokens: 400, completion_tokens: 20 } }))
+      .toEqual({ input_tokens: 400, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 20 });
+  });
+
+  // A Provider that IGNORES the opt-in sends chunks with no usage at all → undefined, so the caller emits no
+  // event rather than a synthesized zero (the same distinction #165 turns on).
+  it('returns undefined when the chunk carries no usage', () => {
+    expect(chatCompletionsUsage({ choices: [] })).toBeUndefined();
+    expect(chatCompletionsUsage(undefined)).toBeUndefined();
+    expect(chatCompletionsUsage({ usage: null })).toBeUndefined();
+  });
+
+  // A non-numeric total is not usable data — treat it as absent rather than coerce it to NaN.
+  it('returns undefined when the token totals are not numbers', () => {
+    expect(chatCompletionsUsage({ usage: { prompt_tokens: 'lots', completion_tokens: 3 } })).toBeUndefined();
   });
 });
