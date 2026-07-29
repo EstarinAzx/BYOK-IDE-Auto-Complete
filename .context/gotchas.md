@@ -1,7 +1,7 @@
 ---
 type: gotchas-index
 project: wisp
-updated: 2026-07-25
+updated: 2026-07-29
 tags: [context, gotchas]
 ---
 

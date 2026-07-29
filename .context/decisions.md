@@ -1,7 +1,7 @@
 ---
 type: decisions-index
 project: wisp
-updated: 2026-07-28
+updated: 2026-07-29
 tags: [context, decisions]
 ---
 
@@ -11,6 +11,7 @@ Settled questions. One file per decision in `decisions/`. Newest first.
 
 For substantial architectural decisions prefer an ADR in `docs/adr/` and link it from an entry here.
 
+- [[2026-07-29-cliproxyapi-harvest-scoped-minimum-record-usage-first]] — **SPEC'D, not built (#164 + 8 tickets):** the codex 502s trace to Wisp reporting **zero usage for every non-Anthropic Provider** (only `anthropicClient` emits a usage event) — verified against transcripts, so Claude Code never auto-compacts and the history grows until Codex rejects it; harvest order fixed usage → classify → **minimum ProviderExecutor record** → retry → api-key usage → Kimi; CLIProxyAPI's registry + translator matrix **rejected** (two doors don't earn it); seam moved BEFORE retry so retry is written once not three times; `count_tokens` deferred (tiktoken dep, may be moot after usage); Antigravity split to its own spec
 - [[2026-07-28-codex-caps-fallback-tiers-picker-fix-ships-in-the-vsix]] — **SHIPPED wisp 1.9.0 (vsix):** `codexModelCaps` fallback tiers mirror models.dev (5.4+/5.6 flagships 1.05M/128K, -codex/-mini 400K/128K, spark 128K/32K, o-series 200K/100K; branch order load-bearing); npm release skipped — the doors advertise ids/labels only, nothing in wisp-router reads the caps; NOT a 502 fix (bridge never trims — upstream enforces its own limit)
 - [[2026-07-25-truncation-reason-rides-out-of-band-marker-gated-on-answer-text]] — **SHIPPED 2.0.37:** upstream's cut-short `stop_reason` reaches the client as a real `stop_reason` via a `truncation` BridgeStreamEvent, outranking `tool_use` (mirrors upstream, which sent `refusal` beside a real tool block); the visible marker is gated on `sawDelta` not `delivered` — thinking is not an answer, and 5 of 6 content-bearing refusals are `[thinking, marker]`; removing the marker outright would resurrect the #89 empty envelope; every `BridgeStreamEvent` consumer MUST handle `truncation` or the encoder's tool fallthrough invents a `tool_use` block
 - [[2026-07-25-1m-tier-is-a-harness-label-not-a-wire-model]] — **SHIPPED 2.0.36:** a trailing `[1m]` is a Claude Code-local budget label, not a wire model (live probe: 404 suffixed / 200 bare); `stripModelTier` drops it at ONE seam (the body `model` field) and never touches beta selection; wisp-slot's 1M spawn id is impossible (Agent `model` is a family-word enum) so 1.4.0 was reverted in 1.5.0; opus-5 effort live-probed at xhigh; **aliases CAN carry the 1M budget** — CC tests `/\[1m\]/i` on the raw model string first, no registry lookup, so `claude-wisp-<alias>[1m]` budgets 1M
