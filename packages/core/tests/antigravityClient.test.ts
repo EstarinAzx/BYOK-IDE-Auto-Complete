@@ -15,6 +15,11 @@
  *
  * Scrubbed from the capture, deliberately: the real Cloud Code project id (an account-identifying value —
  * this repo uses the placeholder `example-project-1`) and the bulk of the opaque signature blob.
+ *
+ * ⚠ THE FRAMING IS PART OF THE FIXTURE. This wire separates frames with **CRLF** (`\r\n\r\n`), and the first
+ * cut of these tests used `\n\n` because the bytes were retyped rather than copied. They passed; the live
+ * turn then returned an empty answer, because a plain '\n\n' split never matches '\r\n\r\n' and the whole
+ * response arrived as a single unparseable block. Keep `FRAME` below — an LF fixture cannot catch this.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -26,20 +31,20 @@ import {
 
 // ----------------------------- The captured wire ----------------------------- //
 
+// The separator the upstream really sends. Not '\n\n' — see the header note.
+const FRAME = '\r\n\r\n';
+
 const CAPTURED_TOOLCALL_SSE = [
   'data: {"response": {"candidates": [{"content": {"role": "model","parts": [{"thoughtSignature": "EpUFCpIFARFNMg9gRRWY7S9ev8ODKx91C67n","functionCall": {"name": "get_weather","args": {"city": "Paris"},"id": "5hp24qb7"}}]}}],"usageMetadata": {"promptTokenCount": 48,"candidatesTokenCount": 16,"totalTokenCount": 202,"thoughtsTokenCount": 138},"modelVersion": "gemini-3.1-pro-low","responseId": "atBpapXTJ_fWjuMPydXcyAI"},"traceId": "429bf353617a2a3c","metadata": {}}',
   '',
   'data: {"response": {"candidates": [{"content": {"role": "model","parts": [{"text": ""}]},"finishReason": "STOP"}],"usageMetadata": {"promptTokenCount": 48,"candidatesTokenCount": 16,"totalTokenCount": 202,"thoughtsTokenCount": 138},"modelVersion": "gemini-3.1-pro-low","responseId": "atBpapXTJ_fWjuMPydXcyAI"},"traceId": "429bf353617a2a3c","metadata": {}}',
-  '',
-].join('\n');
+].join(FRAME) + FRAME;
 
-// A plain answer turn, same envelope shape as the capture.
+// A plain answer turn, same envelope and framing as the capture.
 const TEXT_SSE = [
   'data: {"response": {"candidates": [{"content": {"role": "model","parts": [{"text": "SPIKE_OK"}]}}]}}',
-  '',
   'data: {"response": {"candidates": [{"content": {"role": "model","parts": [{"thought": true,"text": "reasoning, not answer"}]},"finishReason": "STOP"}],"usageMetadata": {"promptTokenCount": 10,"candidatesTokenCount": 3,"thoughtsTokenCount": 7}}}',
-  '',
-].join('\n');
+].join(FRAME) + FRAME;
 
 // ----------------------------- Harness ----------------------------- //
 
@@ -166,6 +171,25 @@ describe('antigravityStream — a real captured tool-call turn', () => {
   it('terminates without a [DONE] sentinel', async () => {
     stubFetch([sseResponse(CAPTURED_TOOLCALL_SSE)]);
     await expect(collect(antigravityStream(turn()))).resolves.toBeDefined();
+  });
+
+  /*
+   * ⚠ REGRESSION — this exact failure shipped past a green suite once (#189, caught by the live turn).
+   * The upstream frames with CRLF. A '\n\n' split never matches '\r\n\r\n', so every frame lands in ONE
+   * block whose concatenated JSON documents fail to parse — the turn then completes, cleanly, with an
+   * EMPTY answer. Silent, and indistinguishable from a model that said nothing.
+   */
+  it('reads a CRLF-framed stream — every frame, not one unparseable block', async () => {
+    stubFetch([sseResponse(`data: {"response":{"candidates":[{"content":{"parts":[{"text":"TURN"}]}}]}}\r\n\r\ndata: {"response":{"candidates":[{"content":{"parts":[{"text":"_OK"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":3,"thoughtsTokenCount":88}}}\r\n\r\n`)]);
+    const events = await collect(antigravityStream(turn()));
+    expect(events.filter((e) => e.type === 'text').map((e) => e.text)).toEqual(['TURN', '_OK']);
+    expect(events.find((e) => e.type === 'usage').usage.output_tokens).toBe(3 + 88);
+  });
+
+  it('reads an LF-framed stream too — the fix is additive, not a swap', async () => {
+    stubFetch([sseResponse('data: {"response":{"candidates":[{"content":{"parts":[{"text":"LF_OK"}]}}]}}\n\n')]);
+    const events = await collect(antigravityStream(turn()));
+    expect(events.filter((e) => e.type === 'text').map((e) => e.text)).toEqual(['LF_OK']);
   });
 });
 

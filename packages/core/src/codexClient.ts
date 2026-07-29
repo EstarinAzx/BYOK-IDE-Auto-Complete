@@ -97,6 +97,14 @@ export const codexInquire = async (args: CodexRequestArgs): Promise<string> => {
 // that ends a block, hold the trailing partial in the buffer until the next chunk completes it, then flush
 // whatever remains at end-of-stream. Provider-agnostic (block framing, not event names) — Codex's Responses
 // stream and Anthropic's Messages stream both flow through it; anthropicClient reuses it.
+//
+// ⚠ The separator is CRLF-tolerant, and that is load-bearing: SSE permits CRLF, LF or CR line endings, and
+// the Antigravity upstream really does frame with \r\n\r\n (#189, seen live). A plain '\n\n' split never
+// matches that — \r sits between the two \n — so the WHOLE response arrives as one block, its concatenated
+// JSON documents fail to parse, and the turn silently yields nothing. The regex matches '\n\n' identically,
+// so every pre-existing caller is unaffected.
+const SSE_BLOCK_SEPARATOR = /\r?\n\r?\n/;
+
 export async function* sseBlocks(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -106,7 +114,7 @@ export async function* sseBlocks(body: ReadableStream<Uint8Array>): AsyncGenerat
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      const blocks = buffer.split('\n\n');
+      const blocks = buffer.split(SSE_BLOCK_SEPARATOR);
       buffer = blocks.pop() ?? ''; // last element is the incomplete tail — carry it forward
       for (const block of blocks) yield block;
     }
