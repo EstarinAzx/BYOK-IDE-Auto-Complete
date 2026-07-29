@@ -67,10 +67,14 @@ HTTP 400 {"detail":"The 'gpt-5.3-codex' model is not supported when using Codex 
 
 Bare `gpt-5.6` is rejected the same way. `gpt-5.6-sol` and `gpt-5.4` both return 200.
 
-This matters because the catalog's Codex Provider carries `defaultModel: 'gpt-5.3-codex'`, and defaultModel
+This mattered because the catalog's Codex Provider carried `defaultModel: 'gpt-5.3-codex'`, and defaultModel
 is what's used "when the Provider has none remembered" — so a fresh Codex sign-in that never picks a model
-sends a request the backend refuses. The failure is a 400 with a clear message, so it is not silent, but it
-is a dead default.
+sent a request the backend refuses. The failure is a 400 with a clear message, so it is not silent, but it
+was a dead default.
+
+**Fixed in #172** (`49761d8`): the row's default is now `gpt-5.6-sol`, and a test asserts the default against
+a whitelist of live-probed accepted ids. The underlying trap below is the durable part — the fix removed one
+bad value, not the reason a bad value could be chosen.
 
 Note this is an *account-path* restriction, not a model-existence one: the id is still valid for API-key
 callers. Any fix has to be scoped to the OAuth path rather than deleting the id.
