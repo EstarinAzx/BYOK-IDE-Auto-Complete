@@ -908,7 +908,16 @@ export const antigravityStreamEvents = async function* (upstream: AsyncIterable<
 
     for (const part of Array.isArray(candidate.content?.parts) ? candidate.content.parts : []) {
       if (!isObj(part)) continue;
-      if (part.thought) continue; // reasoning text, not answer text — the doors render answers only
+      // #191: reasoning text is not answer text, so it rides the thinking channel — the Anthropic door
+      // renders it, the OpenAI door drops it (that door reads text/tool_call and nothing else).
+      // ponytail: part.thoughtSignature is NOT forwarded as thinking_signature. It is this wire's replay
+      // token, and the only consumer would be a replay path that does not exist — AntigravityTurn has no
+      // rawContent channel, so a returned block is dropped before the payload builder ever sees it. An
+      // empty signature is what the Anthropic OAuth wire already sends through this same encoder.
+      if (part.thought) {
+        if (typeof part.text === 'string' && part.text) yield { type: 'thinking', text: part.text };
+        continue;
+      }
       if (typeof part.text === 'string' && part.text) yield { type: 'text', text: part.text };
       if (isObj(part.functionCall)) {
         pendingCalls.push({
@@ -1052,6 +1061,9 @@ export type AntigravityTurn = {
   role: 'system' | 'user' | 'assistant';
   content: string;
   images?: { mimeType: string; dataBase64: string }[];
+  // #191: the Anthropic door normalizes `document` blocks into their own channel; this wire has none — a
+  // PDF is an inlineData part like an image, told apart only by mimeType. Separate field, one wire shape.
+  documents?: { mimeType: string; dataBase64: string }[];
   toolCalls?: { id: string; name: string; argsJson: string }[];
   toolResults?: { callId: string; content: string }[];
 };
@@ -1075,7 +1087,8 @@ const parseToolArgs = (argsJson: string): Json => {
  *   - a user turn's tool RESULTS ride their own content AHEAD of its text, because
  *     validateAntigravityFunctionCallPairing forbids call and response parts in one content and requires
  *     the response content to directly follow the calls it answers;
- *   - images become inlineData parts on the user content.
+ *   - images AND documents become inlineData parts on the user content — this wire has one attachment
+ *     shape, so a PDF differs from a PNG only by mimeType (#191).
  *
  * The response content is emitted role 'user' and flipped to 'model' by
  * normalizeAntigravityFunctionResponses — that quirk lives there, not duplicated here.
@@ -1123,6 +1136,7 @@ export const buildAntigravityPayload = (args: { messages: AntigravityTurn[]; too
     const parts: Json[] = [];
     if (message.content) parts.push({ text: message.content });
     for (const image of message.images ?? []) parts.push({ inlineData: { mimeType: image.mimeType, data: image.dataBase64 } });
+    for (const doc of message.documents ?? []) parts.push({ inlineData: { mimeType: doc.mimeType, data: doc.dataBase64 } });
     if (parts.length) contents.push({ role: 'user', parts });
   }
 

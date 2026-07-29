@@ -611,11 +611,13 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   const growthTracker = createAnthropicCacheGrowthTracker();
 
   // Resolve a normalized request + routed Provider to a BridgeStreamEvent stream, doing the creds/client check
-  // EAGERLY so a signed-out (401) / keyless (400) provider is caught before any SSE head is written. Same four
+  // EAGERLY so a signed-out (401) / keyless (400) provider is caught before any SSE head is written. Same five
   // kinds as the OpenAI door's executor table, but NOT that table: this door's arms carry request shaping the
   // records deliberately don't have — the #139 stable/volatile system split, the #156 diagnosis chain, vision,
-  // and non-strict tools (Claude Code's rich schemas). Folding them together would move those onto the other
-  // door's wire, so the shared piece is the error answer, not the request.
+  // documents, and non-strict tools (Claude Code's rich schemas). Folding them together would move those onto
+  // the other door's wire, so the shared piece is the error answer, not the request. #191 added the fourth arm
+  // (Antigravity) and is the standing proof that this chain must be edited by hand: adding an executor record
+  // does NOT add a Provider here, it only makes the fall-through say `has no API key configured`.
   // ponytail: send params match the records (tool_choice 'auto'); the forced tool_choice + temperature #45
   // carries on `parsed` are not yet threaded to the backend (each backend's tool_choice API differs) — the
   // background tip call degrades to a no-op, as slice #44 observed. Wire them through if that call must fire.
@@ -670,6 +672,27 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // Non-strict tools: the door forwards an external client's toolset (same reason as the Codex arm above).
       const upstream = xaiStream({ creds, baseUrl, model: modelId, messages, effort, tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', signal: controller.signal });
       return { ok: true, events: mapOAuthStream(upstream), model: modelId };
+    }
+    if (isAntigravityProvider(provider)) {
+      const creds = await deps.antigravityCreds?.();
+      if (!creds) return { ok: false, status: 401, message: `provider '${provider.id}' is not signed in` };
+      // Refused before anything opens, same reason string as the OpenAI door's record: the image row is
+      // listed (it is real) but no door has an image-output channel. Both doors must say the same thing.
+      if (isAntigravityImageModel(modelId)) return { ok: false, status: 400, message: antigravityImageRefusal(modelId) };
+      // Documents ride alongside images — this wire has ONE attachment shape (inlineData), so a PDF differs
+      // from a PNG by mimeType only. #186 confirmed the upstream accepts both. textBlocks/rawContent are
+      // Anthropic-wire sidecars with no counterpart here: a replayed thinking block has nothing to become,
+      // so it is dropped and only the turn's text survives — deliberately, not an oversight.
+      const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, documents: t.documents, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+      // The FULL system, not systemSplit.stable — unlike the Anthropic arm above. The split exists to place
+      // a cache breakpoint, and this wire has no breakpoint to place; taking `stable` alone would silently
+      // drop the volatile tail (the mid-session <system-reminder> append) from every request.
+      const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
+      // No effort, and no tool strictness knob: Gemini bakes the reasoning level into the model id
+      // (gemini-3.1-pro-low vs -high), and buildAntigravityTools already cleans Claude Code's rich schemas
+      // for this wire — the door's `false` strict flag has no equivalent to pass. The stream already speaks
+      // BridgeStreamEvent, so unlike the three arms above it needs no mapOAuthStream hop.
+      return { ok: true, events: antigravityStream({ creds, baseUrl, model: modelId, messages, tools: parsed.tools, signal: controller.signal }), model: modelId };
     }
     const client = await deps.clientFor(provider);
     if (!client) return { ok: false, status: 400, message: `provider '${provider.id}' has no API key configured` };
