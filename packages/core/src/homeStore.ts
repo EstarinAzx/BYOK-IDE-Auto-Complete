@@ -19,6 +19,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { parseWispAuth, parseWispConfig, serializeWispStore, type WispAuth, type WispConfig } from './home';
+import type { WispStatus } from './status';
 
 // ----------------------------- Paths ----------------------------- //
 
@@ -27,6 +28,9 @@ export const wispHomeDir = (): string => process.env.WISP_HOME?.trim() || join(h
 
 const CONFIG_FILE = 'config.json';
 const AUTH_FILE = 'auth.json';
+// #171: the statusline snapshot. Not config and not a secret — volatile per-turn telemetry, rewritten by
+// the Bridge after every bridged turn, read only by the out-of-process statusline script.
+const STATUS_FILE = 'status.json';
 
 // ----------------------------- WispHome ----------------------------- //
 
@@ -77,6 +81,13 @@ export class WispHome {
   // Secrets file — owner-only (0o600) per ADR-0002.
   writeAuth = (patch: Partial<WispAuth>): WispAuth => this.merge(AUTH_FILE, this.readAuth(), patch, 0o600);
 
+  // #171: overwrite the statusline snapshot. Whole-file write, not a merge — every field is recomputed
+  // per turn, so a leftover key from a previous turn's Provider would be a stale reading, not a default.
+  // Failures are swallowed: telemetry must never take a turn down.
+  writeStatus = (status: WispStatus): void => {
+    try { this.writeRaw(STATUS_FILE, `${JSON.stringify(status, null, 2)}\n`, 0o644); } catch { /* best-effort */ }
+  };
+
   // Watch the DIRECTORY, not the files — atomic rename-swaps replace the inode, which silently kills
   // per-file watchers on some platforms. Debounced so one swap (tmp create + rename) fires once.
   watch = (onChange: () => void): { dispose: () => void } => {
@@ -86,6 +97,9 @@ export class WispHome {
     try {
       watcher = watch(this.dir, { persistent: false }, (_event, name) => {
         if (name && !name.endsWith('.json')) return; // ignore our own .tmp churn
+        // #171: status.json is rewritten every bridged turn. It is nobody's config, so waking both faces
+        // to re-read config.json on each turn would be pure churn.
+        if (name === STATUS_FILE) return;
         if (timer) clearTimeout(timer);
         timer = setTimeout(onChange, 100);
       });

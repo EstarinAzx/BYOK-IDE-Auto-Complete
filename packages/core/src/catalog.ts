@@ -27,6 +27,7 @@ export * from './codex';
 export * from './anthropic';
 export * from './xai';
 export * from './kimi';
+export * from './status';
 
 // ----------------------------- Types ----------------------------- //
 

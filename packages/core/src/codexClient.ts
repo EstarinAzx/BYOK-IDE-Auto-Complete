@@ -16,13 +16,16 @@
  *     picker streams text and agent mode invokes the tools).
  */
 
-import { CodexCreds, buildCodexResponsesBody, codexReasoning, parseSseBlock, reduceResponsesTextEvents, reduceResponsesToolCalls, extractResponsesText, responsesIncompleteReason, responsesUsage, type CodexEffort, type CodexResponsesEvent, type CodexResponsesTool, type AssembledToolCall, type BridgeUsage } from './catalog';
+import { CodexCreds, buildCodexResponsesBody, codexReasoning, parseSseBlock, reduceResponsesTextEvents, reduceResponsesToolCalls, extractResponsesText, responsesIncompleteReason, responsesUsage, parseCodexQuota, type CodexEffort, type CodexResponsesEvent, type CodexResponsesTool, type AssembledToolCall, type BridgeUsage, type QuotaMeter } from './catalog';
 
 // A conversation message for the Codex backend: Inquire sends system+user, native chat sends user/assistant
 // — optionally with images and, in agent mode, the tool calls it made / the tool results it carries.
 type CodexMessage = { role: 'system' | 'user' | 'assistant'; content: string; images?: { mimeType: string; dataBase64: string }[]; toolCalls?: { id: string; name: string; argsJson: string }[]; toolResults?: { callId: string; content: string }[] };
 
-type CodexRequestArgs = { creds: CodexCreds; baseUrl: string; model: string; messages: CodexMessage[]; effort?: CodexEffort; tools?: CodexResponsesTool[]; toolChoice?: 'auto' | 'required'; signal?: AbortSignal };
+// onQuota (#171): a side channel for the response's utilization headers. NOT a stream event — quota is
+// telemetry, carries no wire content, and must not widen the union every door narrows on. Fires once per
+// request, the moment the head lands, and only when the backend actually reported meters.
+type CodexRequestArgs = { creds: CodexCreds; baseUrl: string; model: string; messages: CodexMessage[]; effort?: CodexEffort; tools?: CodexResponsesTool[]; toolChoice?: 'auto' | 'required'; signal?: AbortSignal; onQuota?: (meters: QuotaMeter[]) => void };
 
 // What codexStream yields: an answer-text fragment, a fully-assembled tool call (emitted once the stream
 // ends), or the turn's real token usage (#165, off the terminal frame). The native-chat consumer maps the
@@ -66,6 +69,12 @@ const codexResponsesRequest = async (args: CodexRequestArgs): Promise<Response> 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`Codex API error ${res.status}${body.trim() ? `: ${body.trim().slice(0, 500)}` : '.'}`);
+  }
+  // #171: the quota meters ride the response HEAD, so they are readable here — before a single SSE byte is
+  // consumed. No meters reported → the callback never fires, and the reader shows no meter rather than a zero.
+  if (args.onQuota) {
+    const meters = parseCodexQuota(res.headers);
+    if (meters.length) args.onQuota(meters);
   }
   return res;
 };
