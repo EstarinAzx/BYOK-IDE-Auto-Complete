@@ -4,6 +4,36 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.1] — 2026-07-29
+
+A single fix, carried here because the extension **bundles its own copy of the engine** — no
+`wisp-router` release can deliver it to a picker or native-chat user. Cut alongside npm
+`wisp-router` 2.0.40, which carries the same change to the terminal face.
+
+### Fixed
+
+- **A `~/.wisp` store that cannot be read is no longer destroyed (#182).** 1.10.0 fixed the commonest
+  cause of an unreadable store — a byte-order mark (#181). This fixes what happens *whenever* a read
+  fails for any other reason: a write interrupted by a crash, a truncated file, a typo from
+  hand-editing. Both stores are read-merge-write, so a failed read did not mean "ignore the file", it
+  meant **erase it**: the empty result was merged with your next change and written back over the real
+  contents. Changing one setting wiped every family route; one sign-in wiped every stored API key and
+  OAuth token.
+
+  The write now refuses. A store holding content that could not be parsed is never overwritten — the
+  operation fails with an error naming the file, and the file is left byte-for-byte as it was, so its
+  contents remain recoverable. Reading stays permissive, so the extension still activates and still
+  routes on defaults with a broken config; only saving over it is blocked until it is repaired or moved
+  aside. A missing or empty store is not this case and still writes normally, so a first install is
+  unaffected. (ADR-0004)
+
+### Surfaces
+
+- **The `wisp` vsix 1.10.1** (this release) — the fix above, in the bundled `@wisp/core`.
+- **npm `wisp-router` 2.0.40** — the same fix for the terminal face, cut in the same pass. Both are
+  tracked under #184.
+- **The `wisp-slot` Claude Code plugin** — untouched by #182, nothing owed. Stays at **1.6.0**.
+
 ## [1.10.0] — 2026-07-29
 
 Ships the **CLIProxyAPI harvest** (spec #164) to the extension. `wisp-router` 2.0.38 carried it to
