@@ -4,6 +4,7 @@
  * Depends on:
  *   - ./catalog, ./routing, ./routingCli, ./bridge, ./bridgeAnthropic, ./bridgeServer,
  *     ./modelsDev, ./codexClient, ./anthropicClient, ./xaiClient, ./codexAuth, ./anthropicAuth, ./xaiAuth,
+ *     ./kimiAuth,
  *     ./home, ./homeStore, ./slash — re-exported as one flat namespace.
  * Data shapes: none of its own — everything comes from the modules below.
  */
@@ -25,6 +26,7 @@ export * from './xaiClient';
 export * from './codexAuth';
 export * from './anthropicAuth';
 export * from './xaiAuth';
+export * from './kimiAuth';
 export * from './home';
 export * from './homeStore';
 export * from './slash';

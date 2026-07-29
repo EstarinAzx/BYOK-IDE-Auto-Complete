@@ -33,7 +33,9 @@ export type Mode =
   | { kind: 'model-pick'; provider: Provider; options: string[] }
   | { kind: 'model-free'; provider: Provider }
   | { kind: 'oauth-pick'; action: 'signin' | 'signout' }
-  | { kind: 'signin-wait'; provider: Provider; origin?: 'menu' }
+  // `device` is Kimi's leg (#170): the browser flows have nothing to show, but a device flow must display
+  // the verification URL + user code the server issued, so it arrives mid-wait and re-renders this screen.
+  | { kind: 'signin-wait'; provider: Provider; origin?: 'menu'; device?: { verificationUri: string; verificationUriComplete?: string; userCode: string } }
   | { kind: 'effort-pick' }
   | { kind: 'test'; provider: Provider; model: string; text: string; phase: 'streaming' | 'done' | 'error'; error?: string }
   // Address + secret ride in the mode so the screen render stays pure (ensureBridgeSecret hits disk

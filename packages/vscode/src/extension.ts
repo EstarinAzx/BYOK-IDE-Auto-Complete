@@ -27,7 +27,7 @@ import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvid
 import {
   Provider, PROVIDERS, CUSTOM_ID, resolveModel, resolveBaseUrl, resolveKeyId, planLegacyMigration, planZenToGoMigration,
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, DEFAULT_EFFORT,
-  isAnthropicProvider, isAnthropicSignedIn, anthropicAccountLabel, isXaiProvider, isXaiSignedIn, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
+  isAnthropicProvider, isAnthropicSignedIn, anthropicAccountLabel, isXaiProvider, isXaiSignedIn, isKimiProvider, KimiAuth, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
   type CodexCreds, type EffortLevel, type AnthropicCreds, type XaiCreds,
 } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
@@ -92,6 +92,11 @@ let anthropicAuth: AnthropicAuth;
 
 // Grok (xAI) OAuth/token lifecycle — same role for the kind:'xai-oauth' row.
 let xaiAuth: XaiAuth;
+
+// Kimi device-flow token lifecycle (#170). Unlike the three above it drives no request path of its own —
+// Kimi talks the ordinary OpenAI-chat wire, so this exists only to hand keyForProvider a bearer. Sign-in
+// itself is a `wisp` command (both faces share ~/.wisp/auth.json, so a terminal sign-in lights up the picker).
+let kimiAuth: KimiAuth;
 
 // The Bridge listener handle — created in activate, started/stopped by the command AND the panel switch. OFF
 // until toggled on (PRD: no local port open until the user deliberately enables it).
@@ -158,12 +163,24 @@ const aliasOnlyModels = (): boolean => effectiveAliasOnly(home.readConfig());
 // plaintext settings. Takes the Provider explicitly so the chat surface can resolve any catalog row, not
 // only the Active one. Still async — callers predate the sync store and the seam stays put.
 const keyForProvider = async (p: Provider): Promise<string> => {
+  // Kimi (#170) signs in with OAuth but talks the ordinary OpenAI-chat wire, so its BEARER is the access
+  // token rather than a stored key. Resolving it at this one seam is what carries Kimi through the chat
+  // picker, Inquire and the Bridge with no new branch in any of them.
+  if (isKimiProvider(p)) return kimiAuth.bearer();
   const stored = home.readAuth().keys?.[resolveKeyId(p)];
   return stored?.trim() || (p.apiKeyEnv ? process.env[p.apiKeyEnv] : '') || '';
 };
 
 // The Active Provider's key — Inquire's path. Thin delegate so there is one key-resolution rule.
 const resolveApiKey = (): Promise<string> => keyForProvider(activeProvider());
+
+// What to tell the user when the Active Provider has no credential. Kimi (#170) is credentialed by a device
+// sign-in run from the `wisp` terminal face, so pointing it at 'Set API Key' would send the user to a field
+// keyForProvider never reads for that row.
+const missingCredentialMessage = (): string =>
+  isKimiProvider(activeProvider())
+    ? 'Sign in to Kimi first: run `wisp` in a terminal, then /signin kimi.'
+    : "Set your API key first (command: 'Wisp: Set API Key').";
 
 // Build a fresh client for an arbitrary Provider (the chat surface picks per-request, so the Active
 // Provider's cachedClient doesn't apply). Returns undefined when the Provider has no key, or is Custom
@@ -352,6 +369,7 @@ const getState = async (): Promise<PanelState> => {
   const signedIn = isCodexProvider(p) ? await codexAuth.isSignedIn()
     : isAnthropicProvider(p) ? await anthropicAuth.isSignedIn()
     : isXaiProvider(p) ? await xaiAuth.isSignedIn()
+    : isKimiProvider(p) ? kimiAuth.isSignedIn()
     : false;
   // The OAuth dropdowns are models.dev-sourced — race the cached fetch against a short timeout (same
   // pattern as chatProvider) so a cold/slow models.dev can never stall panel open; undefined → curated
@@ -737,7 +755,7 @@ const copyBridgeAddress = async (): Promise<void> => {
 // List served models in a quick-pick and write the choice into the setting.
 const listModels = async (): Promise<void> => {
   if (!(await resolveApiKey())) {
-    vscode.window.showWarningMessage("Set your API key first (command: 'Wisp: Set API Key').");
+    vscode.window.showWarningMessage(missingCredentialMessage());
     return;
   }
   try {
@@ -803,7 +821,7 @@ const inquire = async (): Promise<void> => {
       return;
     }
   } else if (!(await resolveApiKey())) {
-    vscode.window.showWarningMessage("Set your API key first (command: 'Wisp: Set API Key').");
+    vscode.window.showWarningMessage(missingCredentialMessage());
     return;
   }
   const client = codex || anthropic || xai ? undefined : await getClient();
@@ -924,6 +942,11 @@ export const activate = (context: vscode.ExtensionContext): void => {
   xaiAuth = new XaiAuth(
     { read: () => home.readAuth().xai, write: (c) => { home.writeAuth({ xai: c }); } },
     (url) => vscode.env.openExternal(vscode.Uri.parse(url)), (m) => output.appendLine(m));
+  // Kimi token lifecycle (#170) — no openExternal: the device flow is driven from `wisp`, and this face only
+  // reads/refreshes the resulting bundle to produce a bearer.
+  kimiAuth = new KimiAuth(
+    { read: () => home.readAuth().kimi, write: (c) => { home.writeAuth({ kimi: c }); } },
+    (m) => output.appendLine(m));
   // Silent one-time migrations, ordered: Zen→Go slot move (frees the zen slot for the new /zen/v1
   // provider) BEFORE the pre-catalog wisp.apiKey→go shim, so the rare both-present case can't orphan a
   // Go key in the zen slot — then the whole result moves into ~/.wisp (#59). A migration failure must

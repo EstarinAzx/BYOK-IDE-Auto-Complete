@@ -12,7 +12,7 @@
  */
 
 import { spawn } from 'child_process';
-import { PROVIDERS, WispHome, CodexAuth, AnthropicAuth, XaiAuth, type Provider } from '@wisp/core';
+import { PROVIDERS, WispHome, CodexAuth, AnthropicAuth, XaiAuth, KimiAuth, isKimiProvider, resolveKeyId, type Provider } from '@wisp/core';
 
 // ----------------------------- Store ----------------------------- //
 
@@ -50,3 +50,20 @@ export const anthropicAuth = new AnthropicAuth(
 export const xaiAuth = new XaiAuth(
   { read: () => home.readAuth().xai, write: (c) => { home.writeAuth({ xai: c }); } },
   openExternal, () => {});
+// Kimi takes no openExternal: the device flow shows the user a URL + code to visit themselves (#170), so
+// there is no browser leg to launch and nothing to catch on a loopback.
+export const kimiAuth = new KimiAuth(
+  { read: () => home.readAuth().kimi, write: (c) => { home.writeAuth({ kimi: c }); } },
+  () => {});
+
+// ----------------------------- Bearer resolution ----------------------------- //
+
+// The ONE rule for "what do we send as this Provider's bearer" — every request path in this face goes
+// through it (the Bridge's keyFor, the /models probe, the /test wiring check). Kimi (#170) is the reason it
+// exists as a shared function: its credential is an OAuth access token rather than a keys-map entry, and
+// resolving that in only some of the paths is how a signed-in user gets a silent 401 from the others.
+export const bearerFor = async (p: Provider): Promise<string> => {
+  if (isKimiProvider(p)) return kimiAuth.bearer();
+  const stored = home.readAuth().keys?.[resolveKeyId(p)];
+  return stored?.trim() || (p.apiKeyEnv ? process.env[p.apiKeyEnv] : '') || '';
+};

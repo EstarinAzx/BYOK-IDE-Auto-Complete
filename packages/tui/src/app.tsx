@@ -29,12 +29,12 @@ import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from '@open
 import type { InputRenderable, Selection } from '@opentui/core';
 import {
   PROVIDERS, SLASH_COMMANDS, parseSlash, suggestSlash, completeSlash, resolveModel,
-  isCodexProvider, isAnthropicProvider, isXaiProvider,
+  isCodexProvider, isAnthropicProvider, isXaiProvider, isKimiProvider,
   isAnthropicSignedIn, effectiveAliasOnly, resolveRoute, EMPTY_ROUTING_MAP,
   FAMILY_KEYS, withFamilyRoute, withAlias, withoutAlias,
   type Provider, type EffortLevel, type Target,
 } from '@wisp/core';
-import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth } from './store';
+import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth } from './store';
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
 import type { Mode, RouteRow } from './modes';
 import { SPLASH, ACCENT, DIM } from './theme';
@@ -102,6 +102,9 @@ export const App = () => {
   const signinSeq = useRef(0); // bumped on cancel so a late OAuth resolve can't yank a later screen
   const testSeq = useRef(0);   // same guard for /test — a late delta/finish can't touch a later screen
   const testAbort = useRef<AbortController | null>(null);
+  // Kimi's device flow polls for up to 15 minutes and WRITES creds when it succeeds, so Esc has to stop the
+  // loop, not just detach the screen — otherwise a cancelled sign-in still signs the user in (#170).
+  const signinAbort = useRef<AbortController | null>(null);
   const bridgeStarting = useRef(false); // in-flight bind guard — see the /bridge case
   // statusGen invalidates a pending copied-note clear whenever anything else writes the row.
   const statusGen = useRef(0);
@@ -217,8 +220,16 @@ export const App = () => {
   const startSignIn = (p: Provider, onSuccess?: () => void, origin?: 'menu') => {
     const seq = ++signinSeq.current;
     setMode({ kind: 'signin-wait', provider: p, origin });
-    const auth = isCodexProvider(p) ? codexAuth : isAnthropicProvider(p) ? anthropicAuth : xaiAuth;
-    auth.signIn().then(
+    // Kimi is the device flow (#170) — no browser to open. It calls back the moment the server issues a URL
+    // and user code, and that lands on the same wait screen; the poll runs behind it.
+    const controller = new AbortController();
+    signinAbort.current = controller;
+    const flow = isKimiProvider(p)
+      ? kimiAuth.signIn((device) => {
+          if (seq === signinSeq.current) setMode({ kind: 'signin-wait', provider: p, origin, device });
+        }, controller.signal)
+      : (isCodexProvider(p) ? codexAuth : isAnthropicProvider(p) ? anthropicAuth : xaiAuth).signIn();
+    flow.then(
       () => { if (seq === signinSeq.current) (onSuccess ?? (() => backToInput(`Signed in — ${p.label} is ready.`)))(); },
       (err) => { if (seq === signinSeq.current) backToInput(`Sign-in failed: ${err instanceof Error ? err.message : String(err)}`); },
     );
@@ -242,7 +253,7 @@ export const App = () => {
 
   // Sign-out is instant — core writes the {} tombstone (which also suppresses the ~/.codex re-import).
   const doSignOut = (p: Provider, origin?: 'menu') => {
-    (isCodexProvider(p) ? codexAuth : isAnthropicProvider(p) ? anthropicAuth : xaiAuth).signOut();
+    (isCodexProvider(p) ? codexAuth : isAnthropicProvider(p) ? anthropicAuth : isXaiProvider(p) ? xaiAuth : kimiAuth).signOut();
     (origin === 'menu' ? backToProviders : backToInput)(`Signed out of ${p.label}.`);
   };
 
@@ -300,7 +311,7 @@ export const App = () => {
         const p = target.args[0] ? byId(target.args[0]) : undefined;
         if (target.args[0] && !p) { setStatus(`Unknown provider: ${target.args[0]}`); return; }
         // OAuth rows sign in, they don't take keys — same filter the picker applies.
-        if (p && (isCodexProvider(p) || isAnthropicProvider(p))) {
+        if (p && (isCodexProvider(p) || isAnthropicProvider(p) || isKimiProvider(p))) {
           setStatus(`${p.label} uses OAuth — try /signin ${p.id}.`); return;
         }
         // A key typed inline was echoed on screen — refuse it and open the masked field instead.
@@ -324,9 +335,9 @@ export const App = () => {
         const arg = target.args[0]?.toLowerCase();
         // Match by kind, not id, so the arg names the door (codex/anthropic/xai) rather than a catalog row.
         const p = arg
-          ? oauthProviders().find((x) => (arg === 'codex' && isCodexProvider(x)) || (arg === 'anthropic' && isAnthropicProvider(x)) || (arg === 'xai' && isXaiProvider(x)))
+          ? oauthProviders().find((x) => (arg === 'codex' && isCodexProvider(x)) || (arg === 'anthropic' && isAnthropicProvider(x)) || (arg === 'xai' && isXaiProvider(x)) || (arg === 'kimi' && isKimiProvider(x)))
           : undefined;
-        if (arg && !p) { setStatus(`/${command} takes codex, anthropic, or xai — got: ${target.args[0]}`); return; }
+        if (arg && !p) { setStatus(`/${command} takes codex, anthropic, xai, or kimi — got: ${target.args[0]}`); return; }
         if (!p) { setMode({ kind: 'oauth-pick', action: command }); return; }
         command === 'signin' ? startSignIn(p) : doSignOut(p);
         return;
@@ -469,9 +480,10 @@ export const App = () => {
       return;
     }
     if (key.name === 'escape') {
-      // ponytail: Esc detaches the UI only — the loopback waits out its own 5-min timeout, and a flow
-      // the user still finishes in the browser lands tokens anyway; add a signIn cancel handle if it bites.
-      if (mode.kind === 'signin-wait') signinSeq.current++; // invalidate the pending flow's UI claim
+      // ponytail: for the BROWSER flows Esc detaches the UI only — the loopback waits out its own 5-min
+      // timeout, and a flow the user still finishes in the browser lands tokens anyway. Kimi's poll does
+      // get a real cancel (it would otherwise keep polling for 15 min and sign the user in after the fact).
+      if (mode.kind === 'signin-wait') { signinSeq.current++; signinAbort.current?.abort(); }
       if (mode.kind === 'test') { testSeq.current++; testAbort.current?.abort(); } // kill the request too
       // Routing steps back one level per Esc (#79): sub-screen → its section → overview → palette.
       // The provider-menu chain does the same (#106): entry/wait → menu → list → palette.
@@ -566,7 +578,7 @@ export const App = () => {
         <OauthPickScreen action={mode.action} onSignIn={startSignIn} onSignOut={doSignOut} />
       )}
 
-      {mode.kind === 'signin-wait' && <SigninWaitScreen provider={mode.provider} />}
+      {mode.kind === 'signin-wait' && <SigninWaitScreen provider={mode.provider} device={mode.device} />}
 
       {mode.kind === 'test' && (
         <TestScreen provider={mode.provider} model={mode.model} text={mode.text} phase={mode.phase} error={mode.error} />
