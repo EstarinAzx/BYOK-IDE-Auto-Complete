@@ -6,6 +6,75 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.41] — 2026-07-30
+
+**Antigravity** — a sixth Provider, and the first one that reaches Claude Code and the OpenAI-speaking
+Bridge on the same day it arrives. Sign in through `wisp`, then drive Gemini from anything that already
+talks to Wisp. (#185, tickets #186–#192)
+
+### Added
+
+- **The Antigravity Provider.** A Google Cloud Code wire, reached with a browser OAuth sign-in
+  (`/signin antigravity` in `wisp`) rather than an API key. Tokens and the bootstrapped Cloud Code
+  project id persist in owner-only `~/.wisp/auth.json` beside the OAuth Providers already there, so the
+  sign-in survives restarts and is shared by every face reading that store. Thirteen models with
+  per-model output caps; the image-generation row is refused up front, by name, rather than failing
+  somewhere inside a stream. (#187, #188)
+
+- **Both Bridge doors answer for it.** The OpenAI door (`/v1/chat/completions`) reaches it through a
+  fifth executor record, so anything speaking OpenAI can name an Antigravity model and get a streamed
+  answer with working tool calls. The Anthropic door (`/v1/messages`) reaches it through a fourth arm on
+  the door's own per-kind chain — **so Claude Code runs on Gemini**, launched the usual way through
+  `claude-wisp`. Tool calls carry the upstream's own call ids untouched; Wisp never mints its own.
+  (#189, #191)
+
+- **Vision and documents both ride.** This wire takes one attachment shape, so a PDF differs from a PNG
+  by mime type alone — an attachment reaching the Anthropic door is forwarded rather than silently
+  dropped. Thinking output rides the thinking channel where the door renders it. (#191)
+
+- **Rate limits now answer `429`.** Antigravity is the first Provider to classify its own rate limits, and
+  the first whose cooldown horizon comes from what the server actually said rather than a guess. Below the
+  instant-retry threshold the failure is left to the existing bounded retry — a blip still retries. At or
+  above it, or on an explicit quota-exhausted reason, the door answers `429` and stops retrying, which is
+  both true and something a client can act on. (#190)
+
+### Fixed
+
+- **Every rate limit on every Provider used to leave the Bridge as a `502`.** No executor record classified
+  anything, so a quota exhaustion was reported as a gateway fault — neither what happened nor actionable.
+  The classification path is now live and door-neutral: both doors answer through the same failure path, so
+  a Provider that classifies is classified at either one. Other Providers are unchanged pending their own
+  records; the widening is additive. (#190)
+
+- **A server-sent event stream framed with CRLF returned an empty answer.** The block splitter matched
+  `\n\n` only, which never matches `\r\n\r\n` — so an entire response arrived as one unparseable block,
+  every frame was dropped, and the turn completed *cleanly* with nothing in it: silent, and
+  indistinguishable from a model that chose to say nothing. Found by driving a real turn, not by the test
+  suite, whose fixtures had been retyped and so normalised the line endings away. Codex and Anthropic frame
+  with `\n\n` and are unaffected. (#189)
+
+- **Thinking tokens are counted as output.** They are billed as output, and were not being reported that
+  way. (#187, #186)
+
+### Surfaces
+
+Which build carries which change — npm is one of three faces, and this release cuts only npm.
+
+- **npm `wisp-router` 2.0.41** (this release) — everything above. Antigravity lives in `@wisp/core`, which
+  this package bundles, so the TUI, `wisp serve` and the `claude-wisp` launcher all receive it together.
+  This is the face that makes Claude Code on Gemini work.
+
+- **The `wisp` VS Code extension (vsix) — a bump is OWED and is NOT cut here. Tracked as #197.** The
+  extension is not a bystander to this work: it constructs `AntigravityAuth` so its Bridge can refresh the
+  bundle and bootstrap the project, passes the credential pair into its own `createBridgeServer`, and
+  renders the Provider row with a truthful signed-in status read from the shared `auth.json`. It bundles
+  its own copy of `@wisp/core`, so **no npm version can deliver any of that** — it stays at **1.10.1**
+  until its own vsix is cut. Note this contradicts #192's own description, which assumed the extension face
+  was untouched; the code says otherwise, and #197 exists because this section was checked rather than
+  copied.
+
+- **The `wisp-slot` Claude Code plugin** — untouched by #185 and nothing is owed. It stays at **1.6.0**.
+
 ## [2.0.40] — 2026-07-29
 
 The other half of 2.0.39. That release stopped a **BOM** from destroying a store; this one stops

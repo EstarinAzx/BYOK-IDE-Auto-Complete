@@ -1,6 +1,6 @@
 ﻿{
   "name": "wisp-router",
-  "version": "2.0.40",
+  "version": "2.0.41",
   "license": "MIT",
   "private": true,
   "bin": {
