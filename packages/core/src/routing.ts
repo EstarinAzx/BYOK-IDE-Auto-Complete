@@ -110,27 +110,98 @@ export const parseUsageLimitReset = (message: string): number | undefined => {
   return m ? Number(m[1]) : DEFAULT_COOLDOWN_SECONDS;
 };
 
+// ----------------------------- Transient failures (#168) ----------------------------- //
+
+// The other half of "this provider is unusable": a blip, not a plan window. A backend that 5xx'd, dropped the
+// socket, or is at capacity will very likely serve the very next request — so the answer is a bounded retry
+// and, if it keeps happening, a cooldown measured in SECONDS. The two channels are kept in separate maps on
+// purpose: the worst outcomes here are a blip sidelining a provider for days and a six-day quota exhaustion
+// being shortened to seconds, and separate maps make both impossible to write, not merely unlikely.
+
+export const TRANSIENT_COOLDOWN_SECONDS = 30;      // long enough to let a backend breathe, short enough to be invisible
+export const TRANSIENT_FAILURES_BEFORE_COOLDOWN = 3; // one blip is not a pattern
+export const TRANSIENT_WINDOW_SECONDS = 120;       // failures this far apart are unrelated, not a streak
+export const MAX_PROVIDER_ATTEMPTS = 3;            // the bound: a persistently failing provider fails, never hangs
+export const RETRY_BASE_DELAY_MS = 200;
+export const JITTER_FRACTION = 0.2;
+
+// Add up to JITTER_FRACTION of the wait, so concurrent waiters do not wake in lockstep and stampede the first
+// provider to recover. The random source is injected — sampling Math.random in a test is flaky by
+// construction. Out-of-range sources are clamped, so the cap holds whatever the caller passes.
+export const jittered = (ms: number, random: () => number): number =>
+  ms * (1 + JITTER_FRACTION * Math.min(1, Math.max(0, random())));
+
+// The wait before attempt n+1: exponential off the base, jittered. Attempts are 1-based.
+export const retryDelayMs = (attempt: number, random: () => number): number =>
+  jittered(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), random);
+
+// Statuses that mean "the backend, not the request" — a retry can actually succeed. 429 is included because a
+// plain rate limit IS a blip, but the usage-limit guard below runs first so a plan-window 429 can never land
+// here. 4xx client errors are absent on purpose: #166 classifies those, and they cannot succeed on a retry.
+const TRANSIENT_STATUS = /API error (429|500|502|503|504)\b/;
+// Prose forms: a capacity rejection (the ticket's named case — transient, NOT exhausted quota), the node/undici
+// socket drops, and a stream that stopped before its terminal frame.
+const TRANSIENT_PROSE = /(at capacity|overloaded|socket hang up|fetch failed|premature close|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|stream ended)/i;
+
+// Is this failure worth retrying / worth the short channel? A usage-limit 429 is checked FIRST and always
+// answers no — that single line is what keeps a six-day plan window from being read as a blip.
+export const isTransientProviderError = (message: string): boolean =>
+  parseUsageLimitReset(message) === undefined
+  && (TRANSIENT_STATUS.test(message) || TRANSIENT_PROSE.test(message));
+
 // The per-provider cooldown store — one instance per Bridge host (the bridgeServer owns it, mirroring the
 // diagnosis chain). noteUsageLimit returns the cooldown seconds when the error was a usage-limit 429
-// (caller logs it), undefined otherwise. coolingUntil feeds the fallback log line's timestamp.
+// (caller logs it), undefined otherwise; noteTransient is its short-channel twin, returning seconds only on
+// the failure that actually trips the cooldown. coolingUntil feeds the fallback log line's timestamp and
+// reports the LATER of the two horizons, so a live plan window is never masked by a 30s blip.
 export type ProviderCooldowns = {
   noteUsageLimit: (providerId: string, errorMessage: string) => number | undefined;
+  noteTransient: (providerId: string, errorMessage: string) => number | undefined;
   cooling: (providerId: string) => boolean;
   coolingUntil: (providerId: string) => number | undefined; // epoch ms, undefined when not cooling
 };
-export const createProviderCooldowns = (now: () => number = Date.now): ProviderCooldowns => {
-  const until = new Map<string, number>();
+export const createProviderCooldowns = (
+  now: () => number = Date.now,
+  random: () => number = Math.random,
+): ProviderCooldowns => {
+  const usageUntil = new Map<string, number>();      // the plan window (#161) — days
+  const transientUntil = new Map<string, number>();  // the blip channel (#168) — seconds
+  // The streak behind the short channel. A window instead of a success hook keeps this store pure and
+  // self-contained: "repeated" means repeated RECENTLY, so an hourly hiccup never accumulates into a cooldown.
+  const streak = new Map<string, { count: number; since: number }>();
+
+  const liveUntil = (m: Map<string, number>, providerId: string): number | undefined => {
+    const t = m.get(providerId);
+    return t !== undefined && t > now() ? t : undefined;
+  };
+
   return {
     noteUsageLimit: (providerId, errorMessage) => {
       const seconds = parseUsageLimitReset(errorMessage);
       if (seconds === undefined) return undefined;
-      until.set(providerId, now() + seconds * 1000);
+      usageUntil.set(providerId, now() + seconds * 1000);
       return seconds;
     },
-    cooling: (providerId) => (until.get(providerId) ?? 0) > now(),
+    noteTransient: (providerId, errorMessage) => {
+      if (!isTransientProviderError(errorMessage)) return undefined;
+      const t = now();
+      const prior = streak.get(providerId);
+      const continuing = prior !== undefined && t - prior.since <= TRANSIENT_WINDOW_SECONDS * 1000;
+      const count = continuing ? prior.count + 1 : 1;
+      if (count < TRANSIENT_FAILURES_BEFORE_COOLDOWN) {
+        streak.set(providerId, { count, since: continuing ? prior.since : t });
+        return undefined;
+      }
+      streak.delete(providerId); // the streak is spent — the next one starts fresh after this cooldown
+      const ms = jittered(TRANSIENT_COOLDOWN_SECONDS * 1000, random);
+      transientUntil.set(providerId, t + ms);
+      return TRANSIENT_COOLDOWN_SECONDS;
+    },
+    cooling: (providerId) => liveUntil(usageUntil, providerId) !== undefined || liveUntil(transientUntil, providerId) !== undefined,
     coolingUntil: (providerId) => {
-      const t = until.get(providerId);
-      return t !== undefined && t > now() ? t : undefined;
+      const usage = liveUntil(usageUntil, providerId);
+      const transient = liveUntil(transientUntil, providerId);
+      return usage === undefined && transient === undefined ? undefined : Math.max(usage ?? 0, transient ?? 0);
     },
   };
 };
