@@ -18,7 +18,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, watch, wri
 import { homedir } from 'os';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
-import { parseWispAuth, parseWispConfig, serializeWispStore, type WispAuth, type WispConfig } from './home';
+import { isUnusableStore, parseWispAuth, parseWispConfig, serializeWispStore, type WispAuth, type WispConfig } from './home';
 import type { WispStatus } from './status';
 
 // ----------------------------- Paths ----------------------------- //
@@ -66,20 +66,32 @@ export class WispHome {
 
   // Shallow read-merge-write. JSON.stringify drops undefined values, so `field: undefined` in a patch
   // deletes the field on disk; unknown keys parsed off disk ride the spread and survive.
-  private merge = <T extends object>(file: string, current: T, patch: Partial<T>, mode: number): T => {
-    const next = { ...current, ...patch };
+  //
+  // #182: the read is deliberately permissive — an unreadable store parses as {} so wisp still starts and
+  // routes on defaults. The WRITE is where that has to stop. Merging {} with a patch and putting it back
+  // does not ignore the file, it ERASES it, and the contents we are erasing are precisely the ones we just
+  // admitted we could not parse. So a store that holds content we did not understand is never overwritten;
+  // the caller gets the same kind of throw writeRaw already produces for ENOSPC/EPERM, which is why no call
+  // site needs a new policy for this. "Nothing there" (absent/empty) is not that case and stays writable.
+  private merge = <T extends object>(file: string, parse: (raw?: string) => T, patch: Partial<T>, mode: number): T => {
+    const raw = this.readRaw(file);
+    if (isUnusableStore(raw)) throw new Error(
+      `${this.path(file)} exists but could not be read as JSON. Wisp will not overwrite it — that would ` +
+      `destroy whatever it holds. Repair the file, or move it aside to start fresh, then retry.`,
+    );
+    const next = { ...parse(raw), ...patch };
     this.writeRaw(file, serializeWispStore(next), mode);
     return next;
   };
 
   readConfig = (): WispConfig => parseWispConfig(this.readRaw(CONFIG_FILE));
   configExists = (): boolean => existsSync(this.path(CONFIG_FILE));
-  writeConfig = (patch: Partial<WispConfig>): WispConfig => this.merge(CONFIG_FILE, this.readConfig(), patch, 0o644);
+  writeConfig = (patch: Partial<WispConfig>): WispConfig => this.merge(CONFIG_FILE, parseWispConfig, patch, 0o644);
 
   readAuth = (): WispAuth => parseWispAuth(this.readRaw(AUTH_FILE));
   authExists = (): boolean => existsSync(this.path(AUTH_FILE));
   // Secrets file — owner-only (0o600) per ADR-0002.
-  writeAuth = (patch: Partial<WispAuth>): WispAuth => this.merge(AUTH_FILE, this.readAuth(), patch, 0o600);
+  writeAuth = (patch: Partial<WispAuth>): WispAuth => this.merge(AUTH_FILE, parseWispAuth, patch, 0o600);
 
   // #171: overwrite the statusline snapshot. Whole-file write, not a merge — every field is recomputed
   // per turn, so a leftover key from a previous turn's Provider would be a stale reading, not a default.

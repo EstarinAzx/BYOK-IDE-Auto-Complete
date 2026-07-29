@@ -12,10 +12,38 @@
 
 import { describe, expect, test } from 'vitest';
 import {
-  parseWispConfig, parseWispAuth, serializeWispStore,
+  parseWispConfig, parseWispAuth, serializeWispStore, isUnusableStore,
   planSecretsMigration, seedConfigFromVsCode, effectiveAliasOnly,
   type WispAuth, type WispConfig,
 } from '../src/home';
+
+// ----------------------------- isUnusableStore ----------------------------- //
+
+// #182: the parsers flatten "absent" and "corrupt" into the same {}, which is safe to READ and catastrophic
+// to write back. This predicate is the bit they throw away — the one the store layer needs to tell the two
+// apart before it overwrites anything.
+describe('isUnusableStore', () => {
+  test('content we could not understand is unusable', () => {
+    expect(isUnusableStore('{ not json')).toBe(true);
+    expect(isUnusableStore('{"a":1,')).toBe(true);   // truncated write
+    expect(isUnusableStore('"a string"')).toBe(true); // valid JSON, not a store
+    expect(isUnusableStore('[1,2]')).toBe(true);
+    expect(isUnusableStore('null')).toBe(true);
+  });
+
+  test('absent or blank is NOT unusable — there is nothing there to lose', () => {
+    expect(isUnusableStore(undefined)).toBe(false);
+    expect(isUnusableStore(null)).toBe(false);
+    expect(isUnusableStore('')).toBe(false);
+    expect(isUnusableStore('  \n\t ')).toBe(false);
+  });
+
+  test('a readable store is usable, BOM and all (#181 stays fixed)', () => {
+    expect(isUnusableStore('{"provider":"codex"}')).toBe(false);
+    expect(isUnusableStore('﻿{"provider":"codex"}')).toBe(false);
+    expect(isUnusableStore('{}')).toBe(false);
+  });
+});
 
 // ----------------------------- parseWispConfig ----------------------------- //
 

@@ -70,6 +70,43 @@ describe('config read/write', () => {
     expect(h.readConfig()).toEqual({ ...original, effort: 'low' });
   });
 
+  // #182: the other half of #181. The BOM is fixed, but the read-merge-write MECHANISM still destroys any
+  // store it cannot parse — a truncated write, a crash mid-flush, a hand-edit typo. Reads stay permissive
+  // (wisp still starts on defaults); the WRITE is what must refuse, because overwriting a file we admit we
+  // did not understand is what turns "we ignored your config" into "we deleted your config".
+  test('a corrupt config is refused by the next write, not overwritten (#182)', () => {
+    const h = home();
+    h.writeConfig({ provider: 'codex', effort: 'high' });
+    const path = join(dir, '.wisp', 'config.json');
+    writeFileSync(path, '{"provider":"codex","eff', 'utf8'); // truncated mid-write
+    const before = readFileSync(path, 'utf8');
+
+    expect(() => h.writeConfig({ effort: 'low' })).toThrow(/config\.json/);
+    expect(readFileSync(path, 'utf8')).toBe(before);
+  });
+
+  // Valid JSON, but not a store. parseObject rejects it exactly like a syntax error, so the same
+  // read-merge-write erasure follows — the refusal has to cover it or the hole is only half closed.
+  test('a config holding valid JSON that is not an object is refused too (#182)', () => {
+    const h = home();
+    const path = join(dir, '.wisp', 'config.json');
+    h.writeConfig({ provider: 'codex' });
+    writeFileSync(path, '[1,2,3]', 'utf8');
+
+    expect(() => h.writeConfig({ effort: 'low' })).toThrow(/config\.json/);
+    expect(readFileSync(path, 'utf8')).toBe('[1,2,3]');
+  });
+
+  // Guard on the other side of the line: "no content" is not "content we failed to understand". A missing
+  // or empty file must stay writable or the refusal bricks first run and any zero-length truncation.
+  test('an absent or empty config is still writable — nothing is lost by overwriting it (#182)', () => {
+    const h = home();
+    expect(() => h.writeConfig({ provider: 'groq' })).not.toThrow(); // absent
+    writeFileSync(join(dir, '.wisp', 'config.json'), '   \n', 'utf8');
+    expect(() => h.writeConfig({ provider: 'groq' })).not.toThrow(); // empty/whitespace
+    expect(h.readConfig()).toEqual({ provider: 'groq' });
+  });
+
   test('an undefined patch value deletes the field on disk', () => {
     const h = home();
     h.writeConfig({ provider: 'groq', customBaseUrl: 'https://x' });
@@ -118,6 +155,20 @@ describe('auth read/write', () => {
     expect(h.readAuth()).toEqual(original);
     h.writeAuth({ anthropic: { accessToken: 'new-signin' } });
     expect(h.readAuth()).toEqual({ ...original, anthropic: { accessToken: 'new-signin' } });
+  });
+
+  // #182 on the store where the loss is worst: a corrupt auth.json plus one sign-in used to persist
+  // {} + the new credential, erasing every other API key and OAuth bundle. The sign-in now fails loudly
+  // instead — the tokens on disk are unreadable either way, but they are still THERE to be recovered.
+  test('a corrupt auth store is refused by the next sign-in, not overwritten (#182)', () => {
+    const h = home();
+    h.writeAuth({ keys: { groq: 'gk-real' }, codex: { accessToken: 'at' } });
+    const path = join(dir, '.wisp', 'auth.json');
+    writeFileSync(path, '{"keys":{"groq":"gk-rea', 'utf8');
+    const before = readFileSync(path, 'utf8');
+
+    expect(() => h.writeAuth({ anthropic: { accessToken: 'new-signin' } })).toThrow(/auth\.json/);
+    expect(readFileSync(path, 'utf8')).toBe(before);
   });
 
   test('auth.json is owner-only on POSIX (Windows relies on the profile ACL)', () => {
