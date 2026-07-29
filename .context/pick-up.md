@@ -18,8 +18,9 @@ closed with every acceptance criterion checked. **Spec #164 is complete — all 
 **There is no `ready-for-agent` ticket. The relay chain has stopped and should not be restarted** until
 something is labelled for it; with an empty queue it will pick nothing, write `queue empty`, and stop again.
 
-The **live Bridge session that had been pending for nine tickets has now run, and the decisive check
-passed** — see below. What remains is two small turns (#169, #172), then triage.
+The **live Bridge session that had been pending for nine tickets has now run, and every check that could be
+run in it passed** (#165, #171, #169) — see below. Only **#172** is left, and it needs a *fresh* Codex
+sign-in rather than another turn. Then triage #180 / #181.
 
 ## The live session — ran 2026-07-29 on 2.0.38. Three of four checks passed.
 
