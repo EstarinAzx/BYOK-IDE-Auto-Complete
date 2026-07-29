@@ -72,7 +72,11 @@ export const PROVIDERS: Provider[] = [
   { id: 'opencode-zen', label: 'OpenCode Zen', baseUrl: 'https://opencode.ai/zen/v1', defaultModel: 'claude-haiku-4-5', apiKeyEnv: 'OPENCODE_API_KEY', catalogKey: 'opencode', keyId: 'opencode-go' },
   // Codex = subscription ChatGPT Codex backend (Responses API via OAuth, no key). kind:'codex' switches
   // off the OpenAI-chat path. No catalogKey; hidden from the native chat picker (keyless rows are).
-  { id: 'codex', label: 'Codex', baseUrl: 'https://chatgpt.com/backend-api/codex', defaultModel: 'gpt-5.3-codex', apiKeyEnv: '', kind: 'codex' },
+  // ⚠ defaultModel must be an id the ChatGPT-ACCOUNT path accepts — a narrower set than CODEX_MODELS,
+  // since defaultModel is what a fresh sign-in sends before the user picks anything. 'gpt-5.3-codex' and
+  // bare 'gpt-5.6' are 400ed there ("not supported when using Codex with a ChatGPT account", #172) while
+  // staying valid for API-key callers and in the caps tiering. Verified 200 (2026-07-29): sol, gpt-5.4.
+  { id: 'codex', label: 'Codex', baseUrl: 'https://chatgpt.com/backend-api/codex', defaultModel: 'gpt-5.6-sol', apiKeyEnv: '', kind: 'codex' },
   // Anthropic = subscription Claude backend (Messages API via Claude.ai OAuth, no key). kind:'anthropic-
   // oauth' switches off the OpenAI-chat path, like Codex. baseUrl is api.anthropic.com (client appends
   // /v1/messages). No catalogKey; hidden from the chat picker until keyed.
