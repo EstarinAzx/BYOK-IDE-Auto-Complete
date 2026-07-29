@@ -21,7 +21,7 @@ import {
   PROVIDERS, createBridgeServer, DEFAULT_BRIDGE_PORT, resolveBaseUrl, resolveKeyId,
   EMPTY_ROUTING_MAP, DEFAULT_EFFORT, effectiveAliasOnly, type Provider,
 } from '@wisp/core';
-import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth } from './store';
+import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth, bearerFor } from './store';
 
 // ----------------------------- Secret + address ----------------------------- //
 
@@ -43,10 +43,9 @@ export const bridgeAddress = (): string => `http://127.0.0.1:${bridgePort()}`;
 
 // Key resolution mirrors the extension's one rule: auth.json (via keyId borrowing) first, then the
 // row's own env var. Never from anywhere else.
-const keyFor = async (p: Provider): Promise<string> => {
-  const stored = home.readAuth().keys?.[resolveKeyId(p)];
-  return stored?.trim() || (p.apiKeyEnv ? process.env[p.apiKeyEnv] : '') || '';
-};
+// The shared bearer rule (store.ts) — Kimi's OAuth token included, so the keyed executor, the picker's
+// usability check and the Bridge model list all carry Kimi with no branch of their own.
+const keyFor = bearerFor;
 
 const clientFor = async (p: Provider): Promise<OpenAI | undefined> => {
   const key = await keyFor(p);

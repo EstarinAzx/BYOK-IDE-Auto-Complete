@@ -32,7 +32,7 @@ type State = {
   providerId?: string;
   providers: { id: string; label: string }[];
   isCustom: boolean;
-  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth';
+  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth';
   signedIn?: boolean;
   account?: string; // #150: "you@email · Max" when the bootstrap identity was captured (Anthropic only)
   modelOptions?: string[];
@@ -203,6 +203,10 @@ export const App = () => {
   // The OAuth Providers (Codex, Anthropic) swap the API-key field for a sign-in/out control and carry no
   // live /models route. oauth gates both behaviours; the per-kind label/messages below distinguish them.
   const oauth = state.kind === 'codex' || state.kind === 'anthropic-oauth' || state.kind === 'xai-oauth';
+  // Kimi (#170) is credential-wise an OAuth row but its sign-in is a DEVICE flow driven from the `wisp`
+  // terminal face, so the panel shows status and points there rather than offering a button it cannot run.
+  // It keeps the live /models route, so it stays out of `oauth` for the dropdown source above.
+  const deviceOauth = state.kind === 'kimi-oauth';
   const accountLabel = state.kind === 'anthropic-oauth' ? 'Claude Account' : state.kind === 'xai-oauth' ? 'Grok Account' : 'Codex Account';
   const signInMsg = state.kind === 'anthropic-oauth' ? 'anthropicSignIn' : state.kind === 'xai-oauth' ? 'xaiSignIn' : 'codexSignIn';
   const signOutMsg = state.kind === 'anthropic-oauth' ? 'anthropicSignOut' : state.kind === 'xai-oauth' ? 'xaiSignOut' : 'codexSignOut';
@@ -282,7 +286,28 @@ export const App = () => {
 
         {/* Credentials: OAuth sign-in OR API key. OAuth Providers (Codex, Anthropic) have no API key —
             "usable when signed in" → account sign-in/out control. Others keep the key field. */}
-        {oauth ? (
+        {deviceOauth ? (
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between gap-2">
+              <label class="field-label">Kimi Account</label>
+              {state.signedIn ? (
+                <span class="flex items-center gap-1.5 text-[11px] text-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]">
+                  <span class="inline-block h-1.5 w-1.5 rounded-full bg-[var(--vscode-testing-iconPassed,var(--vscode-charts-green))]" />
+                  Signed in
+                </span>
+              ) : (
+                <span class="flex items-center gap-1.5 text-[11px] text-[var(--vscode-descriptionForeground)]">
+                  <span class="inline-block h-1.5 w-1.5 rounded-full bg-[var(--vscode-descriptionForeground)] opacity-60" />
+                  Not signed in
+                </span>
+              )}
+            </div>
+            <p class="hint">
+              Subscription-backed Kimi — no API key. Sign in from the terminal with <code>wisp</code> → <code>/signin kimi</code>;
+              both faces share the same credential store, so it lights up here once approved.
+            </p>
+          </div>
+        ) : oauth ? (
           <div class="flex flex-col gap-2">
             <div class="flex items-center justify-between gap-2">
               <label class="field-label">{accountLabel}</label>

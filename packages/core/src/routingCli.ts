@@ -39,8 +39,10 @@ const parseTarget = (raw: string): Target | undefined => {
   return { providerId: raw.slice(0, slash), model: raw.slice(slash + 1) };
 };
 
+// Name the credential the user actually has to supply. Kimi (#170) sits with the OAuth rows here even though
+// its requests ride the API-key path — what's missing is a sign-in, not a key.
 const missingCredentialWarning = (provider: Provider): string =>
-  provider.kind === 'codex' || provider.kind === 'anthropic-oauth' || provider.kind === 'xai-oauth'
+  provider.kind === 'codex' || provider.kind === 'anthropic-oauth' || provider.kind === 'xai-oauth' || provider.kind === 'kimi-oauth'
     ? `warning: Provider '${provider.id}' is not signed in.`
     : `warning: Provider '${provider.id}' has no API key configured.`;
 

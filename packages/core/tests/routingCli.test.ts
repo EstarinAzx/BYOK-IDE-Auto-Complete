@@ -26,6 +26,7 @@ const provider = (id: string, over: Partial<Provider> = {}): Provider => ({
 
 const providers: Provider[] = [
   provider('codex', { apiKeyEnv: '', kind: 'codex' }),
+  provider('kimi', { apiKeyEnv: '', kind: 'kimi-oauth' }),
   provider('groq'),
   provider('openrouter'),
   provider('openai'),
@@ -167,6 +168,15 @@ describe('runRoutingCommand set', () => {
     const result = await run(['set', 'opus', 'codex/gpt-5.6-sol'], map, async () => false);
     expect(result.nextMap).toBeDefined();
     expect(result.lines).toEqual(["warning: Provider 'codex' is not signed in."]);
+    expect(result.exitCode).toBe(0);
+  });
+
+  // #170: Kimi rides the API-key REQUEST path but is credentialed by sign-in, so it must warn about the
+  // sign-in it actually needs rather than an API key it will never read.
+  it('warns a signed-out Kimi binding about sign-in, not about a missing API key', async () => {
+    const result = await run(['set', 'opus', 'kimi/kimi-k2.7-code'], map, async () => false);
+    expect(result.nextMap).toBeDefined();
+    expect(result.lines).toEqual(["warning: Provider 'kimi' is not signed in."]);
     expect(result.exitCode).toBe(0);
   });
 

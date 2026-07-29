@@ -26,6 +26,7 @@ export * from './shared';
 export * from './codex';
 export * from './anthropic';
 export * from './xai';
+export * from './kimi';
 
 // ----------------------------- Types ----------------------------- //
 
@@ -41,7 +42,9 @@ export type Provider = {
   keyId?: string;
   // Provider kind. Absent == 'openai-chat' (every OpenAI-compatible row). 'codex'/'anthropic-oauth'/
   // 'xai-oauth' are the OAuth-backed subscription rows — the Inquire/key/usability paths branch on it.
-  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth';
+  // 'kimi-oauth' (#170) is the odd one out: OAuth to sign in, but the ORDINARY OpenAI-chat wire to talk, so
+  // it exists only to tell the faces "offer sign-in, not a key field". No request path dispatches on it.
+  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth';
   // Context/vision carry no per-row hints — both come from the ACTIVE model via models.dev (catalogKey).
 };
 
@@ -78,6 +81,14 @@ export const PROVIDERS: Provider[] = [
   // ⚠️ NOT the API-key Groq row (Llama): distinct id 'xai'. baseUrl is the subscription proxy (grok-build);
   // grok-4.5 overrides to api.x.ai in the client. No catalogKey; hidden from the chat picker until keyed.
   { id: 'xai', label: 'Grok', baseUrl: 'https://cli-chat-proxy.grok.com/v1', defaultModel: 'grok-build', apiKeyEnv: '', kind: 'xai-oauth' },
+  // Kimi = subscription Kimi Code backend, reached by the RFC 8628 DEVICE flow (no API key, no loopback
+  // catcher, no PKCE — the user authorizes out of band). kind:'kimi-oauth' is a UI marker only: on the wire
+  // this row is plain OpenAI-chat, so it rides the keyed request path and inherits #169's usage reporting.
+  // Its bearer is the OAuth access token, which each face's keyFor resolves from auth.json's kimi slice
+  // instead of the keys map. No catalogKey — models.dev carries no first-party Kimi provider (checked
+  // 2026-07-29), so caps fall to the neutral default. ⚠ defaultModel best-effort: the Kimi Code lineup is
+  // k2.5/k2.6/k2.7-code/k3 and the row serves a live /models route, so the model picker is the correction path.
+  { id: 'kimi', label: 'Kimi', baseUrl: 'https://api.kimi.com/coding', defaultModel: 'kimi-k2.7-code', apiKeyEnv: '', kind: 'kimi-oauth' },
   { id: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini', apiKeyEnv: 'OPENAI_API_KEY', catalogKey: 'openai' },
   { id: 'groq', label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile', apiKeyEnv: 'GROQ_API_KEY', catalogKey: 'groq' },
   { id: 'mistral', label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', defaultModel: 'codestral-latest', apiKeyEnv: 'MISTRAL_API_KEY', catalogKey: 'mistral' },

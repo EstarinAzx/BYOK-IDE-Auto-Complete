@@ -16,12 +16,12 @@
  */
 
 import {
-  resolveBaseUrl, resolveKeyId, isCodexProvider, isAnthropicProvider, isXaiProvider,
+  resolveBaseUrl, isCodexProvider, isAnthropicProvider, isXaiProvider,
   DEFAULT_EFFORT, codexStream, anthropicStream, xaiStream, sseBlocks,
   chatCompletionTextDelta, standardEffortToCodex,
   type Provider,
 } from '@wisp/core';
-import { home, codexAuth, anthropicAuth, xaiAuth } from './store';
+import { home, codexAuth, anthropicAuth, xaiAuth, bearerFor } from './store';
 import { PANEL, DIM } from './theme';
 
 // ----------------------------------------- Wiring check ----------------------------------------- //
@@ -64,7 +64,7 @@ export async function* streamTestReply(p: Provider, model: string, signal: Abort
   if (!baseUrl) throw new Error('Custom has no base URL configured.');
   // Keyless rows (local Ollama) send bare on purpose — a backend that wanted a key answers 401, and
   // that status+body IS the loud error this check exists to surface. No local key gate.
-  const key = home.readAuth().keys?.[resolveKeyId(p)] || (p.apiKeyEnv ? process.env[p.apiKeyEnv] : undefined);
+  const key = await bearerFor(p);
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(key ? { Authorization: `Bearer ${key}` } : {}) },

@@ -24,6 +24,7 @@ import {
   PROVIDERS, resolveKeyId, resolveModel,
   isCodexProvider, isAnthropicProvider, isXaiProvider, isCodexSignedIn, isAnthropicSignedIn,
   isXaiSignedIn, anthropicAccountLabel, DEFAULT_EFFORT,
+  isKimiProvider, isKimiSignedIn,
   type Provider, type EffortLevel,
 } from '@wisp/core';
 import { home, activeProvider } from './store';
@@ -32,9 +33,11 @@ import { onSubmitText, SELECT_MOUSE } from './widgets';
 
 // ----------------------------------------- Key + model storage ----------------------------------------- //
 
-// The three OAuth kinds sign in via a browser flow — every other row takes an API key.
+// The OAuth kinds sign in instead of taking an API key — three browser flows plus Kimi's device flow (#170).
+// Kimi belongs here even though its REQUESTS are plain OpenAI-chat: this predicate is about how the
+// credential is obtained, not about which wire carries the turn.
 const isOAuthProvider = (p: Provider): boolean =>
-  isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p);
+  isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p) || isKimiProvider(p);
 
 // Keyed rows only — the OAuth kinds sign in via /signin, they don't take keys.
 const keyedProviders = (): Provider[] => PROVIDERS.filter((p) => !isOAuthProvider(p));
@@ -48,6 +51,7 @@ const oauthStatus = (p: Provider): string =>
   // #150: the bootstrap identity upgrades the bare status to "you@email · Max" when it was captured.
   : isAnthropicProvider(p) ? (isAnthropicSignedIn(home.readAuth().anthropic) ? (anthropicAccountLabel(home.readAuth().anthropic) ?? 'signed in') : 'signed out')
   : isXaiProvider(p) ? (isXaiSignedIn(home.readAuth().xai) ? 'signed in' : 'signed out')
+  : isKimiProvider(p) ? (isKimiSignedIn(home.readAuth().kimi) ? 'signed in' : 'signed out')
   : '';
 
 export const saveKey = (p: Provider, key: string): void => {
@@ -275,10 +279,23 @@ export const OauthPickScreen = ({ action, onSignIn, onSignOut }: {
   </box>
 );
 
-// The browser-flow wait line — Esc routing (cancel, menu-origin return) lives in the shell.
-export const SigninWaitScreen = ({ provider }: { provider: Provider }) => (
-  <text wrapMode="none" flexShrink={0} fg={DIM} marginTop={1}>Browser opened — finish the {provider.label} sign-in there. Esc to cancel.</text>
-);
+// The sign-in wait line — Esc routing (cancel, menu-origin return) lives in the shell. A device flow (#170)
+// has something to SHOW rather than a browser to wait on: the URL to open and the code to type there. Until
+// the server issues them it reads as the plain waiting line, so the screen covers both legs.
+export const SigninWaitScreen = ({ provider, device }: { provider: Provider; device?: { verificationUri: string; verificationUriComplete?: string; userCode: string } }) =>
+  device ? (
+    <box {...PANEL} title={`${provider.label} sign-in`} marginTop={1} flexDirection="column">
+      <text wrapMode="none" flexShrink={0}>Open: {device.verificationUriComplete ?? device.verificationUri}</text>
+      <text wrapMode="none" flexShrink={0}>Code: {device.userCode}</text>
+      <text wrapMode="none" flexShrink={0} fg={DIM} marginTop={1}>Waiting for you to approve it there. Esc to cancel.</text>
+    </box>
+  ) : (
+    <text wrapMode="none" flexShrink={0} fg={DIM} marginTop={1}>
+      {isKimiProvider(provider)
+        ? `Asking ${provider.label} for a device code. Esc to cancel.`
+        : `Browser opened — finish the ${provider.label} sign-in there. Esc to cancel.`}
+    </text>
+  );
 
 // Pick the stored reasoning effort — writes config here; navigation stays a callback.
 export const EffortPickScreen = ({ onDone }: { onDone: (message?: string) => void }) => (

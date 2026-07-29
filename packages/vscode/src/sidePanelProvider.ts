@@ -38,7 +38,10 @@ export type PanelState = {
   providerId?: string; // Active Provider id (drives the dropdown's selected value)
   providers: { id: string; label: string }[]; // the catalog, for the dropdown
   isCustom: boolean; // active Provider is Custom → the panel reveals the editable base-URL field (Issue 7)
-  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth'; // the OAuth kinds swap the API-key field for sign-in/out (Grok wiring lands in #97)
+  // The OAuth kinds swap the API-key field for sign-in/out (Grok wiring lands in #97). 'kimi-oauth' (#170)
+  // is carried so the row's kind survives the round-trip, but its sign-in lives in `wisp`, not this panel —
+  // the webview shows it as a no-key row rather than offering a button that cannot run a device flow.
+  kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth';
   signedIn?: boolean; // OAuth kinds only: whether a token bundle is present
   account?: string; // #150: "you@email · Max" from the bootstrap identity (Anthropic only)
   modelOptions?: string[]; // OAuth kinds only: models.dev-sourced ids for the dropdown (curated fallback; no live /models route)

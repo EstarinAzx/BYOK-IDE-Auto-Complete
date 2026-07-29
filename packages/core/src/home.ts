@@ -16,7 +16,7 @@
  * keys are preserved so a TUI-era field survives an extension read-modify-write.
  */
 
-import type { AnthropicCreds, CodexCreds, XaiCreds, EffortLevel } from './catalog';
+import type { AnthropicCreds, CodexCreds, XaiCreds, KimiCreds, EffortLevel } from './catalog';
 import type { RoutingMap, SnapshotEntry, SnapshotStore } from './routing';
 
 // ----------------------------- Types ----------------------------- //
@@ -38,6 +38,7 @@ export type WispAuth = {
   codex?: CodexCreds;
   anthropic?: AnthropicCreds;
   xai?: XaiCreds;
+  kimi?: KimiCreds;
   bridgeSecret?: string;
 };
 
@@ -96,6 +97,7 @@ const sanitizeCreds = (v: unknown, fields: Record<string, 'string' | 'number'>):
 const CODEX_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', idToken: 'string', accountId: 'string', apiKey: 'string' } as const;
 const ANTHROPIC_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number', deviceId: 'string', accountUuid: 'string', accountEmail: 'string', organizationName: 'string', rateLimitTier: 'string' } as const;
 const XAI_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number', tokenEndpoint: 'string' } as const;
+const KIMI_CRED_FIELDS = { accessToken: 'string', refreshToken: 'string', expiresAt: 'number' } as const;
 
 // ----------------------------- parseWispConfig ----------------------------- //
 
@@ -157,6 +159,10 @@ export const parseWispAuth = (raw: string | undefined | null): WispAuth => {
   if ('xai' in auth) {
     const xai = sanitizeCreds(auth.xai, XAI_CRED_FIELDS);
     if (xai) auth.xai = xai; else delete auth.xai;
+  }
+  if ('kimi' in auth) {
+    const kimi = sanitizeCreds(auth.kimi, KIMI_CRED_FIELDS);
+    if (kimi) auth.kimi = kimi; else delete auth.kimi;
   }
   if ('bridgeSecret' in auth && typeof auth.bridgeSecret !== 'string') delete auth.bridgeSecret;
   return auth as WispAuth;

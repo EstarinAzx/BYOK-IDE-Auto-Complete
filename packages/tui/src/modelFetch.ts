@@ -12,9 +12,9 @@
  */
 
 import {
-  resolveBaseUrl, resolveKeyId, oauthModelOptions, getModelsDevCatalog, type Provider,
+  resolveBaseUrl, oauthModelOptions, getModelsDevCatalog, type Provider,
 } from '@wisp/core';
-import { home } from './store';
+import { home, bearerFor } from './store';
 
 // ----------------------------- Fetch (throwing) ----------------------------- //
 
@@ -28,7 +28,7 @@ export const fetchModelList = async (p: Provider): Promise<string[] | undefined>
   if (curated) return curated;
   const base = resolveBaseUrl(p, home.readConfig().customBaseUrl ?? '');
   if (!base) return undefined;
-  const key = home.readAuth().keys?.[resolveKeyId(p)] || (p.apiKeyEnv ? process.env[p.apiKeyEnv] : undefined);
+  const key = await bearerFor(p);
   const res = await fetch(`${base}/models`, {
     headers: key ? { Authorization: `Bearer ${key}` } : undefined,
     signal: AbortSignal.timeout(10_000),
