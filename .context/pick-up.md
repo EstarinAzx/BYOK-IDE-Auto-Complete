@@ -38,9 +38,14 @@ sign-in rather than another turn. Then triage #180 / #181.
   accepts `stream_options`. ⚠ **Both aliases hit the same Provider row**: one backend verified, not nine.
   OpenAI, Groq, Mistral, OpenRouter, Ollama, Ollama Cloud, KiloCode, Cline and Custom are still unexercised;
   a rejection there shows as a **400 naming `stream_options`**, and the fix is a per-row opt-out flag.
-- **#172 ⬜ the last one, and it is small.** A fresh Codex sign-in that never opens the model picker completes
-  a turn. Needs a genuinely fresh sign-in — an account that already has a model chosen does not exercise
-  `defaultModel`, which is the whole point.
+- **#172 ✅.** `/test` in a throwaway `WISP_HOME` seeded with only `{"provider":"codex"}` printed
+  `/test: Codex (gpt-5.6-sol)` and streamed a reply, on the published 2.0.38. Self-verifying: the real
+  machine pins `gpt-5.6-terra`, so the header naming `gpt-5.6-sol` proves the sandbox was live *and* that
+  `resolveModel` fell through to `defaultModel`.
+  ⚠ **The obvious way to test this does not work.** Sign-out clears `auth.json`; the picked model lives in
+  `config.json` and survives, and `resolveModel` is `modelMap[id] || defaultModel`, so a logout/login cycle
+  never reaches the changed line. Routing entries pin a model too, so bridging on a family/alias misses it as
+  well. Only a home with **no `models.<id>` entry** exercises it.
 
 **How to check usage — do NOT read `status.json` for this.** It is global and your own bridged turn
 overwrites it; use the per-session Claude Code transcript instead, folded by `message.id`.

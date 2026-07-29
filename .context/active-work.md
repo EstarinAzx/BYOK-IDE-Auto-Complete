@@ -71,9 +71,15 @@ cluster stopped is a matter of living on this build, not of one more session.
     verified, not nine.
   - **#163 → diagnosis confirmed, ticket left open.** Closing it needs a stretch of use with no refusal in
     the 217k–245k band, not another check.
+  - **#172 ✅** — `/test` in a throwaway `WISP_HOME` holding only `{"provider":"codex"}` printed
+    `/test: Codex (gpt-5.6-sol)` and streamed, on the published 2.0.38. Self-verifying: the real machine pins
+    `gpt-5.6-terra`, so that header proves both the sandbox and the `defaultModel` fall-through.
+    ⚠ A logout/login does **not** test this — sign-out clears `auth.json`, the picked model lives in
+    `config.json`, and `resolveModel` is `modelMap[id] || defaultModel`. Routing entries pin a model too.
 - **User action still pending:**
-  - **Verify #172 live** — a fresh Codex sign-in that never picks a model completes a turn.
-  - **#167's manual criterion** — one turn each through Codex, Anthropic and Grok.
+  - **#167's manual criterion** — one turn each through Codex, Anthropic and Grok. **Codex and Anthropic are
+    now covered** by this session's work (the `/test` above; and Claude Code itself bridges through the
+    Anthropic door). **Grok is the only one left.**
   - **#170's two open criteria** — needs a Kimi Code subscription; the sign-in attempt doubles as the
     unverified-constants check.
   - **Install `packages/vscode/wisp-1.9.0.vsix`** (carried over, still not done — #180 supersedes it with a
