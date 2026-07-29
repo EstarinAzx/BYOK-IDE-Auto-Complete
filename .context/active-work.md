@@ -7,43 +7,43 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-29 by Opus 5 (relay leg 5 — #169 landed)._
-_At commit: `7b8d73d` on main, pushed. The relay chain is live; leg 6 works #170._
+_Last updated: 2026-07-29 by Opus 5 (relay leg 6 — #170 landed)._
+_At commit: `d656686` on main, pushed. The relay chain is live; leg 7 works #172._
 
 ## Current focus
 
-**The relay is draining the CLIProxyAPI harvest** (spec #164). Legs 1–5 landed **#165** (Responses-wire
+**The relay is draining the CLIProxyAPI harvest** (spec #164). Legs 1–6 landed **#165** (Responses-wire
 usage), **#166** (error classification), **#167** (the ProviderExecutor seam), **#168** (retry + transient
-cooldown) and **#169** (API-key usage). Four remain.
+cooldown), **#169** (API-key usage) and **#170** (the Kimi Provider). Three remain — and **one of those three
+should not be taken by an agent** (see the queue).
 
-**Usage reporting is now complete across the catalog.** The headline finding — *the codex 502s are a
-usage-reporting bug, not a window bug* — has had its full fix shipped: every Provider kind now reports real
-tokens, so Claude Code can size auto-compaction on all of them. #169 closed the last ten rows, including the
-**default** Provider (OpenCode Go).
+**Usage reporting is complete across the catalog**, and #170 proved it extends for free: Kimi inherited it
+without a line of usage code, because it rides the keyed path.
 
 **The verdict is still not in.** #165's last acceptance criterion — a bridged Codex session reading non-zero
-`/context` — needs a human with a restarted Bridge. **Five** shipped tickets now ride on that check, and
-#169 adds a second live check on the same trip.
+`/context` — needs a human with a restarted Bridge. **Six** shipped tickets now ride on that check.
 
 ## State
 
-- **In flight:** nothing. Working tree clean on main; relay leg 6 due on #170.
-- **Done this session (relay leg 5):**
-  - **#169 landed** — `7b8d73d` on main (PR #176, squash-merged), ticket closed with **seven of eight
-    acceptance criteria machine-checked**; the eighth is manual and carried (#167 precedent).
-  - **The mapper is a sibling, not a shared function.** `chatCompletionsUsage` in `bridge.ts` duplicates
-    every one of `responsesUsage`'s conventions instead of sharing code. The two differ only in source
-    field names; unifying them would thread a field-name shim through the middle of the conversion that
-    *is* the substance.
-  - **The opt-in is unconditional at both call sites.** Both already pass `stream: true` regardless of what
-    the client asked (the door always streams upstream), so there is no request shape where asking for
-    usage would be wrong.
-  - **Purely additive.** The usage chunk carries an **empty `choices` array**, so `mapKeyedStream`'s
-    existing delta reads already skipped it. No new `BridgeStreamEvent` member either — `usage` existed.
-  - Gate: **731/731 tests** (+12), `bun run compile` clean.
-  - Decision: [[2026-07-29-chat-completions-usage-is-a-sibling-mapper-not-a-shared-one]].
-    New trap: [[harvest-tickets-carry-body-text-blockers-not-native-links]].
+- **In flight:** nothing. Working tree clean on main; relay leg 7 due on #172.
+- **Done this session (relay leg 6):**
+  - **#170 landed** — `d656686` on main (PR #177, squash-merged), ticket closed with **nine of eleven
+    acceptance criteria machine-checked**; the two open ones need a Kimi Code subscription.
+  - **The keyed record did NOT cover an OAuth token unchanged — but the gap was one seam, not one
+    executor.** `clientFor` builds from `keyFor`, which reads the keys map. Teaching `keyFor` about Kimi
+    carries it through the keyed executor, the picker's usability check, the Bridge model list and Inquire
+    with no new branch anywhere. Decision:
+    [[2026-07-29-oauth-credentialed-but-keyed-on-the-wire-resolves-at-the-keyfor-seam]].
+  - **`kind: 'kimi-oauth'` is a UI marker only.** Nothing dispatches on it — every kind check is an
+    `=== 'string'` comparison, so Kimi falls through to the keyed executor by construction. The marker only
+    tells the faces "offer sign-in, not a key field".
+  - **New trap, cost two silent 401s in review:** the TUI had **three** copies of the bearer-resolution rule.
+    [[a-shared-bearer-rule-or-the-oauth-row-401s-on-half-the-paths]].
+  - **The root `compile` script only covers `packages/vscode`.** This leg changed six TUI files; `packages/tui`
+    has its own `bun run compile` and must be run separately or its type errors ship silently.
+  - Gate: **758/758 tests** (+27), `bun run compile` clean in **both** packages.
 - **User action pending:**
+  - **Decide what #171 is** — see the queue note. This is the only one blocking the relay's ordering.
   - **Verify #165 live** — restart the Bridge on this build, bridge a Codex session, read `/context`.
     This is the #163 verdict; see [[pick-up]] for what each outcome means.
   - **Verify #169 live** — same trip, different door: a bridged session on the **default** Provider
@@ -51,9 +51,13 @@ tokens, so Claude Code can size auto-compaction on all of them. #169 closed the 
     rather than silence — that is the failure mode the acceptance criteria did *not* cover.
   - **#167's manual criterion is still outstanding** — one turn each through Codex, Anthropic and Grok to
     confirm all three still stream. Unchanged by #168/#169 in intent, but both touched shared paths.
+  - **#170's two open criteria** — needs a Kimi Code subscription: the live device sign-in round trip, and a
+    Kimi turn reporting real usage through the Bridge. **The auth constants are unverified** (host, client
+    id, endpoints) — the CLIProxyAPI source path 404s. A wrong one fails loud at sign-in, so the sign-in
+    attempt IS the verification.
   - **Install `packages/vscode/wisp-1.9.0.vsix`** (carried over, still not done).
 
-## Queue — 4 tickets left, all `ready-for-agent`
+## Queue — 3 tickets left, all labelled `ready-for-agent`
 
 | # | Ticket | Blocked by |
 |---|---|---|
@@ -62,24 +66,32 @@ tokens, so Claude Code can size auto-compaction on all of them. #169 closed the 
 | ~~167~~ | ~~Collapse three Bridge handlers into one ProviderExecutor record~~ | **DONE — `c697733`** |
 | ~~168~~ | ~~Transient failures retried and cooled down~~ | **DONE — `89f94c5`** |
 | ~~169~~ | ~~API-key Providers report real token usage~~ | **DONE — `7b8d73d`** |
-| 170 | Kimi Provider via device flow | — (167, 169 done) |
-| 171 | Statusline: live context percentage + quota meters | — (169 done) |
-| 172 | Codex Provider default model rejected by ChatGPT-account path | — |
-| 173 | **Cut `wisp-router` 2.0.38** — ship the harvest | 170–172 |
+| ~~170~~ | ~~Kimi Provider via device flow~~ | **DONE — `d656686`** |
+| **172** | Codex Provider default model rejected by ChatGPT-account path | — (**next**) |
+| 171 | Statusline: live context percentage + quota meters | ⚠️ **label contradicts its own body — human call** |
+| 173 | **Cut `wisp-router` 2.0.38** — ship the harvest | 171, 172 |
 
 Also open, ungroomed: **#69** (copilot-wisp launcher), **#163** (502 observation — #165+#166 are its
 candidate fix; leave open until the live `/context` check confirms).
 
-- **Blocked:** only #173, on the other three. **#170**, **#171** and **#172** can all start immediately;
-  **#170 is next by age.**
-- **These edges are body text, not native links** — GraphQL `blockedBy` reports empty for all four. See
-  [[harvest-tickets-carry-body-text-blockers-not-native-links]] before trusting a dependency query.
+- **#172 is next** — genuinely unblocked, self-contained, and its body says so explicitly.
+- **⚠️ #171 carries a contradiction an agent must not resolve on its own.** It is *labelled*
+  `ready-for-agent`, but its body ends with: *"Deliberately left without the `ready-for-agent` label until
+  the recon resolves… an unattended agent should not be sent at a display it cannot source data for. Label
+  it once the header capture answers the question — or split the committed context-percentage half out and
+  label that alone."* Two of its three blockers (#165, #169) are done; the third is the response-header
+  recon, which is the ticket's own first step. **Leg 6 honoured the body and skipped it.** A human should
+  either do the recon, split the ticket, or drop the label.
+- **These edges are body text, not native links** — GraphQL `blockedBy` reports empty for all of them. See
+  [[harvest-tickets-carry-body-text-blockers-not-native-links]] before trusting a dependency query. #171 is
+  the sharper version of that trap: **the label itself can lie too.**
 
 ## Pick up here
 
-The relay is running — leg 6 takes #170. Do not re-plan; the tickets carry their own acceptance criteria and
-the ordering rationale is settled in
-[[2026-07-29-cliproxyapi-harvest-scoped-minimum-record-usage-first]].
+The relay is running — leg 7 takes **#172**. Do not re-plan; the tickets carry their own acceptance criteria
+and the ordering rationale is settled in
+[[2026-07-29-cliproxyapi-harvest-scoped-minimum-record-usage-first]]. The one deviation from strict age order
+is #171, and its reason is in the queue table.
 
 ## Skills for next session
 
@@ -102,6 +114,12 @@ the ordering rationale is settled in
 - **Should the two doors' provider dispatch ever fully merge?** Left open on purpose (#167). It costs one flag
   per wire difference today; revisit only when a backend actually needs the same shaping on both doors, and
   only with permission to move wire behaviour.
+- **Is `kimi-k2.7-code` a real Kimi Code model id?** Best-effort. models.dev carries **no first-party
+  Kimi/Moonshot provider** (checked 2026-07-29 — Kimi models appear only inside `fireworks-ai`, `wandb` and
+  `crossmodel`), so the row takes no `catalogKey` and caps fall to the neutral default. The row serves a live
+  `/models` route, so the picker is the correction path. Same for the auth host/client id/endpoints.
+- **ANSWERED (leg 6):** ~~does the keyed record cover an OAuth-token Provider unchanged?~~ No — but the gap
+  is one seam (`keyFor`), not one executor. See the decision entry.
 - **ANSWERED (leg 5):** ~~can the two usage mappers be one function?~~ No — sibling, not shared. See the
   decision entry.
 - **ANSWERED (leg 4):** ~~does the retry wrap the shared error answer?~~ No — the cooldown does, the retry
@@ -121,8 +139,9 @@ the ordering rationale is settled in
 - **CLIProxyAPI is worth re-reading, not re-cloning blind.** Sponsor-funded and further along on usage, error
   taxonomy, retry and multi-provider auth. Most does not apply; the three modules worth reading are named in
   the decision entry.
-- **It ships Kimi and Antigravity today** — Kimi is ~570 lines of plain RFC 8628 (that is #170, next up);
-  Antigravity is ~5,600 and gets its own spec.
+- **It ships Kimi and Antigravity today** — Kimi shipped as #170; Antigravity is ~5,600 lines and gets its
+  own spec. Worth noting for that spec: the CLIProxyAPI source path the Kimi ticket cited **404s**, so plan
+  to re-derive constants rather than quote them.
 - **Response headers are load-bearing and Wisp currently discards them** — #171 adds the snapshot.
 - **The vsix is the ship vehicle for picker/native-chat surfaces**; npm releases don't reach them.
 
@@ -132,6 +151,8 @@ the ordering rationale is settled in
 - [[pick-up]]
 - [[decisions]]
 - [[2026-07-29-cliproxyapi-harvest-scoped-minimum-record-usage-first]]
+- [[2026-07-29-oauth-credentialed-but-keyed-on-the-wire-resolves-at-the-keyfor-seam]]
+- [[a-shared-bearer-rule-or-the-oauth-row-401s-on-half-the-paths]]
 - [[2026-07-29-chat-completions-usage-is-a-sibling-mapper-not-a-shared-one]]
 - [[2026-07-29-retry-wraps-priming-cooldown-channels-are-separate-maps]]
 - [[2026-07-29-two-doors-share-the-error-answer-not-the-request]]
