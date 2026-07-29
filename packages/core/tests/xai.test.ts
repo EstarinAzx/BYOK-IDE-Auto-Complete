@@ -1,6 +1,6 @@
 // ---------------- xai.test.ts — pure Grok (xAI OAuth) Provider helpers ---------------- //
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   isXaiProvider, isXaiSignedIn,
   tokensToXaiCreds, shouldRefreshXaiToken, parseXaiCreds,
@@ -11,6 +11,7 @@ import {
   effortOptionsFor, oauthModelOptions,
   type Provider, type CodexResponsesEvent,
 } from '../src/catalog';
+import { xaiStream } from '../src/xaiClient';
 
 // A Grok catalog row, overridable per-test — mirrors the anthropic.test.ts provider() helper.
 const provider = (over: Partial<Provider> = {}): Provider => ({
@@ -318,6 +319,40 @@ describe('Grok Responses stream (#94 — reuses the Codex Responses reducers)', 
     expect(reduceResponsesTextEvents(events)).toBe('Hello');
     const terminal = events.find((e) => e.event === 'response.completed');
     expect(responsesIncompleteReason(terminal?.data?.response)).toBe('max_output_tokens');
+  });
+});
+
+// #165: Grok shares the Codex mapping, so its stream must report tokens the same way — stub global.fetch with
+// a canned Responses SSE body and read the events back, mirroring the codex.test.ts streaming harness.
+describe('xaiStream (streaming IO, #165)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const sseResponse = (blocks: string[]): Response => {
+    const text = blocks.map((b) => `${b}\n\n`).join('');
+    const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new TextEncoder().encode(text)); c.close(); } });
+    return new Response(body, { status: 200 });
+  };
+  const stub = (blocks: string[]) => vi.stubGlobal('fetch', async () => sseResponse(blocks));
+  const args = { creds: { accessToken: 'at' }, baseUrl: 'https://api.x.ai/v1', model: 'grok-4.5', messages: [{ role: 'user' as const, content: 'hi' }] };
+  const collect = async (gen: AsyncGenerator<any>): Promise<any[]> => { const out: any[] = []; for await (const ev of gen) out.push(ev); return out; };
+
+  // Same mapping as Codex, from the same shared function — cached input lands in cache-read, not uncached.
+  it('emits a usage event carrying the mapped token counts', async () => {
+    stub([
+      'event: response.output_text.delta\ndata: {"delta":"hi"}',
+      'event: response.completed\ndata: {"response":{"status":"completed","output":[],"usage":{"input_tokens":900,"input_tokens_details":{"cached_tokens":400},"output_tokens":120}}}',
+    ]);
+    const out = await collect(xaiStream(args as any));
+    expect(out).toContainEqual({ type: 'usage', usage: { input_tokens: 500, cache_creation_input_tokens: 0, cache_read_input_tokens: 400, output_tokens: 120 } });
+  });
+
+  // A terminal frame without usage stays silent rather than reporting zeros.
+  it('emits no usage event when the terminal frame carries none', async () => {
+    stub([
+      'event: response.output_text.delta\ndata: {"delta":"hi"}',
+      'event: response.completed\ndata: {"response":{"status":"completed","output":[]}}',
+    ]);
+    expect(await collect(xaiStream(args as any))).toEqual([{ type: 'text', value: 'hi' }]);
   });
 });
 

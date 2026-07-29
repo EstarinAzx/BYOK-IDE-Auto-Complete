@@ -242,7 +242,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
         for await (const ev of upstream) {
           if (ev.type === 'text') { if (ev.value) res.write(sseLine(textChunk(ev.value, meta))); }
-          else calls.push(ev.call);
+          else if (ev.type === 'toolCall') calls.push(ev.call);
+          // #165: usage events carry no wire content and this door has no meter channel — skip, never
+          // treat "not text" as "must be a tool call".
         }
         calls.forEach((call, i) => res.write(sseLine(toolCallChunk(call, i, meta))));
         res.write(sseLine(finalChunk(calls.length ? 'tool_calls' : 'stop', meta)));
@@ -253,7 +255,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         let text = '';
         for await (const ev of upstream) {
           if (ev.type === 'text') text += ev.value;
-          else calls.push(ev.call);
+          else if (ev.type === 'toolCall') calls.push(ev.call);
+          // #165: usage events carry no wire content and this door has no meter channel — skip, never
+          // treat "not text" as "must be a tool call".
         }
         sendJson(res, 200, buildCompletion(meta, text, calls));
       }
@@ -350,7 +354,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
         for await (const ev of upstream) {
           if (ev.type === 'text') { if (ev.value) res.write(sseLine(textChunk(ev.value, meta))); }
-          else calls.push(ev.call);
+          else if (ev.type === 'toolCall') calls.push(ev.call);
+          // #165: usage events carry no wire content and this door has no meter channel — skip, never
+          // treat "not text" as "must be a tool call".
         }
         calls.forEach((call, i) => res.write(sseLine(toolCallChunk(call, i, meta))));
         res.write(sseLine(finalChunk(calls.length ? 'tool_calls' : 'stop', meta)));
@@ -361,7 +367,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         let text = '';
         for await (const ev of upstream) {
           if (ev.type === 'text') text += ev.value;
-          else calls.push(ev.call);
+          else if (ev.type === 'toolCall') calls.push(ev.call);
+          // #165: usage events carry no wire content and this door has no meter channel — skip, never
+          // treat "not text" as "must be a tool call".
         }
         sendJson(res, 200, buildCompletion(meta, text, calls));
       }

@@ -16,7 +16,7 @@
  *     picker streams text and agent mode invokes the tools).
  */
 
-import { CodexCreds, buildCodexResponsesBody, codexReasoning, parseSseBlock, reduceResponsesTextEvents, reduceResponsesToolCalls, extractResponsesText, responsesIncompleteReason, type CodexEffort, type CodexResponsesEvent, type CodexResponsesTool, type AssembledToolCall } from './catalog';
+import { CodexCreds, buildCodexResponsesBody, codexReasoning, parseSseBlock, reduceResponsesTextEvents, reduceResponsesToolCalls, extractResponsesText, responsesIncompleteReason, responsesUsage, type CodexEffort, type CodexResponsesEvent, type CodexResponsesTool, type AssembledToolCall, type BridgeUsage } from './catalog';
 
 // A conversation message for the Codex backend: Inquire sends system+user, native chat sends user/assistant
 // — optionally with images and, in agent mode, the tool calls it made / the tool results it carries.
@@ -24,9 +24,14 @@ type CodexMessage = { role: 'system' | 'user' | 'assistant'; content: string; im
 
 type CodexRequestArgs = { creds: CodexCreds; baseUrl: string; model: string; messages: CodexMessage[]; effort?: CodexEffort; tools?: CodexResponsesTool[]; toolChoice?: 'auto' | 'required'; signal?: AbortSignal };
 
-// What codexStream yields: an answer-text fragment, or a fully-assembled tool call (emitted once the stream
-// ends). The native-chat consumer maps these to LanguageModelTextPart / LanguageModelToolCallPart.
-export type CodexStreamEvent = { type: 'text'; value: string } | { type: 'toolCall'; call: AssembledToolCall };
+// What codexStream yields: an answer-text fragment, a fully-assembled tool call (emitted once the stream
+// ends), or the turn's real token usage (#165, off the terminal frame). The native-chat consumer maps the
+// first two to LanguageModelTextPart / LanguageModelToolCallPart and ignores usage; the Bridge's
+// mapOAuthStream forwards usage to the door, whose encoder folds it into the client's meter.
+export type CodexStreamEvent =
+  | { type: 'text'; value: string }
+  | { type: 'toolCall'; call: AssembledToolCall }
+  | { type: 'usage'; usage: BridgeUsage };
 
 // ----------------------------- Request ----------------------------- //
 
@@ -142,6 +147,12 @@ export async function* codexStream(args: CodexRequestArgs): AsyncGenerator<Codex
       if (text) completed = text;
       // Covers both wire shapes: response.incomplete, and response.completed carrying incomplete_details.reason.
       incompleteReason = responsesIncompleteReason(ev.data?.response) ?? incompleteReason;
+      // #165: the turn's real cost rides the terminal frame. Yielded inline (not after the loop) so a
+      // no-delta turn's usage reaches the door BEFORE its first content — the door defers message_start
+      // until usage arrives, so this is what puts real counts on the opening frame instead of zeros.
+      // A frame with no usage block yields nothing at all: zeros are the bug, not a safe default.
+      const usage = responsesUsage(ev.data?.response);
+      if (usage) yield { type: 'usage', usage };
     } else if (ev.event === 'error') {
       streamError = ev.data?.message ?? ev.data?.error?.message ?? streamError;
     }

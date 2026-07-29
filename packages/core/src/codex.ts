@@ -16,6 +16,7 @@
 import type { Provider } from './catalog';
 import {
   sortByReleaseDesc, DEFAULT_EFFORT, trimmedString,
+  type BridgeUsage,
   type ModelCaps, type ModelsDevCatalog,
   type CodexEffort, type CodexReasoning,
   type CodexResponsesEvent, type ToolSpec, type AssembledToolCall,
@@ -236,6 +237,34 @@ export const extractResponsesText = (response: any): string => {
 export const responsesIncompleteReason = (response: any): string | undefined => {
   const reason = response?.incomplete_details?.reason;
   return typeof reason === 'string' ? reason : undefined;
+};
+
+// The real token counts off a *terminal* Responses object, converted to the Anthropic-shaped BridgeUsage the
+// Bridge carries end-to-end (#165). Shared with Grok — same wire, same mapping.
+//
+// The conversion IS the substance: on this wire cached input and reasoning output are reported as SUBSETS of
+// their totals, while BridgeUsage keeps the cache tiers SEPARATE from the uncached input. So:
+//   - cache-read takes the cached detail, and the uncached input gives it up (floored at 0 — a backend that
+//     reports cached > total must not produce a negative meter reading);
+//   - cache-WRITE is always 0, the Responses protocol has no such concept to report;
+//   - output passes through whole, reasoning already inside it — subtracting it would under-report exactly
+//     the high-effort turns whose cost matters most.
+// No usage block, or totals that aren't numbers → undefined, so the caller emits NO event. That distinction
+// is load-bearing: a synthesized zero is the very bug this exists to kill (Claude Code sizes auto-compaction
+// off these counts, and a zero means it never compacts until the backend rejects the history).
+export const responsesUsage = (response: any): BridgeUsage | undefined => {
+  const usage = response?.usage;
+  const input = usage?.input_tokens;
+  const output = usage?.output_tokens;
+  if (typeof input !== 'number' || typeof output !== 'number') return undefined;
+  const cachedDetail = usage?.input_tokens_details?.cached_tokens;
+  const cached = typeof cachedDetail === 'number' ? cachedDetail : 0;
+  return {
+    input_tokens: Math.max(0, input - cached),
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: cached,
+    output_tokens: output,
+  };
 };
 
 // Reassemble streamed Responses function-call events into whole tool calls — the Responses analogue of

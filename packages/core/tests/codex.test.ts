@@ -4,7 +4,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   isCodexProvider, isCodexSignedIn,
   buildCodexResponsesBody, reduceResponsesTextEvents, extractResponsesText, parseSseBlock,
-  responsesIncompleteReason,
+  responsesIncompleteReason, responsesUsage,
   decodeJwtPayload, parseChatgptAccountId, shouldRefreshCodexToken,
   parseCodexAuthJson, codexReasoning, standardEffortToCodex, codexModelCaps, CODEX_MODELS, codexModelsFrom,
   toCodexResponsesTools, reduceResponsesToolCalls,
@@ -668,6 +668,58 @@ describe('responsesIncompleteReason', () => {
   });
 });
 
+// #165: the Responses→Bridge usage mapping. The wire reports cached input as a SUBSET of the input total and
+// reasoning as a SUBSET of the output total; BridgeUsage is Anthropic-shaped (uncached / cache-write /
+// cache-read / output), so the subtraction below is the whole substance of the conversion.
+describe('responsesUsage (#165)', () => {
+  // The mapping proper: cached tokens move to cache-read, the input total loses them, output passes through.
+  it('maps a Responses usage block onto the Anthropic-shaped BridgeUsage', () => {
+    expect(responsesUsage({ usage: { input_tokens: 1000, input_tokens_details: { cached_tokens: 800 }, output_tokens: 300, output_tokens_details: { reasoning_tokens: 250 } } }))
+      .toEqual({ input_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 800, output_tokens: 300 });
+  });
+
+  // The Responses protocol has no cache-WRITE concept, so that tier is always zero — never inferred.
+  it('always reports zero cache-creation tokens', () => {
+    expect(responsesUsage({ usage: { input_tokens: 50, output_tokens: 10 } })?.cache_creation_input_tokens).toBe(0);
+  });
+
+  // Output passes through whole: reasoning is already inside the total, so subtracting it would under-report
+  // a high-effort turn — exactly the turns whose cost matters most for auto-compaction.
+  it('keeps reasoning tokens inside the output count', () => {
+    expect(responsesUsage({ usage: { input_tokens: 10, output_tokens: 900, output_tokens_details: { reasoning_tokens: 850 } } })?.output_tokens).toBe(900);
+  });
+
+  // The all-cached edge: a fully-cached prefix means cached === the input total, so uncached input is 0.
+  it('reports zero uncached input when the whole input was cached', () => {
+    expect(responsesUsage({ usage: { input_tokens: 700, input_tokens_details: { cached_tokens: 700 }, output_tokens: 5 } }))
+      .toMatchObject({ input_tokens: 0, cache_read_input_tokens: 700 });
+  });
+
+  // Defensive: a backend reporting cached > total must not produce a negative meter reading.
+  it('never lets uncached input go negative', () => {
+    expect(responsesUsage({ usage: { input_tokens: 100, input_tokens_details: { cached_tokens: 250 }, output_tokens: 1 } })?.input_tokens).toBe(0);
+  });
+
+  // No details block → nothing was cached; the input total is entirely uncached.
+  it('treats a missing details block as nothing cached', () => {
+    expect(responsesUsage({ usage: { input_tokens: 400, output_tokens: 20 } }))
+      .toEqual({ input_tokens: 400, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 20 });
+  });
+
+  // No usage on the payload → undefined, so the caller emits no event at all rather than a zeroed one (a
+  // synthesized zero is exactly the bug #165 exists to kill).
+  it('returns undefined when the payload carries no usage', () => {
+    expect(responsesUsage({ status: 'completed' })).toBeUndefined();
+    expect(responsesUsage(undefined)).toBeUndefined();
+    expect(responsesUsage({ usage: null })).toBeUndefined();
+  });
+
+  // A non-numeric total is not usable data — treat it as absent rather than coerce it to NaN.
+  it('returns undefined when the token totals are not numbers', () => {
+    expect(responsesUsage({ usage: { input_tokens: 'lots', output_tokens: 3 } })).toBeUndefined();
+  });
+});
+
 // The repo's first codexStream IO test: stub global.fetch to hand back a Response streaming SSE bytes, so the
 // stream's END-state handling (clean, truncated, or dropped) is exercised without a live Codex backend.
 describe('codexStream (streaming IO)', () => {
@@ -719,6 +771,28 @@ describe('codexStream (streaming IO)', () => {
     const out = await collect(codexStream(args));
     expect(out.some((e) => e.type === 'toolCall' && e.call.name === 'readFile')).toBe(true);
     expect(out.some((e) => e.type === 'text' && /ended before completion/.test(e.value))).toBe(true);
+  });
+
+  // #165: the terminal frame's usage block reaches the door as a usage event, so a bridged session's meter
+  // reads real tokens instead of the zeros that kept auto-compaction from ever firing.
+  it('emits a usage event carrying the mapped token counts', async () => {
+    stub([
+      'event: response.output_text.delta\ndata: {"delta":"hi"}',
+      'event: response.completed\ndata: {"response":{"status":"completed","output":[],"usage":{"input_tokens":1200,"input_tokens_details":{"cached_tokens":1000},"output_tokens":340,"output_tokens_details":{"reasoning_tokens":300}}}}',
+    ]);
+    const out = await collect(codexStream(args));
+    expect(out).toContainEqual({ type: 'usage', usage: { input_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 1000, output_tokens: 340 } });
+  });
+
+  // The counterpart edge: a terminal frame with no usage block emits no usage event, and the turn still
+  // completes normally (a zeroed event would be indistinguishable from the bug).
+  it('emits no usage event when the terminal frame carries none', async () => {
+    stub([
+      'event: response.output_text.delta\ndata: {"delta":"hi"}',
+      'event: response.completed\ndata: {"response":{"status":"completed","output":[]}}',
+    ]);
+    const out = await collect(codexStream(args));
+    expect(out).toEqual([{ type: 'text', value: 'hi' }]);
   });
 
   // D1: a response.incomplete carrying incomplete_details.reason appends a visible truncation marker after the text.

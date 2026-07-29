@@ -21,7 +21,7 @@
 import {
   XaiCreds, buildCodexResponsesBody, xaiReasoning, xaiResponsesUrl, xaiRequestHeaders, rewriteXaiResponsesPayload,
   isGrokCliProxyModel, parseSseBlock, reduceResponsesTextEvents, reduceResponsesToolCalls, extractResponsesText,
-  responsesIncompleteReason, type EffortLevel, type CodexResponsesEvent, type CodexResponsesTool,
+  responsesIncompleteReason, responsesUsage, type EffortLevel, type CodexResponsesEvent, type CodexResponsesTool,
 } from './catalog';
 import { sseBlocks, type CodexStreamEvent } from './codexClient';
 
@@ -108,6 +108,9 @@ export async function* xaiStream(args: XaiRequestArgs): AsyncGenerator<XaiStream
       const text = extractResponsesText(ev.data?.response);
       if (text) completed = text;
       incompleteReason = responsesIncompleteReason(ev.data?.response) ?? incompleteReason;
+      // #165: same wire, same mapping function as Codex — see responsesUsage for why no usage means no event.
+      const usage = responsesUsage(ev.data?.response);
+      if (usage) yield { type: 'usage', usage };
     } else if (ev.event === 'error') {
       streamError = ev.data?.message ?? ev.data?.error?.message ?? streamError;
     }
