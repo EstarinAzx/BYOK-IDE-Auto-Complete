@@ -12,19 +12,23 @@ _At commit: `819900b` on main, pushed, tag `v2.0.39`. **Agent queue empty.**_
 
 ## Current focus
 
-**Nothing is in flight, and for the first time in this arc no face is missing a shipped fix.** Spec #164 (the
-CLIProxyAPI harvest) closed last session; this session cut **npm `wisp-router` 2.0.39** (#183), which carried
-#181's data-loss fix to the last face that lacked it.
+**#182 is fixed on main and unreleased — that is the only open thread.** This session cut
+**npm `wisp-router` 2.0.39** (#183, closing the last of the harvest's release debt), then fixed **#182**
+(`9fd63f0`): the read-merge-write mechanism behind #181 no longer erases a store it could not parse.
 
 **What is released right now:**
 
-| Face | Version | Carries |
-|---|---|---|
-| npm `wisp-router` | **2.0.39** | the harvest **and** #181. Nothing owed |
-| `wisp` vsix | **1.10.0** | everything, including #181. Installed locally as `esarinazx.wisp@1.10.0` |
-| `wisp-slot` plugin | **1.6.0** | #171's statusline reader. Pushed — the user must `/plugin update` |
+| Face | Version | Carries | Owed |
+|---|---|---|---|
+| npm `wisp-router` | **2.0.39** | the harvest **and** #181 | **#182** (`9fd63f0`, unreleased) |
+| `wisp` vsix | **1.10.0** | everything through #181 | **#182** — the vsix bundles its own `@wisp/core` |
+| `wisp-slot` plugin | **1.6.0** | #171's statusline reader | nothing — untouched by #182 |
 
-No release debt. The next piece of work is a **choice**, not a queue item — see *Queue*.
+**#182 is fixed on main but shipped nowhere.** It touches `@wisp/core`, so the fix reaches users only
+through an npm cut *and* a vsix build — per
+[[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]], that owed pair should be **filed as a
+ticket, not left in prose**. Not yet filed: cutting two outward-facing releases was not authorized by "do
+#182", so it is the user's call.
 
 ## State
 
@@ -65,22 +69,25 @@ Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #16
 #170 `d656686`, #171 `3e0125e`, #172 `49761d8`, #173 `55daebb`/`v2.0.38`), plus the follow-ups #181 `4ec1a81`,
 #180 `ab2235b` and #183 `819900b`/`v2.0.39`.
 
-**Open — no `ready-for-agent` ticket exists. Nothing is urgent; pick by appetite:**
+**Open — no `ready-for-agent` ticket exists:**
 
 | # | Ticket | Note |
 |---|---|---|
-| **182** | A genuinely unparseable store still silently resets | The remaining half of #181 — same read-merge-write mechanism, rarer trigger. **Needs a design call before code**; the promising shape is refusing to **write** over contents that did not parse. The best-understood item here. |
+| — | **Release #182 to npm + vsix** | **Not filed yet, and the real next move.** `9fd63f0` is a data-loss fix sitting unreleased — exactly the position #181 was in before #183. Needs the user's go: two outward-facing publishes. |
 | **163** | The 502 observation | Diagnosis confirmed. Open pending a stretch of clean use in the 217k–245k band. Closing it is *waiting*, not working. |
 | **174** | Antigravity Provider | Placeholder, ungroomed. Needs `/preset init` or a grill before it is a ticket. |
 | **69** | copilot-wisp launcher | Ungroomed. |
 
+**Closed this session:** #183 (`819900b`/`v2.0.39`) and #182 (`9fd63f0`, ADR-0004).
+
 ## Pick up here
 
-**No forced move.** The release debt that drove the last three sessions is paid.
+**Decide whether to release #182**, and if yes, file the owed pair as a ticket first (the rule from #173).
+It is a data-loss fix in `@wisp/core`, so it needs **both** an npm cut (`2.0.40`) and a vsix build — the
+extension bundles its own core copy. Mechanics are established and fresh: #183 is the template, three commits
+back.
 
-Best default is **#182** — it is the only open item with a known mechanism and a real user cost, and it is a
-*design* question first (fail loud vs. refuse-to-write), so it wants a grill or a short spec before code, not
-a ticket-loop. Everything else is either waiting on time (#163) or ungroomed (#174, #69).
+If the answer is "not yet", nothing else is urgent — #163 is waiting on time, #174 and #69 are ungroomed.
 
 Do **not** restart the relay chain expecting work — with no `ready-for-agent` ticket it will pick nothing,
 write `queue empty`, and stop.
@@ -94,9 +101,12 @@ write `queue empty`, and stop.
 
 ## Open questions
 
-- **Tolerate or fail loud on a genuinely corrupt store?** #182, and now the top open question. Today Wisp
-  does neither — it discards and overwrites. The shape worth exploring is refusing to *write*, not making the
-  pure parsers throw (six callers depend on the current total contract).
+- **Settled:** _tolerate or fail loud on a corrupt store?_ → **neither: refuse to write.** ADR-0004,
+  [[2026-07-29-never-overwrite-a-store-we-could-not-parse]].
+- **Should a refused write print a bare error instead of a stack trace?** Left out of #182 deliberately. On
+  the TUI command paths an unhandled throw dumps a Bun stack trace — legible, exit 1, and *identical to how
+  ENOSPC has always surfaced there*, so #182 made an existing rough edge more reachable rather than adding
+  one. Fixing it properly is cross-cutting (every command path), not a one-liner at one site.
 - **Do the 502s actually stop?** #163. Watch for refusals in the 217k–245k band. Compaction should now fire,
   so that band may simply stop being reached — that is the fix working, not evidence going missing.
 - **Does `auth.json` share every config failure mode?** Same read path and same read-merge-write shape; the

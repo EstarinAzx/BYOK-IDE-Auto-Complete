@@ -9,38 +9,32 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last session (2026-07-29): #183 shipped — `wisp-router@2.0.39` is on npm, verified against a control.**
-That was the last piece of release debt. All three faces now carry every shipped fix, the tracker has no
-`ready-for-agent` ticket, and nothing is in flight. At `819900b` on main, tag `v2.0.39`.
+**Last session (2026-07-29): #183 shipped (`wisp-router@2.0.39` on npm, verified against a control), then
+#182 was fixed (`9fd63f0`, ADR-0004).** At `9fd63f0` on main. Nothing in flight, no `ready-for-agent` ticket.
 
-## There is no forced next task
+## The one open thread: #182 is fixed but shipped nowhere
 
-This is the first session in the arc that opens with a genuinely empty queue. Do not invent urgency, and do
-not restart the relay chain — with no `ready-for-agent` ticket it picks nothing, writes `queue empty`, stops.
+`9fd63f0` stops the read-merge-write mechanism from erasing a store it could not parse — the half of #181
+that a BOM fix did not cover. It is a **data-loss fix sitting unreleased**, which is exactly the position
+#181 was in before #183.
 
-**Ask the user what they want.** If they have no preference, the best default is **#182**.
+It lives in `@wisp/core`, so it reaches users only through **two** builds: an npm cut (`2.0.40`) **and** a
+vsix build, because the extension bundles its own copy of core. The `wisp-slot` plugin is untouched.
 
-### Why #182 is the default
+**This was deliberately not done.** "Do #182" did not authorize two outward-facing publishes — that is the
+user's call. Per the rule from #173, if the answer is yes, **file the owed pair as a ticket first**; an owed
+bump recorded only in prose evaporates. #183 is the template and is three commits back.
 
-It is the remaining half of #181. A BOM is fixed, but a *genuinely* unparseable store (truncated write, real
-typo) still degrades to `{}` — and because both stores are **read-merge-write**, that `{}` is merged with the
-next patch and written back over the real file. Same data loss, rarer trigger.
+If the answer is "not yet": nothing else is urgent. **#163** is waiting on time (a stretch of clean use in
+the 217k–245k band — watching, not working), **#174** and **#69** are ungroomed.
 
-**It is a design call before it is code.** Do not open an editor first. The pure parsers have six callers and
-a total contract (`string → object`, never throws); making them throw changes all six. The shape worth
-exploring is refusing to **write** over contents that did not parse — that is a `writeConfig`/`writeAuth`
-question, not a `parseObject` one. Route it through a grill or `/preset init`, not `/preset scope`.
-
-The rest of the queue is either waiting on time (**#163** — needs a stretch of clean use in the 217k–245k
-band, which is watching, not working) or ungroomed (**#174** Antigravity, **#69** copilot-wisp).
-
-## Released state — nothing is owed
+## Released state
 
 | Face | Version | Missing |
 |---|---|---|
-| npm `wisp-router` | **2.0.39** | nothing |
-| `wisp` vsix | **1.10.0** | nothing — installed as `esarinazx.wisp@1.10.0` |
-| `wisp-slot` plugin | **1.6.0** | nothing pushed; **the user's install is a stale cache snapshot** |
+| npm `wisp-router` | **2.0.39** | **#182** |
+| `wisp` vsix | **1.10.0** | **#182** — bundles its own `@wisp/core` |
+| `wisp-slot` plugin | **1.6.0** | nothing — untouched by #182 |
 
 ## Waiting on the user — down to one
 
@@ -53,10 +47,14 @@ and `/plugin update wisp-slot` (cache at 1.6.0). **#171 is confirmed live end-to
 
 ## Landmines
 
-- **A store file that does not parse is not ignored — it is OVERWRITTEN.** Both stores are read-merge-write,
-  so an empty parse result is merged with the next patch and written back. This is exactly #182 and it is
-  **still live**. Treat any "degrade to `{}`" in this layer as destructive by default.
-  [[a-bom-in-wisp-config-silently-empties-the-whole-config]].
+- **A store file that does not parse is no longer overwritten — `merge` refuses (#182, ADR-0004).** The
+  underlying shape still deserves respect: both stores are read-merge-write, so any *new* "degrade to `{}`"
+  introduced in this layer is destructive by default, and the refusal only guards the one write path. The
+  pure parsers are still total on purpose — do not make them throw, they have six callers.
+  [[2026-07-29-never-overwrite-a-store-we-could-not-parse]].
+- **`writeConfig` / `writeAuth` can throw, and always could** — `writeRaw` throws on ENOSPC/EPERM, and #182
+  added a new trigger for that same contract. ~35 call sites already tolerate it; none were changed. Resist
+  any "return a result type instead" refactor, which would touch all 35.
 - **A fix release is not verified until the OLD version FAILS the same check.** Most natural checks pass on
   the broken build too — on #183 a plain *read* check was green on 2.0.38 and 2.0.39 alike, because the read
   returned `{}` with exit 0. Install the previous published tarball as a control.
@@ -100,6 +98,7 @@ ever reads that file with a bare `JSON.parse`.
 - [[overview]]
 - [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]
 - [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]
+- [[2026-07-29-never-overwrite-a-store-we-could-not-parse]]
 - [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
 - [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
 - [[status-json-is-global-so-it-cannot-observe-another-session]]
