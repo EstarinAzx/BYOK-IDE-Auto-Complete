@@ -259,3 +259,186 @@ describe('withCooldownFallback', () => {
     expect(withCooldownFallback(undefined, 'claude-fable-5', providers, cooling, isAnthropic)).toBeUndefined();
   });
 });
+
+// ----------------------------- Transient failures (#168) ----------------------------- //
+
+import {
+  isTransientProviderError, jittered, retryDelayMs, createProviderCooldowns as makeCooldowns,
+  TRANSIENT_COOLDOWN_SECONDS, TRANSIENT_FAILURES_BEFORE_COOLDOWN, TRANSIENT_WINDOW_SECONDS,
+  MAX_PROVIDER_ATTEMPTS, RETRY_BASE_DELAY_MS, JITTER_FRACTION,
+} from '../src/routing';
+
+// A capacity rejection — the ticket's named case: transient, NOT exhausted quota.
+const AT_CAPACITY = 'Codex API error 503: {"error":{"message":"The model is at capacity. Please try again."}}';
+
+describe('isTransientProviderError', () => {
+  it('reads upstream 5xx as transient', () => {
+    for (const s of [500, 502, 503, 504])
+      expect(isTransientProviderError(`Codex API error ${s}: {"error":{"message":"bad gateway"}}`)).toBe(true);
+  });
+
+  it('reads a capacity rejection as transient, not exhausted quota', () => {
+    expect(isTransientProviderError(AT_CAPACITY)).toBe(true);
+    expect(parseUsageLimitReset(AT_CAPACITY)).toBeUndefined();
+  });
+
+  it('reads a dropped socket as transient', () => {
+    for (const m of ['socket hang up', 'fetch failed', 'read ECONNRESET', 'connect ETIMEDOUT 1.2.3.4:443'])
+      expect(isTransientProviderError(m)).toBe(true);
+  });
+
+  it('reads a stream that ended before completion as transient', () => {
+    expect(isTransientProviderError('Codex stream ended before completion')).toBe(true);
+  });
+
+  // The contamination guard, stated as a predicate: a plan-window 429 is NOT a blip.
+  it('never reads a usage-limit 429 as transient', () => {
+    expect(isTransientProviderError(CODEX_429)).toBe(false);
+  });
+
+  // …but a plain rate-limit 429 is one, and gets the short channel.
+  it('reads a non-usage-limit 429 as transient', () => {
+    expect(isTransientProviderError('Codex API error 429: {"error":{"type":"rate_limit_error"}}')).toBe(true);
+  });
+
+  it('never reads a client error as transient', () => {
+    expect(isTransientProviderError('Codex API error 400: {"error":{"code":"context_length_exceeded"}}')).toBe(false);
+    expect(isTransientProviderError('Codex API error 401: {"error":{"type":"authentication_error"}}')).toBe(false);
+  });
+});
+
+describe('jittered', () => {
+  it('adds nothing at random()=0 and the full capped fraction at random()=1', () => {
+    expect(jittered(1000, () => 0)).toBe(1000);
+    expect(jittered(1000, () => 1)).toBe(1000 * (1 + JITTER_FRACTION));
+  });
+
+  it('stays inside the cap for any random source', () => {
+    for (const r of [-5, 0.5, 42]) {
+      const ms = jittered(1000, () => r);
+      expect(ms).toBeGreaterThanOrEqual(1000);
+      expect(ms).toBeLessThanOrEqual(1000 * (1 + JITTER_FRACTION));
+    }
+  });
+});
+
+describe('retryDelayMs', () => {
+  it('backs off exponentially per attempt', () => {
+    expect(retryDelayMs(1, () => 0)).toBe(RETRY_BASE_DELAY_MS);
+    expect(retryDelayMs(2, () => 0)).toBe(RETRY_BASE_DELAY_MS * 2);
+  });
+
+  it('jitters off the injected source, never the clock', () => {
+    expect(retryDelayMs(1, () => 1)).toBe(RETRY_BASE_DELAY_MS * (1 + JITTER_FRACTION));
+  });
+
+  it('bounds the attempts a request may make', () => {
+    expect(MAX_PROVIDER_ATTEMPTS).toBeGreaterThan(1);
+  });
+});
+
+describe('createProviderCooldowns — the transient channel (#168)', () => {
+  // Fail `n` times in a row at the same instant.
+  const failTimes = (cd: ReturnType<typeof makeCooldowns>, n: number, message = AT_CAPACITY) => {
+    let last: number | undefined;
+    for (let i = 0; i < n; i++) last = cd.noteTransient('codex', message);
+    return last;
+  };
+
+  it('does not cool a provider for a single blip', () => {
+    const cd = makeCooldowns(() => 0, () => 0);
+    expect(cd.noteTransient('codex', AT_CAPACITY)).toBeUndefined();
+    expect(cd.cooling('codex')).toBe(false);
+  });
+
+  it('cools briefly once transient failures repeat inside the window', () => {
+    const cd = makeCooldowns(() => 1_000_000, () => 0);
+    expect(failTimes(cd, TRANSIENT_FAILURES_BEFORE_COOLDOWN)).toBe(TRANSIENT_COOLDOWN_SECONDS);
+    expect(cd.cooling('codex')).toBe(true);
+    expect(cd.coolingUntil('codex')).toBe(1_000_000 + TRANSIENT_COOLDOWN_SECONDS * 1000);
+  });
+
+  it('heals when the short cooldown expires', () => {
+    let now = 0;
+    const cd = makeCooldowns(() => now, () => 0);
+    failTimes(cd, TRANSIENT_FAILURES_BEFORE_COOLDOWN);
+    now += TRANSIENT_COOLDOWN_SECONDS * 1000 + 1;
+    expect(cd.cooling('codex')).toBe(false);
+  });
+
+  // Stale failures must not accumulate into a cooldown days later.
+  it('forgets failures older than the window', () => {
+    let now = 0;
+    const cd = makeCooldowns(() => now, () => 0);
+    for (let i = 0; i < TRANSIENT_FAILURES_BEFORE_COOLDOWN * 3; i++) {
+      expect(cd.noteTransient('codex', AT_CAPACITY)).toBeUndefined();
+      now += TRANSIENT_WINDOW_SECONDS * 1000 + 1;
+    }
+    expect(cd.cooling('codex')).toBe(false);
+  });
+
+  it('records nothing for a failure that is not transient', () => {
+    const cd = makeCooldowns(() => 0, () => 0);
+    expect(cd.noteTransient('codex', 'Codex API error 400: context_length_exceeded')).toBeUndefined();
+    expect(cd.cooling('codex')).toBe(false);
+  });
+
+  it('jitters the cooldown off the injected random source', () => {
+    const cd = makeCooldowns(() => 0, () => 1);
+    failTimes(cd, TRANSIENT_FAILURES_BEFORE_COOLDOWN);
+    expect(cd.coolingUntil('codex')).toBe(TRANSIENT_COOLDOWN_SECONDS * 1000 * (1 + JITTER_FRACTION));
+  });
+
+  it('keeps the two channels on separate providers', () => {
+    const cd = makeCooldowns(() => 0, () => 0);
+    failTimes(cd, TRANSIENT_FAILURES_BEFORE_COOLDOWN);
+    expect(cd.cooling('codex')).toBe(true);
+    expect(cd.cooling('anthropic')).toBe(false);
+  });
+
+  // ---- The two cross-contamination cases the ticket names ---- //
+
+  // A blip must never sideline a Provider for days.
+  it('a transient failure never creates or extends a usage-limit cooldown', () => {
+    let now = 0;
+    const cd = makeCooldowns(() => now, () => 0);
+    failTimes(cd, TRANSIENT_FAILURES_BEFORE_COOLDOWN * 4);
+    expect(cd.coolingUntil('codex')).toBe(TRANSIENT_COOLDOWN_SECONDS * 1000);
+    // Past the short horizon the provider is usable again — nothing wrote a multi-day entry.
+    now = TRANSIENT_COOLDOWN_SECONDS * 1000 + 1;
+    expect(cd.cooling('codex')).toBe(false);
+  });
+
+  // A real multi-day quota exhaustion must never be shortened to seconds.
+  it('a usage-limit cooldown is never shortened by transient failures', () => {
+    let now = 0;
+    const cd = makeCooldowns(() => now, () => 0);
+    expect(cd.noteUsageLimit('codex', CODEX_429)).toBe(551032);
+    failTimes(cd, TRANSIENT_FAILURES_BEFORE_COOLDOWN * 2);
+    expect(cd.coolingUntil('codex')).toBe(551032 * 1000);
+    // Well past any transient horizon, the plan window still holds.
+    now = TRANSIENT_COOLDOWN_SECONDS * 1000 * 100;
+    expect(cd.cooling('codex')).toBe(true);
+    expect(cd.coolingUntil('codex')).toBe(551032 * 1000);
+  });
+
+  // …and the reverse order: a plan-window 429 arriving while the short channel is hot wins.
+  it('a usage-limit failure overrides a live transient cooldown', () => {
+    let now = 0;
+    const cd = makeCooldowns(() => now, () => 0);
+    failTimes(cd, TRANSIENT_FAILURES_BEFORE_COOLDOWN);
+    cd.noteUsageLimit('codex', CODEX_429);
+    now = TRANSIENT_COOLDOWN_SECONDS * 1000 + 1;
+    expect(cd.cooling('codex')).toBe(true);
+    expect(cd.coolingUntil('codex')).toBe(551032 * 1000);
+  });
+
+  // The #161 machinery must keep working off the widened `cooling` predicate.
+  it('family routes still fall back to a healthy Target while a provider cools transiently', () => {
+    const cd = makeCooldowns(() => 0, () => 0);
+    failTimes(cd, TRANSIENT_FAILURES_BEFORE_COOLDOWN);
+    const familyMatch = { provider: providers[1], pinnedModel: 'gpt-5.6-big', matched: 'family' as const };
+    const r = withCooldownFallback(familyMatch, 'claude-fable-5', providers, cd.cooling, (pr) => pr.id === 'anthropic');
+    expect(r).toEqual({ provider: providers[3], pinnedModel: 'claude-fable-5', matched: 'family' });
+  });
+});

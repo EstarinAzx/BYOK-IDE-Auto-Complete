@@ -45,7 +45,11 @@ import {
   type AnthropicSseMeta, type BridgeAnthropicRequest, type ReviewerVerdict,
 } from './bridgeAnthropic';
 import type { NormalizedTurn } from './catalog';
-import { resolveRoute, withCooldownFallback, createProviderCooldowns, type RoutingMap, type RouteMatch } from './routing';
+import {
+  resolveRoute, withCooldownFallback, createProviderCooldowns,
+  isTransientProviderError, retryDelayMs, MAX_PROVIDER_ATTEMPTS,
+  type RoutingMap, type RouteMatch,
+} from './routing';
 
 // ----------------------------- Dependencies ----------------------------- //
 
@@ -149,6 +153,12 @@ const primeStream = async <T>(source: AsyncIterable<T>): Promise<AsyncIterable<T
   };
 };
 
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+// What an executor / the Anthropic door's startProviderStream answers with: an opened stream, or a refusal
+// carrying its own status. openPrimed below is generic over it so each door keeps the extra fields it returns.
+type OpenedStream = { ok: false; status: number; message: string } | { ok: true; events: AsyncIterable<BridgeStreamEvent> };
+
 // The non-streaming reply envelope. bridge.ts is deliberately streaming-only (it emits SSE chunks), so when a
 // client asks stream:false this glue assembles the drained stream into one OpenAI chat.completion object.
 const buildCompletion = (meta: ChunkMeta, text: string, calls: { id: string; name: string; argsJson: string }[]) => ({
@@ -191,10 +201,19 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // babysit the Routing map). One instance per Bridge host, like the diagnosis chain below.
   const cooldowns = createProviderCooldowns();
 
-  // Record a provider error against the cooldown store; a recognized usage-limit 429 logs the horizon once.
+  // Record a provider error against the cooldown store. A recognized usage-limit 429 logs the multi-day horizon
+  // and RETURNS — the plan window is the answer, and letting the same failure also touch the short channel is
+  // exactly the contamination #168 forbids. Anything transient feeds the blip channel instead, which only cools
+  // once the failures repeat.
   const noteProviderError = (providerId: string, err: unknown): void => {
-    const seconds = cooldowns.noteUsageLimit(providerId, String(err));
-    if (seconds !== undefined) deps.log(`[bridge] provider ${providerId} usage limit hit — cooling down ${Math.round(seconds / 60)}m; claude-* family routes fall back to anthropic until ${new Date(Date.now() + seconds * 1000).toISOString()} (#161)`);
+    const message = String(err);
+    const seconds = cooldowns.noteUsageLimit(providerId, message);
+    if (seconds !== undefined) {
+      deps.log(`[bridge] provider ${providerId} usage limit hit — cooling down ${Math.round(seconds / 60)}m; claude-* family routes fall back to anthropic until ${new Date(Date.now() + seconds * 1000).toISOString()} (#161)`);
+      return;
+    }
+    const transient = cooldowns.noteTransient(providerId, message);
+    if (transient !== undefined) deps.log(`[bridge] provider ${providerId} repeated transient failures — cooling down ${transient}s; family routes fall back to a healthy Target meanwhile (#168)`);
   };
 
   // Resolve a requested model name through the Routing map (#51): Provider id → Alias exact → Family
@@ -392,6 +411,33 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   const executorFor = (provider: Provider): ProviderExecutor =>
     providerExecutors.find((e) => e.matches(provider)) ?? keyedExecutor;
 
+  // #168: open an upstream and prime it, retrying while NOTHING has been delivered. Priming (#167) is what makes
+  // this expressible: it pulls the first event before any head is written, so "the stream failed before
+  // delivering anything" is a condition with a clean boundary — everything up to and including the first pull is
+  // retryable, everything after it has already reached the client and must never be discarded and restarted.
+  // Written once here, so both doors retry the same way. Four things stop a retry: the client hung up, the
+  // attempts ran out, #166 classified the failure (a client error cannot succeed on a retry), or the failure is
+  // not transient at all. A refusal (`ok:false`) is a creds/key problem and returns untouched — never retried.
+  const openPrimed = async <R extends OpenedStream>(
+    provider: Provider, executor: ProviderExecutor, controller: AbortController, attempt: () => Promise<R>,
+  ): Promise<R> => {
+    for (let n = 1; ; n++) {
+      try {
+        const started = await attempt();
+        if (!started.ok) return started;
+        // Only `events` is replaced; every other field the door's own result carries (the Anthropic door's
+        // resolved `model`) rides through the spread untouched.
+        return { ...started, events: await primeStream(started.events) } as R;
+      } catch (err) {
+        const message = String(err);
+        if (controller.signal.aborted || n >= MAX_PROVIDER_ATTEMPTS || executor.classify(err) || !isTransientProviderError(message)) throw err;
+        const wait = retryDelayMs(n, Math.random);
+        deps.log(`[bridge] provider ${provider.id} transient failure — retrying in ${Math.round(wait)}ms (attempt ${n + 1}/${MAX_PROVIDER_ATTEMPTS}): ${message} (#168)`);
+        await sleep(wait);
+      }
+    }
+  };
+
   // The ONE gateway-error answer, shared by both doors (#167 — this used to be five copies). An aborted
   // request is the client hanging up, not a failure. A failure the Provider's record classifies answers with
   // its own status (#166), so Claude Code compacts instead of retrying a request that cannot succeed; anything
@@ -446,7 +492,10 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     req.on('close', () => controller.abort());
 
     try {
-      const started = await executor.open({ parsed, provider, model, baseUrl, signal: controller.signal });
+      // #168: the open is primed and bounded-retried in one step — a stream that dies before delivering
+      // anything is re-opened instead of costing the user the turn.
+      const started = await openPrimed(provider, executor, controller, () =>
+        executor.open({ parsed, provider, model, baseUrl, signal: controller.signal }));
       if (!started.ok) return sendError(res, started.status, started.message);
 
       const meta: ChunkMeta = { id: `chatcmpl-${crypto.randomBytes(12).toString('hex')}`, model: parsed.model, created: Math.floor(Date.now() / 1000) };
@@ -454,12 +503,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // chunk — bridge.ts then folds it into a tool_calls delta.
       const calls: AssembledToolCall[] = [];
       if (parsed.stream) {
-        // #166: primed, so an upstream rejection throws BEFORE the 200 head below and the catch still has a
-        // status to answer with. Uniform across every record now — only the Codex path primed before, so the
-        // other three wrote the head first and locked every pre-stream failure into a 200 with an empty body.
-        const upstream = await primeStream(started.events);
+        // #166: openPrimed already pulled the first event, so an upstream rejection threw BEFORE this head and
+        // the catch still had a status to answer with. Uniform across every record — only the Codex path primed
+        // before, so the other three wrote the head first and locked every pre-stream failure into an empty 200.
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-        for await (const ev of upstream) {
+        for await (const ev of started.events) {
           if (ev.type === 'text') res.write(sseLine(textChunk(ev.text, meta)));
           else if (ev.type === 'tool_call') calls.push(ev.call);
           // Every other BridgeStreamEvent member is Anthropic-door vocabulary — thinking passthrough, usage,
@@ -634,7 +682,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     };
 
     try {
-      const result = await startProviderStream({ ...parsed, tools: advisorTools }, provider, route.pinnedModel, controller);
+      // #168: same bounded retry as the OpenAI door, over this door's own request shaping. Only the eager base
+      // pass is retried — an advisor continuation pass below is mid-conversation, so content has already been
+      // delivered and re-opening it would discard the turn.
+      const result = await openPrimed(provider, executorFor(provider), controller, () =>
+        startProviderStream({ ...parsed, tools: advisorTools }, provider, route.pinnedModel, controller));
       if (!result.ok) return sendError(res, result.status, result.message);
 
       // The event source: with an advisor tool, the door plays the server role via runAdvisorLoop (the first
@@ -667,8 +719,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       }
 
       // #166: prime BEFORE the head — this door is Claude Code's route, so it is where a pre-stream rejection
-      // used to become a 200 with an empty body (or, once headers were out, an unclassifiable 502).
-      const primed = await primeStream(eventsSource);
+      // used to become a 200 with an empty body (or, once headers were out, an unclassifiable 502). The base
+      // pass arrives already primed from openPrimed; only the advisor loop can still throw on its first pull.
+      const primed = parsed.advisor ? await primeStream(eventsSource) : eventsSource;
 
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       const enc = createAnthropicSseEncoder(meta);

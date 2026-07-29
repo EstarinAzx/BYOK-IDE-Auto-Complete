@@ -5,6 +5,7 @@ import { createServer } from 'http';
 import * as http from 'http';
 import type { AddressInfo } from 'net';
 import { createBridgeServer, type BridgeDeps } from '../src/bridgeServer';
+import { MAX_PROVIDER_ATTEMPTS, TRANSIENT_FAILURES_BEFORE_COOLDOWN, TRANSIENT_COOLDOWN_SECONDS } from '../src/routing';
 import type { Provider } from '../src/catalog';
 
 // The Grok catalog row — id 'xai', the subscription-proxy base (grok-build routes there).
@@ -200,5 +201,132 @@ describe('Bridge — classified Codex failures (#166)', () => {
       await post(port, '/v1/chat/completions', { model: 'codex', stream: true, messages: [{ role: 'user', content: 'hi' }] });
     });
     expect(lines.some((l) => l.includes('context_length_exceeded'))).toBe(true);
+  });
+});
+
+// #168: a transient upstream failure used to cost the user the whole turn. These assert the retry only fires
+// where NOTHING was delivered, never fires for a failure #166 classified, is bounded, and that repeated
+// failures put the provider on the SHORT cooldown channel.
+describe('Bridge — transient retry and cooldown (#168)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const CODEX: Provider = { id: 'codex', label: 'Codex', baseUrl: 'https://chatgpt.com/backend-api/codex', defaultModel: 'gpt-5.4', apiKeyEnv: '', kind: 'codex' };
+
+  const codexDeps = (over: Partial<BridgeDeps> = {}): BridgeDeps => makeDeps({
+    providers: [CODEX],
+    codexSignedIn: async () => true,
+    codexCreds: async () => ({ accessToken: 'tok', accountId: 'acct' }),
+    xaiSignedIn: async () => false,
+    xaiCreds: async () => undefined,
+    activeProviderId: () => 'codex',
+    ...over,
+  });
+
+  // A clean Responses turn (the Codex/Grok wire): one text delta then the terminal frame.
+  const goodSse = (): Response => {
+    const text =
+      'event: response.output_text.delta\ndata: {"delta":"recovered"}\n\n' +
+      'event: response.completed\ndata: {"response":{"output":[{"type":"message","content":[{"type":"output_text","text":"recovered"}]}]}}\n\n';
+    const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new TextEncoder().encode(text)); c.close(); } });
+    return new Response(body, { status: 200 });
+  };
+
+  // A 200 that delivers a delta and THEN breaks — the case that must never be retried. Enqueue-then-error in
+  // one tick would NOT model this: controller.error() discards the queue, so the delta would never be read.
+  // Driving it from pull() makes the delta genuinely reach the consumer before the socket drops.
+  const partialThenBreak = (): Response => {
+    let sent = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (!sent) {
+          sent = true;
+          c.enqueue(new TextEncoder().encode('event: response.output_text.delta\ndata: {"delta":"half a "}\n\n'));
+          return;
+        }
+        c.error(new Error('socket hang up'));
+      },
+    });
+    return new Response(body, { status: 200 });
+  };
+
+  const badGateway = () => new Response('{"error":{"message":"internal server error"}}', { status: 500 });
+
+  // Count upstream attempts so "was it retried" is an observable, not an inference.
+  const countingFetch = (responses: (() => Response)[]) => {
+    const state = { calls: 0 };
+    vi.stubGlobal('fetch', async () => {
+      const make = responses[Math.min(state.calls, responses.length - 1)];
+      state.calls += 1;
+      return make();
+    });
+    return state;
+  };
+
+  it('retries a stream that failed before delivering anything (OpenAI door)', async () => {
+    const state = countingFetch([badGateway, goodSse]);
+    await runServer(codexDeps(), async (port) => {
+      const { status, body } = await post(port, '/v1/chat/completions', { model: 'codex', stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(200);
+      expect(body).toContain('recovered');
+    });
+    expect(state.calls).toBe(2);
+  });
+
+  // Claude Code's route — the one where losing the turn actually hurts.
+  it('retries a stream that failed before delivering anything (Anthropic door)', async () => {
+    const state = countingFetch([badGateway, goodSse]);
+    await runServer(codexDeps(), async (port) => {
+      const { status, body } = await post(port, '/v1/messages', { model: 'codex', max_tokens: 100, stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(200);
+      expect(body).toContain('recovered');
+    });
+    expect(state.calls).toBe(2);
+  });
+
+  // Never discard delivered content: a torn stream surfaces what arrived, it does not start over.
+  it('never retries a stream that already delivered content', async () => {
+    const state = countingFetch([partialThenBreak]);
+    await runServer(codexDeps(), async (port) => {
+      const { status, body } = await post(port, '/v1/chat/completions', { model: 'codex', stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(200);
+      expect(body).toContain('half a ');
+    });
+    expect(state.calls).toBe(1);
+  });
+
+  // A #166-classified failure cannot succeed on a retry, so it must not cost one.
+  it('never retries a classified client error', async () => {
+    const state = countingFetch([() => new Response('{"error":{"code":"context_length_exceeded","message":"too big"}}', { status: 400 })]);
+    await runServer(codexDeps(), async (port) => {
+      const { status } = await post(port, '/v1/chat/completions', { model: 'codex', stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(400);
+    });
+    expect(state.calls).toBe(1);
+  });
+
+  // The bound: a provider that is genuinely down fails the request, it does not retry forever.
+  it('bounds the attempts and still answers 502 when they are exhausted', async () => {
+    const state = countingFetch([badGateway]);
+    await runServer(codexDeps(), async (port) => {
+      const { status } = await post(port, '/v1/chat/completions', { model: 'codex', stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(502);
+    });
+    expect(state.calls).toBe(MAX_PROVIDER_ATTEMPTS);
+  });
+
+  // Repeated failed REQUESTS (not attempts) trip the short channel — and the log says so, with #168 not #161.
+  it('cools the provider on the short channel after repeated failed requests', async () => {
+    countingFetch([badGateway]);
+    const lines: string[] = [];
+    await runServer(codexDeps({ log: (m) => lines.push(m) }), async (port) => {
+      for (let i = 0; i < TRANSIENT_FAILURES_BEFORE_COOLDOWN; i++)
+        await post(port, '/v1/chat/completions', { model: 'codex', stream: true, messages: [{ role: 'user', content: 'hi' }] });
+    });
+    expect(lines.some((l) => l.includes('#168') && l.includes('retrying'))).toBe(true);
+    const cooled = lines.find((l) => l.includes('#168') && l.includes('cooling down'));
+    expect(cooled).toBeDefined();
+    // The blip channel, never the plan-window one — #161's line is the multi-day answer.
+    expect(cooled).not.toContain('#161');
+    expect(cooled).toContain(`${TRANSIENT_COOLDOWN_SECONDS}s`);
   });
 });
