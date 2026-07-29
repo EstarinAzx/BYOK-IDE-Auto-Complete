@@ -7,52 +7,82 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-30 by Opus 5 (relay leg 6: #192 cut as PR #198, held at the tag push)._
-_At commit: `5e96abc` on main; the release cut is `c49532c` on `ticket/192-antigravity-release`, **unmerged on
-purpose**. **#192 is `ready-for-human` and the agent queue is DRY — the relay chain stopped here.**_
+_Last updated: 2026-07-30 by Opus 5 (relay leg 7: #192 PUBLISHED — `wisp-router@2.0.41` is on npm)._
+_At commit: `c2e8447` on main (the squash-merged release cut), tag `v2.0.41` pushed._
+_**Spec #185 is CLOSED. #197 is `ready-for-agent` and the queue is NOT dry — the chain stopped by explicit
+instruction, not because the work ran out.** See "Why the chain stopped" below._
 
 ## Current focus
 
-**#192 CUT, NOT PUBLISHED — PR #198 (`c49532c`) bumps the TUI package to 2.0.41 and writes its changelog.
-The `v2.0.41` tag is deliberately not pushed, and the PR is deliberately not merged.**
+**RELEASED. `wisp-router@2.0.41` is on npm and `dist-tags.latest` points at it.** Spec #185 delivered end to
+end: #186 (spike) → #187 `e04f53b` → #188 `ba8dab3` → #189 `c6f644a` → #190 `6a7e0fe` → #191 `915d415` →
+#192 `c2e8447`.
 
-Gate: **1009/1009 vitest**, `bun run compile` clean in **BOTH** packages. No code changed — everything being
-released is already on main (`e04f53b`, `63453e0`, `ba8dab3`, `c6f644a`, `6a7e0fe`, `915d415`).
+Gate on merged main before the tag: **1009/1009 vitest**, `bun run compile` clean in **BOTH** packages.
 
-### Why it stopped
+### The release, verified
 
-An npm version **can never be republished**, and it is public. Every prior ticket in this spec had a worst case
-of "a merge to your own repo"; this one does not, so the tag is handed over rather than taken. Not merged
-either, on purpose: a release commit sitting on `main` untagged is a trap for the next agent, which would see
-`2.0.41` in `package.json`, `2.0.40` on npm, and reasonably conclude a tag push is owed.
+`release.yml` run [30453312841](https://github.com/EstarinAzx/Wisp-Router/actions/runs/30453312841) —
+**success, all five jobs.** All four build runners green, each with its baked-in smoke test (standalone binary
+boots without Bun/Node · `claude-wisp` fails loud with the Bridge guidance at exit 1 · `wisp serve` answers
+the secretless `/v1/models`).
 
-**Two commands, the user's to run:**
+**No 403 this time — all four platform packages landed**, so the shim's release-download fallback is insurance
+rather than the install path: `@tsd47216/wisp-router-{win32-x64,darwin-arm64,darwin-x64,linux-x64}@2.0.41` plus
+the thin shell `wisp-router@2.0.41`. The GitHub release carries all four binaries as assets.
 
-```
-gh pr merge 198 --squash --repo EstarinAzx/Wisp-Router
-git checkout main && git pull && git tag v2.0.41 && git push origin v2.0.41
-```
+**Verified past the registry read** — a read alone passes on a broken build, so the bins were *executed* from a
+scratch `npm i wisp-router@2.0.41` under a sandboxed `WISP_HOME`: the win32 platform package resolved (other
+three correctly `UNMET OPTIONAL`), `wisp routing` booted the engine and printed the family table at exit 0, and
+`claude-wisp` fell over loudly with the Bridge guidance at exit 1 — the workflow's own assertion, re-confirmed
+on the *published* artifact.
 
-### The Surfaces check caught a wrong ticket premise
+**The 2.0.40 control failed, which is what makes the above mean anything**
+([[verifying-a-fix-release-needs-the-previous-version-as-a-control]]). Same command, same sandbox shape, no
+credentials needed:
 
-#192's body says "the extension face gets nothing from this release." **It does.**
+| | `wisp routing set haiku antigravity/gemini-3-flash` |
+|---|---|
+| **2.0.40** | `error: Unknown Provider 'antigravity'.` — exit **1** |
+| **2.0.41** | `warning: Provider 'antigravity' is not signed in.` — exit **0**, route persisted |
+
+2.0.40 **boots fine** and prints its own routing table, so the failure isolates the shipped change rather than
+a broken install. The control is credential-free precisely because a missing sign-in is a *warning* here, not
+a refusal — worth reusing for the next Provider release.
+
+### Why the chain stopped (and why the queue is not dry)
+
+Leg 6's handoff and baton both said *"then the queue is dry → stop, no leg 8"* — but leg 6's own final step was
+**label #197 `ready-for-agent`**, which makes the queue non-empty by construction. The prediction contradicted
+the instruction it shipped with.
+
+Honored the explicit stop rather than the inference, because the extension face genuinely has a human in its
+loop: the vsix is **packaged, not installed** and not on the marketplace, so somebody has to install it by
+hand. The baton points at **#197** so re-arming costs one command.
+
+Recorded as [[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]].
+
+### The Surfaces correction stands — not "fixed" back
+
+#192's body claimed the extension face gets nothing from this release. **It does.**
 `git log v2.0.40..main -- packages/vscode/` returns **`ba8dab3` (#188)** and **`c6f644a` (#189)**: the
 extension constructs `AntigravityAuth` to refresh the bundle and bootstrap the Cloud Code project, passes
 `antigravitySignedIn`/`antigravityCreds` into **its own** `createBridgeServer` — **that face hosts the Bridge
 too** — and renders the `antigravity-oauth` row with a truthful signed-in status. It bundles its own
-`@wisp/core`, so **no npm version delivers any of it**. Bump owed, filed as **#197** (vsix 1.11.0),
-deliberately **unlabelled** so no frontier query picks it before #192 lands.
+`@wisp/core`, so **no npm version delivers any of it**. Bump owed, filed as **#197** (vsix 1.11.0), now
+labelled `ready-for-agent` since the publish it was blocked on has landed.
 
 Full reasoning:
 [[2026-07-30-a-surfaces-section-is-checked-against-the-code-not-copied-from-the-ticket]]. `plugins/` was
 genuinely untouched, so `wisp-slot` staying at **1.6.0** is evidence-backed rather than assumed.
 
-### Still unmet — every one of these needs the publish
+## Previously (relay leg 6)
 
-Release workflow green on all four runners · published version verified **past the registry read** (real
-install, bins executed) · **2.0.40 installed as a control and failing** the check 2.0.41 passes · npm 404 on a
-just-published version treated as propagation lag · **spec #185 closed** · then label **#197**
-`ready-for-agent`.
+**#192 cut as PR #198 (`c49532c`) and held at the tag push** — version bump + changelog with `### Surfaces`,
+gate 1009/1009 vitest and compile clean in both packages. The hold was a judgement call carried from leg 5 (an
+npm version can never be republished, and it is public), waved off by the maintainer the same day; leg 7
+merged and published it. The Surfaces check is what caught #192's own body being wrong about the extension
+face, and filed #197.
 
 ## Previously (relay leg 5)
 

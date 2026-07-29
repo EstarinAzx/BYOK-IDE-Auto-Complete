@@ -9,118 +9,91 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last session (2026-07-30, relay leg 6): #192 CUT, NOT PUBLISHED.** PR **#198** (`c49532c`) bumps the TUI
-package to **2.0.41** and writes its changelog. Gate: **1009/1009 vitest**, `bun run compile` clean in **both**
-packages.
+**Last session (2026-07-30, relay leg 7): #192 PUBLISHED. `wisp-router@2.0.41` is on npm and
+`dist-tags.latest` points at it.** Spec **#185 is closed** — the Antigravity Provider is delivered end to end
+and released. Merge commit `c2e8447` on main, tag `v2.0.41` pushed,
+[run 30453312841](https://github.com/EstarinAzx/Wisp-Router/actions/runs/30453312841) green on all five jobs.
 
-**Leg 6 held at the tag push; the maintainer then waved the hold off. #192 is `ready-for-agent` again and
-relay leg 7 is spawned to publish.**
+## Queue: #197 — the extension face owes a vsix 1.11.0 bump
 
-## Queue: #192 — the release. **Publishing is AUTHORIZED.**
+**The queue is NOT empty.** #197 is `ready-for-agent` and unblocked (leg 7 armed it as its last act, once the
+npm cut it depended on had landed).
 
-**⚠ DO NOT RESTART #192. PR #198 already exists and is yours — RESUME it.** The ticket-loop idempotency guard
-(step 4) fires on branch `ticket/192-antigravity-release`; the correct response is **resume**, *not* "comment
-on the collision and relabel `ready-for-human`". Relabelling here stalls the release for nothing.
+**The chain stopped anyway, by instruction, not because the work ran out.** Leg 6's handoff said "then the
+queue is dry → stop, no leg 8" while its own step 8 armed #197 — the prediction contradicted the instruction it
+shipped with. Leg 7 honored the stop because the *reason* survives the wrong premise: **the vsix is packaged,
+not installed** and not on the marketplace, so the extension release has a human step no label can remove.
+Recorded as [[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]].
 
-The hold that stopped leg 6 was a judgement call carried from leg 5, not something #192 asks for. It has been
-lifted explicitly. **Merging PR #198 and pushing the `v2.0.41` tag — which publishes publicly and permanently
-to npm — is expected of this leg.** #192's newest comment (`issuecomment-5117931020`) carries the same
-instructions.
+**To resume, one command:**
 
-### Order of operations
+```
+/relay N=1 /preset ticket-loop -> after the ticket's gate (tests green + landed, or ready-for-human relabel), run /preset wrap-up gateless: eyeball gate auto-go (unattended), /context-update, rewrite .context/pick-up.md to the next unblocked ready-for-agent ticket or 'queue empty', commit .context on main - never the ticket branch. At leg boot also read .context/pick-up.md.
+```
 
-1. **Merge** — `gh pr merge 198 --squash --repo EstarinAzx/Wisp-Router`. Then re-run the gate on merged
-   `main`: `bun run test` **and** `bun run compile` in **both** packages (root + `packages/tui`).
-2. **Tag** — `git checkout main && git pull && git tag v2.0.41 && git push origin v2.0.41`. The tag must equal
-   `packages/tui/package.json` **exactly**; `release.yml` verifies it and fails loud otherwise.
-3. **Watch `release.yml`** across **all four** runners (win32-x64, darwin-arm64, darwin-x64, linux-x64).
-   Platform packages publish **best-effort** — npm's spam filter has 403'd them before, and the shim falls
-   back to the GitHub release download. Only the **thin shell** must land.
-4. **Verify past the registry read** — install into a scratch dir and **execute the bins**. A read alone
-   passes on a broken build.
-5. **Install 2.0.40 as a control and confirm it FAILS** the check 2.0.41 passes
-   ([[verifying-a-fix-release-needs-the-previous-version-as-a-control]]). Suggested credential-free control:
-   aim a family route at an Antigravity target — that provider id does not exist on 2.0.40. Any control works
-   so long as the **old version fails**.
-6. **npm 404 on a version its own job just published = propagation lag.** Check the job log + dist-tags, then
-   retry. Do **not** re-tag.
-7. **Close #192 and spec #185.** Clear #192's `ready-for-agent` label by hand — a `Closes #N` merge closes but
-   does not relabel, and the next frontier query would re-pick it.
-8. **Label #197 `ready-for-agent`** — the last act. It is unlabelled on purpose, blocked on this publish.
+(The relay state file `.claude/relay/ticket-loop.md` has `stop: true`; re-running the command re-inits it.)
 
-Then the queue is dry → stop, no leg 8.
+### What #197 needs
 
-## What #192 found: the ticket's own premise was wrong
+The extension face **is not a bystander** to #187–#191, contrary to #192's original body.
+`git log v2.0.40..main -- packages/vscode/` returns **`ba8dab3` (#188)** and **`c6f644a` (#189)**: it
+constructs `AntigravityAuth`, passes `antigravitySignedIn`/`antigravityCreds` into **its own**
+`createBridgeServer` (it hosts the Bridge too), and renders the `antigravity-oauth` row. It **bundles its own
+`@wisp/core`**, so no npm version reaches it — hence a separate vsix bump, `packages/vscode/package.json`
+1.10.1 → **1.11.0**, plus its changelog.
 
-#192's body states *"the extension face gets nothing from this release."* **It does.**
-
-`git log v2.0.40..main -- packages/vscode/` returns **`ba8dab3` (#188)** and **`c6f644a` (#189)**:
-
-- `extension.ts` constructs **`AntigravityAuth`** so the Bridge can refresh the bundle and bootstrap the Cloud
-  Code project.
-- It passes `antigravitySignedIn` / `antigravityCreds` into **its own** `createBridgeServer` — **that face
-  hosts the Bridge too**, so a user who never installs npm still reaches Antigravity through both doors.
-- The panel renders the `antigravity-oauth` row with a truthful signed-in status off the shared `auth.json`.
-
-It bundles its own `@wisp/core`, so **no npm version delivers any of it.** Owed bump filed as **#197** (vsix
-1.11.0), deliberately **unlabelled** — labels are the only real gate, and labelling it now would hand the next
-leg the extension release before the npm cut it depends on had merged.
-
-`plugins/` was genuinely untouched → `wisp-slot` stays at **1.6.0**, evidence-backed rather than assumed.
-
-Full reasoning: [[2026-07-30-a-surfaces-section-is-checked-against-the-code-not-copied-from-the-ticket]].
-
-## What is in PR #198
-
-Two files, the same shape as every prior release cut on this repo:
-
-- `packages/tui/package.json` — **2.0.40 → 2.0.41**. The workflow verifies the tag equals this exactly and
-  fails loud otherwise; it is the single version source.
-- `packages/tui/CHANGELOG.md` — the 2.0.41 entry with its **`### Surfaces`** section.
-
-**No code changed.** Everything being released is already on `main`: `e04f53b`, `63453e0`, `ba8dab3`,
-`c6f644a`, `6a7e0fe`, `915d415`.
+- **A vsix is evidence only when checked in the BUNDLE** — unzip it and grep `extension/dist/extension.js`.
+- **`bun run compile` runs in BOTH packages**; the test gate is **`bun run test`** (vitest). Bare `bun test`
+  runs Bun's own runner and reports ~53 bogus failures.
 
 ## Released state
 
 | Face | Version | Missing |
 |---|---|---|
-| npm `wisp-router` | **2.0.40** | #187–#191 — **2.0.41 is cut and waiting on the tag** |
+| npm `wisp-router` | **2.0.41** | nothing — #187–#191 all shipped |
 | `wisp` vsix | **1.10.1** | **Antigravity (#187–#191) — bump owed, tracked as #197**; also still **packaged, not installed** |
 | `wisp-slot` plugin | **1.6.0** | nothing — untouched by #185 |
 
 ## Waiting on the user
 
-- **Publish 2.0.41** (above) — the only thing blocking spec #185.
+- **Install `packages/vscode/wisp-1.10.1.vsix`** — not on the marketplace, so that face lacks #182 until
+  installed by hand. #197 supersedes this with 1.11.0.
 - **Dismiss the two secret-scanning alerts** as "won't fix" —
   [#1 Client ID](https://github.com/EstarinAzx/Wisp-Router/security/secret-scanning/1),
   [#2 Client Secret](https://github.com/EstarinAzx/Wisp-Router/security/secret-scanning/2). Settled as
   acceptable ([[2026-07-29-a-public-repo-is-a-publishing-decision-not-a-commit]]); noise now.
 - **A local Bridge access secret was printed to a session log** during #191's live run. Loopback-only, never
   entered the repo. To rotate: delete `bridgeSecret` from `~/.wisp/auth.json` and start any host. Low urgency.
-- **Install `packages/vscode/wisp-1.10.1.vsix`** — not on the marketplace, so that face lacks #182 until
-  installed by hand. #197 will supersede this with 1.11.0.
 - **#170** — needs a **Kimi Code subscription**.
 - **#189's last criterion** — a Claude-model turn *completing* on Antigravity, after the quota resets
-  `2026-07-30T20:55:48Z`. Not blocking anything.
+  `2026-07-30T20:55:48Z`. Not blocking anything; Gemini turns were verified end to end.
+- **18 stale local `ticket/*` branches** from landed work (`git branch --list 'ticket/*'`). Cleanup, not a
+  blocker.
 
 ## Landmines
 
-Release:
+Release (all exercised in leg 7, all still true):
 
 - **An npm version can never be republished.** The tag is the trigger; there is no undo.
 - **The tag must equal `packages/tui/package.json` exactly** — `release.yml` verifies it and fails loud.
 - **A fix release is not verified until the OLD version FAILS the same check.**
-  [[verifying-a-fix-release-needs-the-previous-version-as-a-control]].
-- **npm is one of THREE faces.** Every release entry carries `### Surfaces`, and that section is **derived from
+  [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]. Leg 7's control, reusable and
+  credential-free: `wisp routing set haiku antigravity/gemini-3-flash` → 2.0.40 `error: Unknown Provider
+  'antigravity'.` exit 1; 2.0.41 exit 0 with only a *sign-in warning*. A missing sign-in warns rather than
+  refuses, which is what makes it need no credentials.
+- **Verify past the registry read** — install to a scratch dir and **execute the bins**. A read alone passes on
+  a broken build.
+- **npm can 404 a version its own job just published** — propagation lag; check the job log + dist-tags and
+  retry. Do **not** re-tag. (Did not bite in leg 7.)
+- **npm is one of THREE faces.** Every release entry carries `### Surfaces`, **derived from
   `git log <last-tag>..main -- <face-path>`, never copied from the ticket** —
   [[2026-07-30-a-surfaces-section-is-checked-against-the-code-not-copied-from-the-ticket]].
-- **A vsix is evidence only when checked in the BUNDLE** — unzip it and grep `extension/dist/extension.js`.
-- **Platform packages publish best-effort; the thin shell hard-fails.** The shim's release-download fallback
-  covers installs either way.
+- **Platform packages publish best-effort; the thin shell hard-fails.** Leg 7 saw no 403 — all four landed —
+  but the shim's release-download fallback is why a 403 is survivable.
 - **`## Blocked by` is body text, not native tracker links** — a frontier query cannot see it. **Labels are
   the only real gate.**
-- **A closed-by-PR issue keeps its `ready-for-agent` label.** `Closes #N` closes but does not relabel.
+- **A closed-by-PR issue keeps its `ready-for-agent` label.** Confirmed again in leg 7: the squash merge closed
+  #192 but left it labelled. Clear it by hand or the next frontier query re-picks finished work.
 
 Antigravity:
 
@@ -161,8 +134,6 @@ Antigravity:
 - **The transport fork is deliberately NOT ported** — both Bridge runtimes already negotiate `http/1.1`.
 - **The model catalog is advisory.** Known-good: `gemini-3.1-pro-low`, `gemini-2.5-flash`, `gemini-3-flash`,
   `gemini-3.6-flash-low`, `gemini-3.6-flash-high`, `gemini-pro-agent`.
-- **⚠ Claude quota on Antigravity exhausted until `2026-07-30T20:55:48Z`.** A 429 on a Claude model there is
-  the ACCOUNT, not the code. Gemini is unaffected.
 - **Credits' cooldown ledger is harmful with one credential** — do not helpfully port it.
 
 Credential hygiene ([[2026-07-29-a-public-repo-is-a-publishing-decision-not-a-commit]]):
@@ -198,6 +169,7 @@ Reference clone for #185 lives at `D:\scratch\CLIProxyAPI` (shallow, `c9417c8`, 
 
 - [[active-work]]
 - [[overview]]
+- [[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]]
 - [[2026-07-30-a-surfaces-section-is-checked-against-the-code-not-copied-from-the-ticket]]
 - [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
 - [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]
