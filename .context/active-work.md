@@ -41,16 +41,23 @@ No release debt. The next piece of work is a **choice**, not a queue item — se
     Responses-wire fingerprint. Read from the per-session Claude Code **transcript**, folded by `message.id`.
   - **#169 ✅** — 2/2 keyed turns (`glm`, `deepseek` → **OpenCode Go**) reported usage; no 400 on
     `stream_options`. ⚠ Both aliases hit the **same Provider row** — one backend verified, not nine.
-  - **#171 ✅ (writer)** — `status.json` carried `211214/1000000 → 21%` and meters `5h 55% · 7d 27%`.
+  - **#171 ✅ writer AND reader — the badge is confirmed live.** The writer put
+    `163855/1000000 → 16%` + meters `5h 63% · 7d 27%` in `status.json`; the reader rendered
+    `[WISP opus→claude-opus-5 ctx 17% 5h 63% 7d 27%]`. **Correction to last session's diagnosis:** the badge
+    was never gated on `/plugin update`. `~/.claude/hooks/statusline-wrapper.ps1` runs the **repo checkout**
+    copy of `wisp-statusline.js` on purpose, so the stale 1.5.0 plugin cache never fed it — it had the reader
+    from `3e0125e` onward. [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]].
+  - **#167 ✅ complete** — the last third is covered: a **Grok** turn streamed a reply (user-confirmed
+    2026-07-29). All three OAuth kinds have now driven a turn through the unified `ProviderExecutor` records.
   - **#172 ✅** — `/test` in a throwaway `WISP_HOME` printed `/test: Codex (gpt-5.6-sol)` and streamed.
   - **#163 → diagnosis confirmed, ticket open.** The 502s were a usage-reporting bug, not a window bug.
-- **User action pending (unchanged — none block anything):**
-  - **Reload VS Code**, confirm **Kimi** in the picker / native chat and its panel sign-in state.
-  - **`/plugin update wisp-slot`** — the install is a **cache snapshot** pinned at `b45c43c4` (2026-07-25),
-    not a live pointer at the checkout, so the `ctx …%` badge will not appear until it updates.
-  - **#167's last third** — a **Grok** turn (`wisp` → `/test grok`). Codex and Anthropic are covered.
-  - **#170's two criteria** — needs a Kimi Code subscription; the sign-in doubles as the unverified-constants
-    check.
+- **User action pending — down to one:**
+  - **#170's two criteria** — needs a **Kimi Code subscription**; the sign-in doubles as the
+    unverified-constants check (auth host, client id, endpoints were never verified offline and fail loud at
+    sign-in with the server's own words). Nothing else is waiting on the user.
+  - _Done 2026-07-29:_ `/plugin update wisp-slot` (cache now 1.6.0, byte-identical to the repo copy) and the
+    Grok turn. The VS Code reload / Kimi picker check is folded into #170 above — it cannot be finished
+    without the subscription anyway.
 
 ## Queue
 
@@ -117,4 +124,5 @@ write `queue empty`, and stop.
 - [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
 - [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
 - [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]
+- [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]
 - [[status-json-is-global-so-it-cannot-observe-another-session]]

@@ -42,13 +42,14 @@ band, which is watching, not working) or ungroomed (**#174** Antigravity, **#69*
 | `wisp` vsix | **1.10.0** | nothing — installed as `esarinazx.wisp@1.10.0` |
 | `wisp-slot` plugin | **1.6.0** | nothing pushed; **the user's install is a stale cache snapshot** |
 
-## Waiting on the user (not blockers, unchanged)
+## Waiting on the user — down to one
 
-- **Reload VS Code** → confirm **Kimi** in the picker / native chat + its panel sign-in state.
-- **`/plugin update wisp-slot`** → the dev-machine install is a **cache snapshot** at commit `b45c43c4`
-  (2026-07-25), *not* a live pointer at the checkout. The `ctx …%` badge will not appear until it updates.
-- **#167's last third** — a **Grok** turn (`/test grok`). Codex and Anthropic already covered.
-- **#170** — needs a Kimi Code subscription.
+- **#170** — needs a **Kimi Code subscription**. The sign-in doubles as the unverified-constants check, and
+  the VS Code reload / Kimi picker confirmation folds into it. Nothing else is waiting.
+
+_Cleared 2026-07-29:_ the Grok turn (**#167 now fully covered** — all three OAuth kinds have driven a turn),
+and `/plugin update wisp-slot` (cache at 1.6.0). **#171 is confirmed live end-to-end** — the badge rendered
+`[WISP opus→claude-opus-5 ctx 17% 5h 63% 7d 27%]`.
 
 ## Landmines
 
@@ -74,6 +75,10 @@ band, which is watching, not working) or ungroomed (**#174** Antigravity, **#69*
 - **Never verify usage from `status.json`.** It is global, and a bridged reader's own turn overwrites it. Use
   the per-session Claude Code transcript, folded by `message.id`.
   [[status-json-is-global-so-it-cannot-observe-another-session]].
+- **The `ctx …%` badge does NOT come from the plugin cache.** `~/.claude/hooks/statusline-wrapper.ps1` runs
+  the **repo checkout** copy of `wisp-statusline.js` deliberately, so `/plugin update` never changes what the
+  statusline executes. Diagnosing the badge from the cached plugin version already cost one session.
+  [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]].
 - **`## Blocked by` on the harvest tickets is body text, not native links** — GraphQL `blockedBy` returns
   empty even for a genuinely blocked ticket.
   [[harvest-tickets-carry-body-text-blockers-not-native-links]].
@@ -94,6 +99,7 @@ ever reads that file with a bare `JSON.parse`.
 - [[active-work]]
 - [[overview]]
 - [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]
+- [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]
 - [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
 - [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
 - [[status-json-is-global-so-it-cannot-observe-another-session]]
