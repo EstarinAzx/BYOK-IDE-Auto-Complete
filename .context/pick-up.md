@@ -9,21 +9,47 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last session (2026-07-29): the store data-loss arc closed end to end.** #183 cut npm 2.0.39, #182 fixed the
-mechanism behind #181 (`9fd63f0`, ADR-0004), and #184 shipped it to both faces — **npm 2.0.40 + vsix
-1.10.1**. At `b672333` on main. Nothing in flight, no `ready-for-agent` ticket, no release debt.
+**Last session (2026-07-29): #174 got groomed. Spec #185, tickets #186–#192. Nothing implemented.** An
+eight-question grill settled the Antigravity scope; full reasoning in
+[[2026-07-29-antigravity-narrow-port-never-mint-opaque-tool-ids]]. No code was written, no release cut, no
+release debt. At `9208613` on main plus this session's `.context/` commit.
 
-## There is no queued work
+## Two threads. They do not block each other.
 
-Ask the user what they want. Do not invent urgency, and do not restart the relay chain — with no
-`ready-for-agent` ticket it picks nothing, writes `queue empty`, stops.
+**1 — Human, ten minutes: run the #186 auth spike.** Browser OAuth on the Google account. Confirm Antigravity
+access exists, record the PKCE verdict, record whether the pinned client version was accepted, and save the
+captured request/response bodies (including one streaming turn) on the ticket. Those become #187's fixtures.
 
-The only outstanding action is the user's: **install `packages/vscode/wisp-1.10.1.vsix`**. That face is not
-on the marketplace, so the extension does not carry #182 until it is installed by hand.
+This gates every live-wire ticket. Access not confirmed → comment the finding on #186, label nothing, leave
+#185 dormant. Do **not** flip labels hoping it works out.
 
-Everything else open is waiting on time (**#163** — a stretch of clean use in the 217k–245k band, watching
-not working) or ungroomed (**#174** Antigravity, **#69** copilot-wisp; both want a grill or `/preset init`
-before they are tickets).
+**2 — Agent: `/relay N=1 /preset ticket-loop`.** Armed and re-seeded (`.claude/relay/ticket-loop.md`,
+`stop: false`, leg 1). It lands **#187** and stops on a dry queue. That is correct, not a failure.
+
+## The queue is deliberately one ticket deep
+
+Only **#187** carries `ready-for-agent`. **#186** carries `ready-for-human`. The other five are bare.
+
+`## Blocked by` is body text, not native links — a frontier query cannot see it, so **labels are the only
+real gate**. Labelling #188 onward now would let the relay build the entire Provider before anyone confirms
+the account has access. That is exactly how **#170** ended up complete, correct, and unusable.
+
+#187 is exempt because it is a pure transcription of the reference's own ~3,900-line test corpus — its
+correctness does not depend on account access, and it needs zero credentials to verify.
+
+**Re-arming order, one step at a time:** #186 passes → label **#188** → then **#189** → then **#190** and
+**#191** together (independent of each other) → then **#192**, which closes #185.
+
+## The binding rule — do not let a leg "improve" this
+
+**The port never mints opaque provider-side tool ids. The upstream's own `functionCall.id` passes through
+untouched.**
+
+Two-thirds of the reference's 1,980-line reasoning-replay subsystem exists to service ids that are
+content-hash **lookup keys into a replay ledger**. Minting them without building the ledger makes every one a
+dangling pointer. This single rule is what makes omitting that subsystem safe. A change that generates
+"stable synthetic ids" breaks the foundation **silently** — nothing fails at compile time, and the damage
+shows up as mangled tool history several turns later.
 
 ## Released state — nothing owed
 
@@ -31,77 +57,83 @@ before they are tickets).
 |---|---|---|
 | npm `wisp-router` | **2.0.40** | nothing |
 | `wisp` vsix | **1.10.1** | nothing — but **packaged, not installed** |
-| `wisp-slot` plugin | **1.6.0** | nothing — untouched by #182 |
+| `wisp-slot` plugin | **1.6.0** | nothing |
 
-## Waiting on the user — down to one
+## Waiting on the user
 
-- **#170** — needs a **Kimi Code subscription**. The sign-in doubles as the unverified-constants check, and
-  the VS Code reload / Kimi picker confirmation folds into it. Nothing else is waiting.
-
-_Cleared 2026-07-29:_ the Grok turn (**#167 now fully covered** — all three OAuth kinds have driven a turn),
-and `/plugin update wisp-slot` (cache at 1.6.0). **#171 is confirmed live end-to-end** — the badge rendered
-`[WISP opus→claude-opus-5 ctx 17% 5h 63% 7d 27%]`.
+- **Install `packages/vscode/wisp-1.10.1.vsix`** — that face is not on the marketplace, so the extension does
+  not carry #182 until it is installed by hand.
+- **#170** — needs a **Kimi Code subscription**. The sign-in doubles as the unverified-constants check.
+- **#186** — the Antigravity auth spike above.
 
 ## Landmines
 
-- **A store file that does not parse is no longer overwritten — `merge` refuses (#182, ADR-0004).** The
-  underlying shape still deserves respect: both stores are read-merge-write, so any *new* "degrade to `{}`"
-  introduced in this layer is destructive by default, and the refusal only guards the one write path. The
+New this session (Antigravity):
+
+- **The binding rule above.** Highest-consequence, zero compile-time protection.
+- **Antigravity is a THIRD wire**, not OpenAI- or Anthropic-shaped: Gemini `generateContent` nested in a
+  bespoke Cloud Code envelope. It needs a third stream mapper, a fourth tool builder, a `BridgeDeps`
+  widening, **and** its own branch in the Anthropic door's chain — that door deliberately refuses the
+  executor record. "Just add a record" is wrong.
+- **The retryability contract is a string.** `isTransientProviderError` regexes `String(err)` for
+  `API error (429|500|502|503|504)`. A client that throws any other shape silently receives **zero** retries
+  and nobody notices until a blip becomes a user-visible failure. Throw
+  `` `Antigravity API error ${status}: ${body}` ``.
+- **Schema cleaning applies only at schema paths.** The reference records that whole-document cleaning
+  silently corrupted conversation history — keys like `title`/`format`/`default`/`const` also occur inside
+  replayed function-call arguments.
+- **The session id is content-derived, not a nonce.** A random-per-request implementation looks fine and
+  loses upstream cache behaviour.
+- **#190 edits `routing.ts`, which every Provider shares.** Its two cooldown channels are separate on purpose
+  so a blip cannot write a long horizon and a long quota window cannot be shortened by a blip. Preserve that.
+- **Credits' cooldown ledger is harmful with one credential** — the reference consults it *before sending*,
+  so a single benched credential 429s itself. It is out of scope; do not helpfully port it.
+
+Carried forward:
+
+- **A store file that does not parse is no longer overwritten — `merge` refuses (#182, ADR-0004).** Both
+  stores are read-merge-write, so any *new* "degrade to `{}`" in this layer is destructive by default. The
   pure parsers are still total on purpose — do not make them throw, they have six callers.
-  [[2026-07-29-never-overwrite-a-store-we-could-not-parse]].
-- **`writeConfig` / `writeAuth` can throw, and always could** — `writeRaw` throws on ENOSPC/EPERM, and #182
-  added a new trigger for that same contract. ~35 call sites already tolerate it; none were changed. Resist
-  any "return a result type instead" refactor, which would touch all 35.
-- **A fix release is not verified until the OLD version FAILS the same check.** Most natural checks pass on
-  the broken build too — on #183 a plain *read* check was green on 2.0.38 and 2.0.39 alike, because the read
-  returned `{}` with exit 0. Install the previous published tarball as a control. Used twice now (#183, #184)
-  and it earned its keep both times.
+- **`writeConfig` / `writeAuth` can throw, and always could.** ~35 call sites already tolerate it. Resist any
+  "return a result type instead" refactor.
+- **A fix release is not verified until the OLD version FAILS the same check.**
   [[verifying-a-fix-release-needs-the-previous-version-as-a-control]].
-- **A vsix is evidence only when checked in the BUNDLE.** The extension bundles its own `@wisp/core`, so a
-  commit on main proves nothing about what an extension user runs. Unzip the `.vsix` and grep
-  `extension/dist/extension.js` for a string the fix introduced — that is what #184 did.
-- **npm can 404 a version its own publish job just succeeded on.** Propagation lag, not a broken release —
-  check the job log for `+ wisp-router@<v>` and `npm view … dist-tags`, then retry. Hit this on #183.
-- **RUN `bun run compile` IN BOTH PACKAGES.** The root script only covers `packages/vscode`; `packages/tui`
-  has its own (`tsc -p ./`). Vitest typechecks neither. Also: the test gate is **`bun run test`** (vitest) —
-  bare `bun test` runs Bun's own runner instead and reports ~53 bogus failures on `vi.stubGlobal`.
+- **A vsix is evidence only when checked in the BUNDLE** — unzip it and grep `extension/dist/extension.js`.
+- **npm can 404 a version its own publish job just succeeded on.** Propagation lag; check the job log, retry.
+- **RUN `bun run compile` IN BOTH PACKAGES.** The root script only covers `packages/vscode`. The test gate is
+  **`bun run test`** (vitest) — bare `bun test` runs Bun's own runner and reports ~53 bogus failures.
   [[widening-a-client-stream-event-union-breaks-else-narrowing-vitest]].
-- **npm is one of THREE faces**, and the vsix bundles its own `@wisp/core`. Every release entry carries a
-  `### Surfaces` section — keep it, and **file an owed bump as a ticket in the same pass**; prose evaporates.
-  [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]].
+- **npm is one of THREE faces.** Every release entry carries `### Surfaces`; file an owed bump as a ticket in
+  the same pass. [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]].
 - **The `wisp-slot` version lives in TWO files** — `plugins/slot/.claude-plugin/plugin.json` **and**
-  `.claude-plugin/marketplace.json`. They must move together (precedent `0965cab`).
-- **Never verify usage from `status.json`.** It is global, and a bridged reader's own turn overwrites it. Use
-  the per-session Claude Code transcript, folded by `message.id`.
+  `.claude-plugin/marketplace.json`.
+- **Never verify usage from `status.json`** — it is global.
   [[status-json-is-global-so-it-cannot-observe-another-session]].
-- **The `ctx …%` badge does NOT come from the plugin cache.** `~/.claude/hooks/statusline-wrapper.ps1` runs
-  the **repo checkout** copy of `wisp-statusline.js` deliberately, so `/plugin update` never changes what the
-  statusline executes. Diagnosing the badge from the cached plugin version already cost one session.
+- **The `ctx …%` badge runs from the repo checkout, not the plugin cache.**
   [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]].
-- **`## Blocked by` on the harvest tickets is body text, not native links** — GraphQL `blockedBy` returns
-  empty even for a genuinely blocked ticket.
-  [[harvest-tickets-carry-body-text-blockers-not-native-links]].
 - **`.context/` commits go to main, never a ticket branch.**
 
 ## Loose threads noticed, not touched
 
 `packages/vscode/src/chatProvider.ts` — #165's Anthropic branch has a **duplicated**
-`if (ev.type !== 'toolCall') continue;`. Dead, not wrong: it compiles and behaves identically. Worth deleting
-next time that file is open. (Still untouched — this session never opened it.)
+`if (ev.type !== 'toolCall') continue;`. Dead, not wrong. Still untouched.
 
-`packages/tui/package.json` itself starts with a **UTF-8 BOM**. Harmless today — Bun's `.json()` tolerates it
-and the release workflow reads the version through exactly that path — but it is a live tripwire if anything
-ever reads that file with a bare `JSON.parse`.
+`packages/tui/package.json` starts with a **UTF-8 BOM**. Harmless today; a live tripwire if anything ever
+reads it with a bare `JSON.parse`.
+
+Reference clone for #185 lives at `D:\scratch\CLIProxyAPI` (shallow, `c9417c8`, re-clonable, outside the
+repo).
 
 ## Related
 
 - [[active-work]]
 - [[overview]]
-- [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]
-- [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]
+- [[2026-07-29-antigravity-narrow-port-never-mint-opaque-tool-ids]]
+- [[2026-07-29-retry-wraps-priming-cooldown-channels-are-separate-maps]]
+- [[2026-07-29-two-doors-share-the-error-answer-not-the-request]]
 - [[2026-07-29-never-overwrite-a-store-we-could-not-parse]]
-- [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
+- [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]
 - [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
 - [[status-json-is-global-so-it-cannot-observe-another-session]]
-- [[harvest-tickets-carry-body-text-blockers-not-native-links]]
+- [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]
 - [[widening-a-client-stream-event-union-breaks-else-narrowing-vitest]]

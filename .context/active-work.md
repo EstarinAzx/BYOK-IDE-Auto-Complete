@@ -7,12 +7,25 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-29 by Opus 5 (release session: #183, the npm cut)._
-_At commit: `819900b` on main, pushed, tag `v2.0.39`. **Agent queue empty.**_
+_Last updated: 2026-07-29 by Opus 5 (grooming session: #174 → spec #185 + tickets #186–#192)._
+_At commit: `9208613` on main. **Agent queue holds exactly one ticket: #187.**_
 
 ## Current focus
 
-**Nothing open. The store data-loss arc is closed end to end.** This session cut **npm 2.0.39** (#183,
+**#174 is groomed. Spec #185, tickets #186–#192, nothing implemented.** An eight-question grill settled the
+narrow-port scope; the full reasoning is in
+[[2026-07-29-antigravity-narrow-port-never-mint-opaque-tool-ids]]. Headline: ~1,200–1,500 TS lines against
+the reference's 5,643 non-test Go lines, both Bridge doors, all 13 models, credits **and** reasoning-replay
+out — the latter safe **only** under the binding rule that the port never mints opaque provider-side tool ids.
+
+Reference clone refreshed at `D:\scratch\CLIProxyAPI` (shallow, `c9417c8`, re-clonable).
+
+**Ticket #186 (auth spike) is `ready-for-human` and gates everything live.** #187 (the pure layer) is the
+only `ready-for-agent` ticket, deliberately — see Queue below.
+
+### Previously (release arc, closed)
+
+**The store data-loss arc is closed end to end.** That session cut **npm 2.0.39** (#183,
 clearing the harvest's last debt), fixed **#182** (`9fd63f0`, ADR-0004) — the read-merge-write mechanism
 behind #181 no longer erases a store it could not parse — then shipped it to both faces as **npm 2.0.40 +
 vsix 1.10.1** (#184).
@@ -31,7 +44,9 @@ extension carries #182.
 
 ## State
 
-- **In flight:** nothing. Working tree clean on main. **Relay chain stopped** (`stop: true`), queue dry.
+- **In flight:** nothing implemented. Working tree clean on main. **Relay chain re-seeded and armed**
+  (`.claude/relay/ticket-loop.md`, `stop: false`, leg 1) — but armed for **exactly one leg**: it will land
+  #187, find the queue dry, write `queue empty`, and stop. That is correct, not a failure.
 - **#183 ✅ `819900b` / `v2.0.39`** — release green on all four native runners + publish; `latest` is 2.0.39.
   Gate before the cut: **783/783 tests, `bun run compile` clean in both packages.**
   - **Verified past the registry read, with a control.** The same BOM'd `config.json` plus one unrelated
@@ -76,35 +91,58 @@ Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #16
 #170 `d656686`, #171 `3e0125e`, #172 `49761d8`, #173 `55daebb`/`v2.0.38`), plus the follow-ups #181 `4ec1a81`,
 #180 `ab2235b` and #183 `819900b`/`v2.0.39`.
 
-**Open — no `ready-for-agent` ticket exists:**
+**Spec #185 — Antigravity, seven tickets, none started:**
+
+| # | Ticket | Label | Blocked by |
+|---|---|---|---|
+| **186** | Auth spike — access, PKCE, posture | `ready-for-human` | none — needs a human at a browser |
+| **187** | Pure layer — envelope, tools, signatures, 429 classifier, SSE mapper | **`ready-for-agent`** | none |
+| **188** | Catalog row, kind, creds slice, `AntigravityAuth` | — | #186 |
+| **189** | Executor record + OpenAI door — first real turn | — | #188, #187 |
+| **190** | Rate limits answer 429; cooldown from server horizon | — | #189 |
+| **191** | Anthropic door — Claude Code driven by Gemini | — | #189 |
+| **192** | Release — npm + TUI face, surfaces named | — | #190, #191 |
+
+**Why only #187 carries `ready-for-agent`.** `## Blocked by` is body text, not native links — a frontier
+query cannot see it, so **labels are the only real gate**. Labelling #188 onward now would let the relay build
+the whole Provider before anyone confirms this account has Antigravity access, which is exactly the #170
+failure mode. #187 is exempt because it is a pure transcription of the reference's own ~3,900-line test corpus:
+its correctness does not depend on account access and it needs zero credentials to verify.
+
+**Re-arming order** (one step at a time): human runs #186 → label #188 → then #189 → then #190 **and** #191
+together → then #192, which closes #185. Access not confirmed → comment on #186, label nothing, leave #185
+dormant.
+
+**Still open, unrelated:**
 
 | # | Ticket | Note |
 |---|---|---|
 | **163** | The 502 observation | Diagnosis confirmed. Open pending a stretch of clean use in the 217k–245k band. Closing it is *waiting*, not working. |
-| **174** | Antigravity Provider | Placeholder, ungroomed. Needs `/preset init` or a grill before it is a ticket. |
+| **174** | Antigravity placeholder | **Groomed** → #185. Left open as the tracking issue until #185 closes. |
 | **69** | copilot-wisp launcher | Ungroomed. |
 
-**Closed this session:** #183 (`819900b`/`v2.0.39`), #182 (`9fd63f0`, ADR-0004), #184 (`d36688c`/`v2.0.40`
-+ `b672333`).
+**Closed in the previous session:** #183 (`819900b`/`v2.0.39`), #182 (`9fd63f0`, ADR-0004), #184
+(`d36688c`/`v2.0.40` + `b672333`).
 
 ## Pick up here
 
-**Nothing is queued and nothing is owed.** Ask the user what they want; do not invent urgency.
+**Two independent threads. They do not block each other.**
 
-The only outstanding action is theirs: **install `packages/vscode/wisp-1.10.1.vsix`** so the extension
-actually carries #182 (this face is not on the marketplace). Everything else open is either waiting on time
-(**#163**) or ungroomed (**#174**, **#69**) — both of the latter want a grill or `/preset init` before they
-are tickets.
+1. **Human: run the #186 auth spike.** Browser OAuth on the Google account, confirm Antigravity access,
+   record the PKCE verdict and the posture verdict, save the captured request/response fixtures on the
+   ticket. This gates every live-wire ticket. Ten minutes.
+2. **Agent: start the relay** — `/relay N=1 /preset ticket-loop`. It lands #187 and stops on a dry queue.
 
-Do **not** restart the relay chain expecting work — with no `ready-for-agent` ticket it will pick nothing,
-write `queue empty`, and stop.
+Two user actions still outstanding from before: **install `packages/vscode/wisp-1.10.1.vsix`** (that face is
+not on the marketplace, so it does not carry #182 until installed by hand), and **#170** needs a Kimi Code
+subscription.
 
 ## Skills for next session
 
 - `/preset pick-up` — session door.
+- `/relay N=1 /preset ticket-loop` — armed, one leg (#187). Re-arm by flipping labels in the order above.
 - `packages/tui:verify` — sandboxed CLI verification for TUI command surfaces (isolated `WISP_HOME`).
-- `grill-me` / `/preset init` — the right shape for #182's design call and for grooming #174.
-- `/relay N=1 /preset ticket-loop` — only after something is labelled `ready-for-agent`.
+- `grill-me` / `/preset init` — still the right shape for **#69**, the last ungroomed ticket.
 
 ## Open questions
 
@@ -131,6 +169,15 @@ write `queue empty`, and stop.
   whitelists rather than pattern-matches.
 - **Are the #168 retry constants right in production?** Picked cold, never tuned against a real outage.
 - **Should the two doors' provider dispatch ever fully merge?** Left open on purpose (#167).
+- **Antigravity: how does effort map?** Every record handles the shared effort setting differently — one maps
+  it, two pass it raw, one ignores it. Gemini has its own thinking config. Deferred to implementation (#185).
+- **Antigravity: does the upstream accept vision or document input?** The Anthropic door carries both;
+  unchecked. #186 should answer it, #191 must record the answer.
+- **Antigravity: what refresh skew?** The reference uses ~50 minutes against a ~60-minute token, so it
+  refreshes on nearly every request older than ten. Match it or pick something saner — open (#188).
+- **Does the runtime's default transport already satisfy what the reference pins?** The reference forces
+  HTTP/1.1 because Go defaults to HTTP/2; undici is HTTP/1.1 already, so this fork may cost nothing.
+  **Verify in #189, do not assume.**
 
 ## Related
 
@@ -138,6 +185,7 @@ write `queue empty`, and stop.
 - [[pick-up]]
 - [[decisions]]
 - [[gotchas]]
+- [[2026-07-29-antigravity-narrow-port-never-mint-opaque-tool-ids]]
 - [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
 - [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
 - [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]
