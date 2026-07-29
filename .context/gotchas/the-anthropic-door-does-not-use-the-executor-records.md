@@ -20,7 +20,13 @@ the OpenAI door; on the Anthropic door the same Provider falls straight through 
 ```
 
 which reads like a configuration mistake and is actually a missing arm. Found by #190 writing an end-to-end
-429 test for both doors and watching the Anthropic one return 400. Adding that arm is #191's whole subject.
+429 test for both doors and watching the Anthropic one return 400.
+
+**#191 (`915d415`) closed that particular gap — the chain is now codex → anthropic → xai → antigravity →
+keyed.** The *rule below is unchanged and is the durable part of this page*: the arm had to be hand-written,
+it is per-wire rather than a copy of its neighbour
+([[2026-07-30-the-antigravity-arm-is-not-a-copy-of-the-anthropic-arm]]), and the **next** Provider kind will
+land in exactly the same hole unless both places are counted.
 
 ## What IS shared, and why it matters
 
@@ -42,10 +48,17 @@ When adding a Provider kind, count **two** places, not one:
 
 Missing (2) is silent on the OpenAI door and unit-invisible: `bridgeServer.test.ts` had no Antigravity case
 at all before #190, and the OpenAI-door tests all pass with the arm absent. The only thing that catches it is
-driving the *other* door.
+driving the *other* door. #191's control confirms it from the other side — remove the arm and the whole
+`/v1/messages` block fails while every other test in the suite stays green.
+
+And (2) is **not** a delegation to (1). The door owns wire behaviour the records cannot express (the #139
+system split, the #156 diagnosis chain, vision/documents, non-strict tools), which is why #167 left it alone
+in the first place. A new arm mirrors its neighbours only where the wire agrees.
 
 ## Related
 
+- [[gotchas]]
 - [[2026-07-29-two-doors-share-the-error-answer-not-the-request]]
 - [[2026-07-30-a-classified-verdict-rides-on-the-error-not-its-message]]
+- [[2026-07-30-the-antigravity-arm-is-not-a-copy-of-the-anthropic-arm]]
 - [[active-work]]

@@ -1,68 +1,109 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-07-29
+updated: 2026-07-30
 tags: [context, active-work]
 ---
 
 # Active Work
 
-_Last updated: 2026-07-30 by Opus 5 (relay leg 4: #190 landed and verified live)._
-_At commit: `6a7e0fe` on main. **#191 is `ready-for-agent` — the chain is armed for leg 5.**_
+_Last updated: 2026-07-30 by Opus 5 (relay leg 5: #191 landed and verified live)._
+_At commit: `915d415` on main. **#192 is `ready-for-agent` — the chain is armed for leg 6, and #192 closes
+spec #185.**_
 
 ## Current focus
 
-**#190 LANDED (`6a7e0fe`, PR #195) — Antigravity answers rate limits as 429, and seeds cooldowns from the
-horizon the server actually stated.** Gate on merged main: **991/991 vitest** (971 before), `bun run compile`
-clean in **BOTH** packages.
+**#191 LANDED (`915d415`, PR #196) — the Anthropic door's fourth arm. Claude Code, driven by Gemini, through
+Antigravity.** Gate on merged main: **1009/1009 vitest** (991 before), `bun run compile` clean in **BOTH**
+packages.
 
-Every executor record returned `undefined` from `classify`, so **every** rate limit on **every** Provider left
-the Bridge as a 502 — a gateway fault, which is neither what happened nor something a client can act on.
-Antigravity is the first record to say 429.
+The Anthropic door does **not** shape requests through the executor records. `startProviderStream` carries its
+own hand-rolled per-kind chain — deliberately, because the door owns wire behaviour the records cannot express
+(the #139 system split, the #156 diagnosis chain, vision/documents, non-strict tools). That chain ran
+codex → anthropic → xai → keyed, so an Antigravity Target fell through to the keyed tail and answered
+`400 has no API key configured`: a missing arm wearing a config mistake's error message. It was
+**unit-invisible by construction** — every OpenAI-door test passes with the arm absent — so every test added
+here drives the real listener over `/v1/messages`.
 
-- `antigravity.ts` — `antigravity429Failure` builds #166's four-field failure shape plus, for a spent window,
-  `cooldownSeconds` from the server's stated horizon. `antigravityApiError` **attaches it to the thrown
-  Error**; `antigravityFailureOf` reads it back. `antigravity429Error` survives as the `{status, message}`
-  view, so #187's pins hold unchanged.
-- `routing.ts` — `ProviderCooldowns.noteQuotaWindow(id, seconds)`: a **second door onto the same long
-  channel** for a record that classified the failure itself. `parseUsageLimitReset` untouched, so the widening
-  is additive and no other Provider's behaviour moves.
-- `bridgeServer.ts` — the record's `classify` hook, and `noteProviderError` seeding the quota window *before*
-  the blip streak so a spent window never accumulates blip credit.
+- `bridgeServer.ts` — the fourth arm: creds check, the image refusal (the same string the OpenAI door's record
+  uses), the turn mapping, `antigravityStream`.
+- `antigravity.ts` — thought parts now ride the **thinking** channel instead of being dropped, and
+  **documents** ride as `inlineData` parts beside images.
 
-### Why the verdict rides on the Error rather than its message
+### Inherited, not rebuilt
 
-The message cannot round-trip it. A 429 the pure layer **declined** renders as
+**The 429 and the retry boundary.** Both doors answer through the one shared `failProviderRequest`, which
+reads `executorFor(provider).classify`, so #190's classification was already door-neutral; and `openPrimed`
+wraps the eager base pass only (advisor continuations and the reviewer sub-call are deliberately not retried).
+The arm carries **no** 429 handling and **no** retry of its own — that boundary is matched, not widened.
+
+### The four deliberate divergences from the arm above it
+
+Full reasoning: [[2026-07-30-the-antigravity-arm-is-not-a-copy-of-the-anthropic-arm]].
+
+1. **The FULL system rides, not `systemSplit.stable`.** The Anthropic arm prefers `stable` because the split
+   places a **cache breakpoint** and the volatile tail threads separately as `systemSuffix`. This wire has
+   neither, so `stable` alone is not "the cached part" — it is the system prompt with its tail deleted.
+   Copying the arm three lines up (the most natural tidy-up there is) silently drops the mid-session
+   `<system-reminder>` append from every request, with nothing erroring.
+2. **Thought parts surface; `thoughtSignature` does not.** It is *this* wire's replay token; an Anthropic
+   `thinking.signature` means a different thing, and the only consumer would be a replay path that does not
+   exist (`AntigravityTurn` has no `rawContent` channel). An empty signature is what the Anthropic OAuth wire
+   already sends through this same encoder.
+3. **Documents wired beside images** — one attachment shape on this wire, two lines. Left out, it repeats the
+   door's old silent-vision hole with PDFs.
+4. **No effort, no strictness flag, no `mapOAuthStream` hop** — Gemini bakes reasoning into the model id,
+   `buildAntigravityTools` already cleans Claude Code's schemas, and the stream already speaks
+   `BridgeStreamEvent`.
+
+### The controls
+
+Five deliberate breaks, each failing **exactly its own tests and nothing else**: removing the arm (the whole
+`/v1/messages` block goes, everything else stays green), copying the Anthropic arm's `systemSplit` preference
+(one test), dropping documents (one), re-dropping thought parts (three), removing the image refusal (one).
+
+### Verified live — driving the door, not the record
+
+Through a sandboxed `WISP_HOME` (real `~/.wisp` config + auth never written; the real Bridge on 41184 left
+running): a streamed turn; a **tool round trip** — `get_weather` called with the upstream's own id
+`i7j25lmi`, the result sent back, answered *"The weather in Paris is currently 17°C and raining."*; **vision**
+on a real PNG, described correctly; **a PDF** read back (`WISP191`); a family route and an Alias both
+answering, the Alias on its pinned model; the image row refused; `claude-wisp-antigravity` in the door's own
+list.
+
+**Claude Code launched through `claude-wisp` completed a real agent turn** — a Read tool call and its result —
+answered by Gemini, with both door calls logged routing to `antigravity`.
+
+### #185's open question is answered
+
+**This upstream accepts BOTH vision and document input.** A 400 on an image mid-run turned out to be an
+**invalid hand-written fixture PNG**, not the wire — and a `gemini-3.1-pro-low` run that declined to call a
+tool was the model's discretion, with the declarations on the wire the whole time. Both cost a diagnosis
+cycle; the lesson is folded into
+[[a-live-negative-on-this-wire-is-usually-the-fixture-or-the-model]].
+
+### Still open on #189 — the account, not the code
+
+**A Claude-model turn on Antigravity.** That quota is exhausted until `2026-07-30T20:55:48Z` (it is what let
+#190 verify its 429 live). "Claude Code driven by Gemini" is #191's own framing, so nothing is blocked.
+
+### Previously — #190 (`6a7e0fe`)
+
+**Antigravity answers rate limits as 429, and seeds cooldowns from the horizon the server actually stated.**
+Gate: **991/991 vitest**, compile clean both packages. Every executor record returned `undefined` from
+`classify`, so every rate limit on every Provider left the Bridge as a 502 — a gateway fault, which is neither
+what happened nor something a client can act on.
+
+**The verdict rides ON the thrown Error, not in its message** — deliberately breaking the house style, because
+for this Provider the message cannot round-trip it: a **declined** 429 renders as
 `Antigravity API error 429: <raw upstream body>`, and that body says `RESOURCE_EXHAUSTED` /
-`RATE_LIMIT_EXCEEDED` **exactly like a classified one** — they differ by a number that was parsed and then
-thrown away. Guessing is asymmetric: guessing "classified" kills the bounded retry and loses the turn.
-
-**The control is the argument.** Swapping in the natural message classifier leaves **990 of 991 green**,
-failing only `leaves a below-threshold 429 to the bounded retry`. Every "does it answer 429" test passes,
-because the wrong implementation answers 429 for everything — so the test that pins this is the one asserting
-a **non**-classification. Full reasoning:
+`RATE_LIMIT_EXCEEDED` exactly like a classified one. They differ by a number that was parsed and discarded.
+Swapping in the natural message classifier leaves **990 of 991 green**, failing only `leaves a below-threshold
+429 to the bounded retry` — so the test that pins the design is the one asserting a **non**-classification.
 [[2026-07-30-a-classified-verdict-rides-on-the-error-not-its-message]].
 
-### Verified live — and the horizon checks out independently
-
-The Claude quota on this Provider is exhausted until `2026-07-30T20:55:48Z`, so a real 429 was reachable on
-demand. One real turn at `claude-sonnet-4-6` against the real daily host returned
-`Antigravity API error 429: QUOTA_EXHAUSTED`, carrying `status 429`, `code antigravity_quota_exhausted`,
-`type rate_limit_error` and **`cooldownSeconds: 118540`**.
-
-The probe ran at `2026-07-29T12:00:28Z` — **118,548s** before the reset #189 independently recorded. The code
-read **118,540**. The gap is the request's own latency, so that is genuinely the server's stated window, not a
-default and not arithmetic done here. Happy path unaffected: the same probe at `gemini-3.1-pro-low` completed
-a real streamed turn. Read-only — `~/.wisp` read, never written; the Bridge on 41184 untouched.
-
-### Found while testing, left for #191
-
-**The Anthropic door does not use the executor records at all.** `startProviderStream` carries its own
-per-kind chain (codex → anthropic → xai → keyed) with no Antigravity arm, so `/v1/messages` on this Provider
-answers `400 has no API key configured` before any 429 can happen. The classification is already
-**door-neutral** — both doors answer through the shared `failProviderRequest` — so #191 gets the 429 for free
-once it adds the arm, and must not re-implement it.
-[[the-anthropic-door-does-not-use-the-executor-records]].
+Verified live: a real `claude-sonnet-4-6` 429 carried `cooldownSeconds: 118540` against an
+independently-recorded reset **118,548s** away — the server's own horizon, to within request latency.
 
 ### Previously — #189 (`c6f644a`)
 
@@ -157,8 +198,15 @@ extension carries #182.
 
 ## State
 
-- **In flight:** nothing. Working tree clean on main at `6a7e0fe`, pushed; the #190 branch is merged and
-  deleted. **The relay chain ran legs 1–4 (#187, #188, #189, #190) and is armed for leg 5 on #191.**
+- **In flight:** nothing. Working tree clean on main at `915d415`, pushed; the #191 branch is merged and
+  deleted. **The relay chain ran legs 1–5 (#187, #188, #189, #190, #191) and is armed for leg 6 on #192 —
+  which closes spec #185.**
+- **#191 ✅ `915d415` (PR #196)** — the Anthropic door's fourth arm; Claude Code driven by Gemini. Gate on
+  merged main: **1009/1009 vitest** (991 before), compile clean **both** packages. **Five** deliberate-break
+  controls, each failing only its own tests. **Verified live** — a streamed turn, a tool round trip on the
+  upstream's own id, vision on a real PNG, a PDF read back, a family route and an Alias both answering, and a
+  real Claude Code agent turn through `claude-wisp` answered by Gemini. Answers #185's open question: this
+  upstream takes **both** vision and documents.
 - **#190 ✅ `6a7e0fe` (PR #195)** — rate limits answer 429; cooldowns seeded from the server's horizon. Gate on
   merged main: **991/991 vitest**, compile clean **both** packages. **Five** deliberate-break controls, each
   failing only the tests that pin its claim — including the one that proves the carrier design (the obvious
