@@ -65,6 +65,7 @@ Non-obvious traps. One file per trap in `gotchas/`. A flat list.
 - [[model-cant-see-the-image-over-the-bridge-read-images-n-in-the-log]] — "Model can't see the image" over the Bridge — read `images=N` in the log BEFORE touching code (#51+)
 - [[npm-spam-filter-a-green-publish-can-vanish-minutes-later]] — npm spam filter: a green publish can vanish minutes later
 - [[github-runners-macos-13-is-a-zombie-label-opentui-selects-is]] — GitHub runners: macos-13 is a zombie label; opentui select's ▶ is ambiguous-width
+- [[both-oauth-providers-ship-quota-headers-codex-rejects-gpt-5-3-codex]] — Both OAuth Providers ship quota headers (units differ) — and the Codex OAuth path rejects `gpt-5.3-codex` (#171)
 
 ## Related
 
