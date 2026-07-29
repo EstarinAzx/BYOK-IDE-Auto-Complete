@@ -4,6 +4,70 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] — 2026-07-29
+
+Ships the **CLIProxyAPI harvest** (spec #164) to the extension. `wisp-router` 2.0.38 carried it to
+npm on 2026-07-29; this is the half npm could never deliver, because the extension **bundles its own
+copy of the engine** — a core fix reaches a picker or native-chat user only when the vsix is rebuilt.
+See *Surfaces* at the end for what reaches where.
+
+### Added
+
+- **Kimi as a Provider (#170).** A Kimi Code subscriber can use that subscription through Wisp instead
+  of buying separate API credit. The row appears in the **model picker, native chat and Inquire**, and
+  the side panel shows its signed-in state. **Sign-in happens in the terminal**, not the panel: run
+  `wisp` → `/signin kimi` and approve at the printed URL. Both faces share `~/.wisp/auth.json`, so it
+  lights up here once approved — the panel points you there rather than offering a button that cannot
+  run a device flow. ⚠ Kimi's auth host, client id and endpoints could not be verified offline; a wrong
+  value fails loud at sign-in with the server's own words.
+- **Live token usage on every bridged turn (#165, #169).** When the extension hosts the Bridge, Codex
+  and Grok turns (#165) and every API-key Provider (#169) now report real usage instead of zeros. This
+  is what lets Claude Code size auto-compaction on a bridged session — without it a conversation grew
+  unchecked until the backend refused it. Verified live: 7/7 Codex turns and 2/2 keyed turns reporting.
+
+### Fixed
+
+- **A fresh Codex sign-in no longer sends a model the account path refuses (#172).** The codex row's
+  default was `gpt-5.3-codex`, which a ChatGPT account is answered `400 … not supported when using
+  Codex with a ChatGPT account` for — so signing in and using native chat **without opening the model
+  picker** failed on the first turn. The default is now `gpt-5.6-sol`. `gpt-5.3-codex` remains valid
+  for API-key callers and stays in the dropdown: this is an account-path restriction, not a
+  model-existence one.
+- **A BOM in `~/.wisp/config.json` or `auth.json` no longer destroys it (#181).** A UTF-8 byte-order
+  mark — what Notepad and PowerShell's `Out-File -Encoding utf8` write **by default** — made the file
+  unparseable, and the stores are read-merge-write: the empty result was merged with the next change
+  and **written back over the real file**. Hand-editing your config and later changing one setting
+  erased every family route; the same path on `auth.json` plus one sign-in erased every stored API key
+  and OAuth token, silently and with no error at any point. A BOM is valid UTF-8 and is now tolerated.
+- **A usage event can no longer be mistaken for a tool call in native chat (#165).** The Codex, Grok
+  and Anthropic chat paths read "not text" as "must be a tool call"; the new usage events now fall out
+  explicitly instead of reaching that branch.
+- **Failed bridged turns answer with a real status, and transient ones retry (#166, #167, #168).**
+  Codex failures are classified into their actual conditions rather than a blanket
+  `502 provider request failed` (a 502 tells the client to retry, which for an over-window conversation
+  only makes it worse); pre-stream failures are no longer locked into an empty `200`; and a stream that
+  dies before delivering anything is retried once with backoff, with a repeatedly-failing provider
+  briefly cooled off.
+
+### Changed
+
+- **The statusline snapshot is written whichever face hosts the Bridge (#171).** The extension now
+  passes `recordStatus` into its Bridge deps, so `~/.wisp/status.json` is written after each bridged
+  turn on the Anthropic door here too — not only under `wisp serve`. Reading it back is the
+  `wisp-slot` plugin's job; see *Surfaces*.
+
+### Surfaces
+
+- **This vsix (1.10.0)** — everything above. The Kimi row, the corrected Codex default, the native-chat
+  usage-event guard and the BOM fix reach a picker / native-chat / Inquire user **only** through this
+  build.
+- **npm `wisp-router`** — carried the engine half in **2.0.38**. ⚠ **#181's BOM fix is NOT in 2.0.38**;
+  it landed after that cut and ships on npm in the next one. Until then, `wisp serve` / `claude-wisp`
+  users still have the destructive behaviour.
+- **The `wisp-slot` Claude Code plugin (1.6.0)** — bumped alongside this release. It carries the
+  *reader* half of #171: without it the Bridge writes `status.json` and no `ctx …%` ever appears on the
+  badge.
+
 ## [1.9.0] — 2026-07-28
 
 Catches up with the TUI line (wisp-router 2.0.32–2.0.37) — Opus 5, `[1m]` tier
