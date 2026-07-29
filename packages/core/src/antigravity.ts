@@ -742,19 +742,29 @@ const truncationFor = (finishReason: unknown): AnthropicTruncationReason | undef
   }
 };
 
-// Gemini usage -> the door-neutral counts. promptTokenCount INCLUDES the cached read, so the uncached input
-// gives them up (floored at 0) — the #165 convention every Wisp usage reader shares.
+/*
+ * Gemini usage -> the door-neutral counts. Two conventions, both load-bearing:
+ *
+ *  - promptTokenCount INCLUDES the cached read, so the uncached input gives them up (floored at 0) — the
+ *    #165 convention every Wisp usage reader shares.
+ *  - output = candidatesTokenCount + thoughtsTokenCount. Thinking tokens are BILLED OUTPUT and this wire
+ *    reports them in a separate field, so reading candidates alone under-reports enormously. Measured on
+ *    the #186 spike's live captures: candidates 10 vs thoughts 215, and candidates 1 vs thoughts 1123 —
+ *    a ~100x under-report on a reasoning turn. The upstream's own totalTokenCount confirms the sum
+ *    (3 + 10 + 215 = 228; 1092 + 1 + 1123 = 2216).
+ */
 const antigravityUsage = (metadata: unknown): BridgeUsage | undefined => {
   if (!isObj(metadata)) return undefined;
   const prompt = Number(metadata.promptTokenCount ?? 0);
   const cached = Number(metadata.cachedContentTokenCount ?? 0);
-  const output = Number(metadata.candidatesTokenCount ?? 0);
-  if (!prompt && !cached && !output) return undefined;
+  const candidates = Number(metadata.candidatesTokenCount ?? 0);
+  const thoughts = Number(metadata.thoughtsTokenCount ?? 0);
+  if (!prompt && !cached && !candidates && !thoughts) return undefined;
   return {
     input_tokens: Math.max(0, prompt - cached),
     cache_creation_input_tokens: 0,
     cache_read_input_tokens: cached,
-    output_tokens: output,
+    output_tokens: candidates + thoughts,
   };
 };
 

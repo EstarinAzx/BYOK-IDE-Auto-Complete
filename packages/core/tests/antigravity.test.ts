@@ -713,6 +713,34 @@ describe('antigravityStreamEvents', () => {
     expect(usageEvents[0].usage).toEqual({ input_tokens: 8, cache_creation_input_tokens: 0, cache_read_input_tokens: 2, output_tokens: 4 });
   });
 
+  // Live captures from the #186 spike. Thinking tokens are billed OUTPUT and ride their own field, so
+  // reading candidatesTokenCount alone under-reports a reasoning turn by ~100x. The upstream's own
+  // totalTokenCount is the check: prompt + candidates + thoughts.
+  it('counts thinking tokens as output — the real wire reports them separately', async () => {
+    const events = await collect(antigravityStreamEvents(feed([
+      { response: {
+        candidates: [{ content: { parts: [{ text: '' }] }, finishReason: 'STOP' }],
+        usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 10, totalTokenCount: 228, thoughtsTokenCount: 215 },
+      } },
+    ])));
+    const usage = events.find((e) => e.type === 'usage').usage;
+    expect(usage.output_tokens).toBe(225);            // 10 + 215, NOT 10
+    expect(usage.input_tokens).toBe(3);
+    expect(usage.input_tokens + usage.output_tokens).toBe(228); // == the upstream's own total
+  });
+
+  it('counts thinking tokens as output on a vision turn too (candidates 1, thoughts 1123)', async () => {
+    const events = await collect(antigravityStreamEvents(feed([
+      { response: {
+        candidates: [{ content: { parts: [{ text: '' }] }, finishReason: 'STOP' }],
+        usageMetadata: { promptTokenCount: 1092, candidatesTokenCount: 1, totalTokenCount: 2216, thoughtsTokenCount: 1123 },
+      } },
+    ])));
+    const usage = events.find((e) => e.type === 'usage').usage;
+    expect(usage.output_tokens).toBe(1124);
+    expect(usage.input_tokens + usage.output_tokens).toBe(2216);
+  });
+
   it('emits no usage event at all when the terminal chunk carries none — a synthesized zero is the bug', async () => {
     const events = await collect(antigravityStreamEvents(feed([
       { response: { candidates: [{ content: { parts: [{ text: 'a' }] }, finishReason: 'STOP' }] } },
