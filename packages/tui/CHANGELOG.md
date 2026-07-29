@@ -6,6 +6,103 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.38] — 2026-07-29
+
+The CLIProxyAPI harvest (#164) — eight tickets whose common thread is that the Bridge now
+tells the truth about what a turn cost, what went wrong, and how full the window is. Every
+item below reaches the **npm Bridge** (`wisp`, `wisp serve`, `claude-wisp`); the *Surfaces*
+section at the end says which ones also need a build this release does not cut.
+
+### Added
+
+- **Auto-compaction works on a bridged session again.** Claude Code sizes compaction off the
+  usage a turn reports, and only the Anthropic client ever emitted one — so every Codex and
+  Grok turn closed with zeros, the history never compacted, and it grew until Codex rejected
+  it with a 502. Both backends already report the counts on the Responses API's terminal
+  frame; those are now mapped onto the usage the Bridge carries end to end. A frame with no
+  usage block emits no event at all rather than a synthesized zero — the zero is the bug.
+  (#165)
+- **The same repair for every API-key Provider.** Chat-completions streams omit usage unless
+  the request asks for it, so OpenCode Go, Zen, OpenAI, Groq, Mistral, OpenRouter, Ollama,
+  KiloCode, Cline and Custom all reported nothing. The Bridge now opts in with
+  `stream_options.include_usage` and maps the final chunk. A Provider that ignores the opt-in
+  still finishes clean — no usage block means no event, never a zero. (#169)
+- **A transient failure no longer costs the whole turn.** A stream that died before its
+  terminal frame, an upstream 5xx, or a provider at capacity used to surface as an error, and
+  a provider that kept failing kept getting picked. The open-and-prime step now retries with
+  bounded, jittered backoff, and a provider that keeps failing is cooled off briefly. Only a
+  failure that delivered nothing is retryable — anything the client has already seen is never
+  discarded and restarted — and a classified failure, a credential refusal or a client
+  hang-up is never retried. The transient cooldown is a separate channel from the quota one,
+  so a blip cannot sideline a provider for days and a quota exhaustion cannot be shortened to
+  seconds. (#168)
+- **Kimi as a Provider.** A Kimi Code subscriber can use that subscription through Wisp
+  instead of buying separate API credit. Sign in from the terminal — `wisp` → `/signin kimi`
+  — and approve at the printed URL; `/signout kimi` revokes. Kimi is the first Provider that
+  authenticates with OAuth but talks the ordinary OpenAI-chat wire, so it routes through the
+  keyed executor untouched and inherits the usage reporting above for free. ⚠ Its auth host,
+  client id and endpoints could not be verified offline; a wrong value fails loud at sign-in
+  with the server's own words. (#170)
+- **A live context meter on the Claude Code statusline.** The Bridge writes
+  `~/.wisp/status.json` after each bridged turn on the Anthropic door — the turn's real usage
+  against the model's window, plus the account's quota utilization read off the response head
+  — and the `wisp-slot` statusline renders `ctx 122% 5h 4% 7d 22%`. The percentage is
+  deliberately unclamped: a 122% reading is a conversation already past the window and doomed
+  upstream, and showing it before the request fails is the point. Nothing is synthesized — a
+  Provider that reports no usage or no headers yields a shorter badge, and API-key Providers
+  get no context reading at all, since their window is known only from models.dev, which the
+  door does not fetch per turn. Needs the marketplace plugin too — see *Surfaces*. (#171)
+
+### Fixed
+
+- **A failed Codex turn now answers with what actually went wrong.** Every failure left the
+  Bridge as `502 provider request failed`, and a 502 tells Claude Code the server broke and
+  the request is worth retrying — so it retried requests that could never succeed, most
+  damagingly an over-window conversation, which only grows on the retry. The four conditions
+  the backend actually reports — context too large, invalid thinking signature, previous
+  response not found, auth unavailable — are recognised in every wire form they use and
+  answered with their own status. Anything unmatched stays a 502: an unknown failure must
+  remain a gateway error. (#166)
+- **A pre-stream failure is no longer locked into an empty 200.** The doors committed their
+  `200` SSE head before the upstream request had run at all — the provider streams are async
+  generators, so no IO happens until the first pull. The first event is now pulled ahead of
+  the head on every path, which is what makes any status above reachable and what gives the
+  retry its clean boundary. (#166, #167)
+- **A fresh Codex sign-in that never picks a model completes its turn.** The codex row's
+  default was `gpt-5.3-codex`, which the ChatGPT-account path refuses outright: `400 The
+  'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT account`. The default
+  is now `gpt-5.6-sol` (verified 200 by live probe). `gpt-5.3-codex` stays valid for API-key
+  callers and stays in the curated dropdown — this is an account-path restriction, not a
+  model-existence one. Also reaches the vsix — see *Surfaces*. (#172)
+
+### Changed
+
+- **One `ProviderExecutor` record per Provider kind.** The OpenAI door carried a near-copy
+  chat handler per kind, with the keyed path inline as a fourth and the same gateway-error
+  catch pasted at five sites; a new backend meant a new handler. It is now one row per kind
+  and one handler driving the table, with a single shared gateway-error answer. Internal, and
+  behaviour-neutral apart from priming becoming uniform (above). (#167)
+
+### Surfaces
+
+Which build carries which change — npm is one of three faces, and this release cuts only npm.
+
+- **npm `wisp-router` 2.0.38** (this release) — every item above.
+- **The `wisp` VS Code extension (vsix) — a matching bump is owed, and is deliberately not
+  cut here.** Four of the harvested tickets changed extension-face code that no npm install
+  can deliver, because the extension bundles its own copy of the engine: #170 adds the Kimi
+  row to the model picker, native chat and Inquire plus the side panel's device sign-in
+  state; #172's corrected default is what native chat and Inquire send for a fresh Codex
+  sign-in; #165 added the usage-event guard on the extension's own chat path; and #171 wires
+  the snapshot into the extension-hosted Bridge. The vsix stays at **1.9.0** in this release
+  and the bump is tracked as its own ticket — cutting a second outward-facing release was
+  outside what this one authorized.
+- **The `wisp-slot` Claude Code plugin** — the *reader* half of #171 lives in
+  `statusline/wisp-statusline.js`, which ships through the plugin marketplace, not npm and
+  not the vsix. A user on plugin **1.5.0** therefore has the writer without the reader: the
+  Bridge will write `status.json` but no `ctx …%` appears on the badge. That bump is owed too
+  and is tracked with the vsix one.
+
 ## [2.0.37] — 2026-07-25
 
 ### Fixed
