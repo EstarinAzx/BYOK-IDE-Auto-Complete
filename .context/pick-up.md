@@ -1,7 +1,7 @@
 ---
 type: pick-up
 project: wisp
-updated: 2026-07-29
+updated: 2026-07-30
 tags: [context, pick-up]
 ---
 
@@ -9,53 +9,47 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last session (2026-07-29, relay leg 3): #189 LANDED.** Squash-merged as **`c6f644a`** on main via PR #194; #189 closed, branch deleted. Gate re-verified on merged main: **971/971 vitest**, compile clean **both** packages.
+**Last session (2026-07-30, relay leg 4): #190 LANDED.** Squash-merged as **`6a7e0fe`** on main via PR #195; #190 closed, branch deleted. Gate re-verified on merged main: **991/991 vitest** (971 before), compile clean **both** packages. Verified **live** against a real quota-exhausted 429.
 
-## Queue: #190 and #191 are both `ready-for-agent`
+## Queue: #191 is the only armed ticket
 
-Run **`/relay N=1 /preset ticket-loop`**. It picks the oldest unblocked ticket, **#190** (rate limits answer 429; cooldown seeded from the server's stated horizon), then **#191** (the Anthropic door — Claude Code driven by Gemini). After both: **#192**, which closes spec #185.
+Run **`/relay N=1 /preset ticket-loop`**. It takes **#191** (the Anthropic door — Claude Code driven by Gemini), then **#192**, which closes spec #185.
 
-Both run on **Gemini**, so neither is blocked by the Claude quota below.
+## What #190 landed (on main, `6a7e0fe`)
 
-## What #189 landed (on main, `c6f644a`)
+Every executor record returned `undefined` from `classify`, so **every** rate limit on **every** Provider left the Bridge as a 502 — a gateway fault, which is neither what happened nor something a client can act on. Antigravity is the first record to say **429**.
 
-The first real Antigravity turn. Antigravity is the **fifth `ProviderExecutor` record**, not a sixth special case.
+- `antigravity.ts` — `antigravity429Failure` builds #166's four-field failure shape plus, for a spent window, `cooldownSeconds` from the horizon the server stated. `antigravityApiError` **attaches it to the thrown Error**; `antigravityFailureOf` reads it back. `antigravity429Error` survives as the `{status, message}` view, so #187's pins hold.
+- `routing.ts` — `ProviderCooldowns.noteQuotaWindow(id, seconds)`: a **second door onto the same long channel** for a record that classified the failure itself. `parseUsageLimitReset` untouched.
+- `bridgeServer.ts` — the record's `classify` hook, and `noteProviderError` seeding the quota window *before* the blip streak.
 
-`packages/core/src/antigravity.ts` **+239** — the thirteen-model lineup with per-model output caps, the daily-first host chain, turn URLs + mirrored headers, `antigravityApiError` (the throw shape), the injected random session-id fallback, and `buildAntigravityPayload` / `buildAntigravityRequestBody` (turns → Gemini payload → #187's whole envelope pipeline, in the one order that holds).
+### The design call worth knowing before touching it
 
-`packages/core/src/antigravityClient.ts` **(new)** — the socket: streaming with the SSE flag, non-streaming, and the host walk.
+**The verdict rides ON the thrown Error, not in its message** — deliberately breaking the house style, because for this Provider the message cannot round-trip it. A 429 the pure layer **declined** renders as `Antigravity API error 429: <raw upstream body>`, and that body says `RESOURCE_EXHAUSTED` / `RATE_LIMIT_EXCEEDED` **exactly like a classified one**. They differ by a number that was parsed and then thrown away.
 
-Plus the executor record, the `BridgeDeps` `antigravitySignedIn`/`antigravityCreds` pair (optional, the xai precedent), the models-list branch, the image refusal, and both faces wired.
+Guessing is asymmetric: guessing "declined" wastes two retries then answers right; guessing **"classified" kills the bounded retry** and loses a turn to a rate limit that had already expired.
 
-### Verified live, end to end
+**The control is the whole argument.** Swapping in the natural message classifier leaves **990 of 991 green**, failing only `leaves a below-threshold 429 to the bounded retry`. Every "does it answer 429" test passes, because the wrong implementation answers 429 for everything — so the test that pins this is the one asserting a **non**-classification. [[2026-07-30-a-classified-verdict-rides-on-the-error-not-its-message]]
 
-After `/signin antigravity`, driven through `wisp serve` running from the branch:
+### Verified live — and the horizon checks out independently
 
-- **A real streamed turn** — streamed `TURN_OK` from `gemini-3.1-pro-low`.
-- **Tool calling end to end** — call emitted, result returned, and the model *used* it: *"The weather in Paris is currently 19 degrees Celsius with drizzle."*
-- **Upstream ids untouched** — id `noxjacvf`, the same 8-char upstream shape as #186's `5hp24qb7`. Nothing minted.
-- Signed-out → **401 before any head**; image model **listed and refused** (400, reason named) with real creds; models endpoint reflects sign-in both ways; the live 429 classified to the exact contract shape.
+A real turn at `claude-sonnet-4-6` against the real daily host returned `Antigravity API error 429: QUOTA_EXHAUSTED`, carrying `status 429`, `code antigravity_quota_exhausted`, `type rate_limit_error`, **`cooldownSeconds: 118540`**.
 
-### ⚠ The bug the live turn caught — read before writing any SSE code
+The probe ran at `2026-07-29T12:00:28Z` — **118,548s** before the reset #189 independently recorded (`2026-07-30T20:55:48Z`). The code read **118,540**. The gap is the request's own latency, so that is genuinely the server's stated window. Happy path unaffected: the same probe at `gemini-3.1-pro-low` completed a real streamed turn.
 
-**The first live turn returned an EMPTY answer, at 200, with a fully green suite.**
+## What #191 actually has to do — read this first
 
-The upstream frames SSE with **`\r\n\r\n`**. `sseBlocks` split on `'\n\n'` only, and that **never matches CRLF** — the `\r` sits between the two `\n`. So the entire response arrived as ONE block, its concatenated JSON documents failed to parse, every frame was dropped, and the turn completed cleanly with no text. Silent, and indistinguishable from a model that said nothing.
+**The Anthropic door does not use the executor records at all.** #167 unified the *OpenAI* door onto one `ProviderExecutor` record per kind and left this one alone: `startProviderStream` carries its own hand-written chain — codex → anthropic → xai → keyed — and never consults `providerExecutors`. Antigravity is simply not in it, so `/v1/messages` on this Provider falls through to the keyed tail and answers `400 has no API key configured` — which reads like a config mistake and is a missing arm.
 
-The tests missed it because the fixture bytes were **retyped rather than copied**, normalising CRLF to LF. Fixed in the same PR: the separator is now `/\r?\n\r?\n/` (matches `'\n\n'` identically, so Codex and Anthropic are unaffected), the fixtures frame with CRLF, and two named regression tests pin both endings. Control: reverting the separator fails 5 tests, including `expected [] to deeply equal ['TURN','_OK']`.
+So the work is **one arm**, not a subsystem. Three things follow:
 
-**The lesson, and it generalises:** a hand-retyped fixture silently normalises whitespace and line endings. When the framing is part of the contract, **copy the bytes** — an LF fixture cannot catch a CRLF bug. [[2026-07-29-a-retyped-sse-fixture-cannot-catch-a-crlf-framing-bug]]
+- **The 429 answer comes for free.** Both doors answer through the one shared `failProviderRequest`, which reads `executorFor(provider).classify`. #190's classification is already door-neutral. Do **not** re-implement it.
+- **The door carries wire behaviour the records do not** — the #139 system split, the #156 diagnosis chain, vision/documents, non-strict tools. That is exactly why #167 left it alone, and the new arm must respect it rather than delegate to the record.
+- **Drive the door, not the record.** The gap was unit-invisible: `bridgeServer.test.ts` had no Antigravity case at all before #190, and every OpenAI-door test passes with the arm absent. [[the-anthropic-door-does-not-use-the-executor-records]]
 
-### Still unverified from #189 — one criterion, and it is the account
+Also open on #191 specifically: **does the upstream accept vision or document input?** #186 said yes to both (vision *and* PDF); the Anthropic door carries both, and #191 must record what actually happens.
 
-**A Claude model turn on this Provider.** Live result was `Antigravity API error 429: QUOTA_EXHAUSTED`; the quota resets **`2026-07-30T20:55:48Z`**. The Claude path *is* wired — the request builds, sends, reaches the upstream, and comes back correctly classified (which is exactly the horizon **#190** consumes). What is unproven is a Claude turn *completing*. Re-check after the reset; it does not block #190 or #191.
-
-Also unforceable: **production reached on daily's REAL failure**. Daily is confirmed as the host actually used; the fallback itself is verified against a stubbed capacity 503, a 429 and a transport error.
-
-### Two calls in #189 a reviewer should sanity-check
-
-- **"The models endpoint lists all thirteen models"** was implemented as: the **Provider's** lineup is the thirteen (`oauthModelOptions` → pickers, `wisp models antigravity`), while the **door's** `/v1/models` keeps one row per Provider and reflects signed-in state. Listing thirteen model ids at the door would need `resolveRoute` to map bare model names to a Provider — shared routing, which **#190 also edits**. Flagged, not silently redesigned.
-- **Effort is not threaded.** The lineup encodes its tier in the model id (`-low`, `-high`, `-extra-low`), which answers #185's open "how does effort map?" for this row.
+⚠ **#191 cannot be fully verified on a Claude model until `2026-07-30T20:55:48Z`** — that quota is still exhausted (it is what let #190 verify its own 429 live). Gemini models are unaffected, and "Claude Code driven by Gemini" is the ticket's own framing, so this is not a blocker.
 
 ## Waiting on the user
 
@@ -65,13 +59,13 @@ Also unforceable: **production reached on daily's REAL failure**. Daily is confi
   ([[2026-07-29-a-public-repo-is-a-publishing-decision-not-a-commit]]); noise now.
 - **Install `packages/vscode/wisp-1.10.1.vsix`** — not on the marketplace, so that face lacks #182 until installed by hand.
 - **#170** — needs a **Kimi Code subscription**.
-- _Done 2026-07-29:_ `/signin antigravity` — the row is live and driving real turns.
+- **#189's last criterion** — a Claude-model turn *completing* on Antigravity, after the quota resets `2026-07-30T20:55:48Z`. Not blocking anything.
 
 ## Released state — nothing owed
 
 | Face | Version | Missing |
 |---|---|---|
-| npm `wisp-router` | **2.0.40** | nothing — #187/#188/#189 are unreleased core; #192 ships the spec |
+| npm `wisp-router` | **2.0.40** | nothing — #187–#190 are unreleased core; #192 ships the spec |
 | `wisp` vsix | **1.10.1** | nothing — but **packaged, not installed** |
 | `wisp-slot` plugin | **1.6.0** | nothing |
 
@@ -79,40 +73,38 @@ Also unforceable: **production reached on daily's REAL failure**. Daily is confi
 
 Antigravity:
 
-- **SSE framing here is CRLF.** See the bug above. `sseBlocks` is now CRLF-tolerant — do not "simplify" it back to a plain `'\n\n'` split.
+- **The 429 verdict is carried on the Error, never sniffed from the message.** A declined 429 and a classified one use the *same words*. A "tidier" message-matching `classify` passes 990/991 tests and silently kills the bounded retry. [[2026-07-30-a-classified-verdict-rides-on-the-error-not-its-message]]
+- **The two cooldown channels are separate maps on purpose.** `noteQuotaWindow` and `noteUsageLimit` write `usageUntil`; `noteTransient` writes `transientUntil`; `coolingUntil` reports the later. Collapsing them lets a blip sideline a Provider for days, or a six-day window be cut to seconds.
+- **A cooling Antigravity has no fallback for a Gemini model name** — `withCooldownFallback` re-aims *family* matches only, and a family match is a `claude-*` id by construction. Recorded and pinned by #190, not a bug to "fix".
+- **SSE framing here is CRLF.** `sseBlocks` is CRLF-tolerant — do not "simplify" it back to a plain `'\n\n'` split.
 - **A live 401 does NOT validate the request body.** Google authenticates before it validates, so an auth failure proves URL/method/headers only.
 - **Never mint opaque provider-side tool ids.** The upstream's own `functionCall.id` passes through untouched; absent upstream ⇒ an **empty** id, never a minted one. Confirmed live: real ids look like `noxjacvf`.
-- **The throw shape is a CONTRACT.** `isTransientProviderError` regexes `String(err)` for `API error (429|500|502|503|504)`. `antigravityApiError` produces it; any "tidier" message silently gets **zero** retries.
-- **The schema cleaner is safe because of its WALKER, not only its scope.**
-  [[the-schema-cleaner-is-safe-because-of-its-walker-not-only-its-scope]]. The change that re-arms the reference's production bug is *"simplify `mapSchema` to a generic deep walk"*, and **no single test catches it**.
+- **The throw shape is a CONTRACT.** `isTransientProviderError` regexes `String(err)` for `API error (429|500|502|503|504)`. Any "tidier" message silently gets **zero** retries. #190's carrier is additive precisely so this still holds.
+- **The schema cleaner is safe because of its WALKER, not only its scope.** [[the-schema-cleaner-is-safe-because-of-its-walker-not-only-its-scope]]. The change that re-arms the reference's production bug is *"simplify `mapSchema` to a generic deep walk"*, and **no single test catches it**.
 - **The session id is content-derived, not a nonce.** #189's random fallback resolves AFTER the stable id on purpose.
 - **Tool results ride their own content, AHEAD of the turn text.** The pairing validator forbids call and response parts in one content and wants the response content directly after the calls.
-- **The two hosts are not interchangeable.** Project bootstrap → **production**; turns → **daily**.
-- **The transport fork is deliberately NOT ported** — both Bridge runtimes already negotiate `http/1.1` (measured). Adding a knob would be dead configuration.
-- **#190 edits `routing.ts`, which every Provider shares.** Its two cooldown channels are separate on purpose so a blip cannot write a long horizon and a long quota window cannot be shortened by a blip. Preserve that.
-- **Credits' cooldown ledger is harmful with one credential** — the reference consults it *before sending*, so a single benched credential 429s itself. Out of scope; do not helpfully port it.
-- **⚠ Claude quota exhausted until `2026-07-30T20:55:48Z`** (`claude-sonnet-4-6`, `claude-opus-4-6-thinking` — note `-4-6`). A 429 on a Claude model is the ACCOUNT, not the code.
+- **The two hosts are not interchangeable.** Project bootstrap → **production**; turns → **daily**. A 429 walks BOTH before it surfaces, so one attempt is two upstream calls.
+- **The transport fork is deliberately NOT ported** — both Bridge runtimes already negotiate `http/1.1` (measured).
 - **The model catalog is advisory.** A row listed `recommended: true` can 400 on every shape. Known-good: `gemini-3.1-pro-low`, `gemini-2.5-flash`, `gemini-3-flash`, `gemini-3.6-flash-low`, `gemini-3.6-flash-high`, `gemini-pro-agent`.
+- **Credits' cooldown ledger is harmful with one credential** — the reference consults it *before sending*, so a single benched credential 429s itself. Out of scope; do not helpfully port it.
 
 Credential hygiene ([[2026-07-29-a-public-repo-is-a-publishing-decision-not-a-commit]]):
 
-- **Never write account-identifying values into this repo.** The spike fixtures at `D:\scratch\antigravity-spike\out\` carry the real project id — #189 scrubbed it to `example-project-1` before using those bytes. `tokens.json` / `.tokens-SECRET.json` there are **live credentials**: never read, never copy.
+- **Never write account-identifying values into this repo.** The spike fixtures at `D:\scratch\antigravity-spike\out\` carry the real project id — scrub to `example-project-1` before using those bytes. `tokens.json` / `.tokens-SECRET.json` there are **live credentials**: never read, never copy.
 - **Never commit a token.** Anything credential-shaped bound for this PUBLIC repo is a question for the maintainer, not a default.
-- **A test run that touches `~/.wisp` restores it.** #189 pinned a temporary port + model there and restored the file byte-for-byte; the user's own Bridge on 41184 was never touched.
+- **A test run that touches `~/.wisp` restores it.** #190's live probe read `auth.json` in-process and wrote nothing at all — no server, no port, no config write — which is the cheapest shape for a live check.
 
 General:
 
 - **A store file that does not parse is no longer overwritten — `merge` refuses (#182, ADR-0004).**
 - **`writeConfig` / `writeAuth` can throw, and always could.** ~35 call sites tolerate it.
-- **A fix release is not verified until the OLD version FAILS the same check.**
-  [[verifying-a-fix-release-needs-the-previous-version-as-a-control]].
+- **A fix release is not verified until the OLD version FAILS the same check.** [[verifying-a-fix-release-needs-the-previous-version-as-a-control]].
 - **A vsix is evidence only when checked in the BUNDLE** — unzip it and grep `extension/dist/extension.js`.
 - **RUN `bun run compile` IN BOTH PACKAGES.** The root script only covers `packages/vscode`. The test gate is **`bun run test`** (vitest) — bare `bun test` runs Bun's own runner and reports ~53 bogus failures.
-- **npm is one of THREE faces.** Every release entry carries `### Surfaces`.
-  [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]].
+- **npm is one of THREE faces.** Every release entry carries `### Surfaces`. [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]].
 - **The `wisp-slot` version lives in TWO files** — `plugins/slot/.claude-plugin/plugin.json` **and** `.claude-plugin/marketplace.json`.
-- **Never verify usage from `status.json`** — it is global.
-  [[status-json-is-global-so-it-cannot-observe-another-session]].
+- **Never verify usage from `status.json`** — it is global. [[status-json-is-global-so-it-cannot-observe-another-session]].
+- **`## Blocked by` is body text, not native tracker links** — a frontier query cannot see it. **Labels are the only real gate.**
 - **`.context/` commits go to main, never a ticket branch.**
 
 Reference clone for #185 lives at `D:\scratch\CLIProxyAPI` (shallow, `c9417c8`, re-clonable, outside the repo).
@@ -121,6 +113,8 @@ Reference clone for #185 lives at `D:\scratch\CLIProxyAPI` (shallow, `c9417c8`, 
 
 - [[active-work]]
 - [[overview]]
+- [[2026-07-30-a-classified-verdict-rides-on-the-error-not-its-message]]
+- [[the-anthropic-door-does-not-use-the-executor-records]]
 - [[2026-07-29-a-retyped-sse-fixture-cannot-catch-a-crlf-framing-bug]]
 - [[2026-07-29-a-public-repo-is-a-publishing-decision-not-a-commit]]
 - [[the-schema-cleaner-is-safe-because-of-its-walker-not-only-its-scope]]

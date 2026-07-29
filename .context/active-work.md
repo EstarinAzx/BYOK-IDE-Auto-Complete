@@ -7,10 +7,64 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-29 by Opus 5 (relay leg 3: #189 landed and verified live)._
-_At commit: `c6f644a` on main. **#190 and #191 are both `ready-for-agent` — the chain is re-armed.**_
+_Last updated: 2026-07-30 by Opus 5 (relay leg 4: #190 landed and verified live)._
+_At commit: `6a7e0fe` on main. **#191 is `ready-for-agent` — the chain is armed for leg 5.**_
 
 ## Current focus
+
+**#190 LANDED (`6a7e0fe`, PR #195) — Antigravity answers rate limits as 429, and seeds cooldowns from the
+horizon the server actually stated.** Gate on merged main: **991/991 vitest** (971 before), `bun run compile`
+clean in **BOTH** packages.
+
+Every executor record returned `undefined` from `classify`, so **every** rate limit on **every** Provider left
+the Bridge as a 502 — a gateway fault, which is neither what happened nor something a client can act on.
+Antigravity is the first record to say 429.
+
+- `antigravity.ts` — `antigravity429Failure` builds #166's four-field failure shape plus, for a spent window,
+  `cooldownSeconds` from the server's stated horizon. `antigravityApiError` **attaches it to the thrown
+  Error**; `antigravityFailureOf` reads it back. `antigravity429Error` survives as the `{status, message}`
+  view, so #187's pins hold unchanged.
+- `routing.ts` — `ProviderCooldowns.noteQuotaWindow(id, seconds)`: a **second door onto the same long
+  channel** for a record that classified the failure itself. `parseUsageLimitReset` untouched, so the widening
+  is additive and no other Provider's behaviour moves.
+- `bridgeServer.ts` — the record's `classify` hook, and `noteProviderError` seeding the quota window *before*
+  the blip streak so a spent window never accumulates blip credit.
+
+### Why the verdict rides on the Error rather than its message
+
+The message cannot round-trip it. A 429 the pure layer **declined** renders as
+`Antigravity API error 429: <raw upstream body>`, and that body says `RESOURCE_EXHAUSTED` /
+`RATE_LIMIT_EXCEEDED` **exactly like a classified one** — they differ by a number that was parsed and then
+thrown away. Guessing is asymmetric: guessing "classified" kills the bounded retry and loses the turn.
+
+**The control is the argument.** Swapping in the natural message classifier leaves **990 of 991 green**,
+failing only `leaves a below-threshold 429 to the bounded retry`. Every "does it answer 429" test passes,
+because the wrong implementation answers 429 for everything — so the test that pins this is the one asserting
+a **non**-classification. Full reasoning:
+[[2026-07-30-a-classified-verdict-rides-on-the-error-not-its-message]].
+
+### Verified live — and the horizon checks out independently
+
+The Claude quota on this Provider is exhausted until `2026-07-30T20:55:48Z`, so a real 429 was reachable on
+demand. One real turn at `claude-sonnet-4-6` against the real daily host returned
+`Antigravity API error 429: QUOTA_EXHAUSTED`, carrying `status 429`, `code antigravity_quota_exhausted`,
+`type rate_limit_error` and **`cooldownSeconds: 118540`**.
+
+The probe ran at `2026-07-29T12:00:28Z` — **118,548s** before the reset #189 independently recorded. The code
+read **118,540**. The gap is the request's own latency, so that is genuinely the server's stated window, not a
+default and not arithmetic done here. Happy path unaffected: the same probe at `gemini-3.1-pro-low` completed
+a real streamed turn. Read-only — `~/.wisp` read, never written; the Bridge on 41184 untouched.
+
+### Found while testing, left for #191
+
+**The Anthropic door does not use the executor records at all.** `startProviderStream` carries its own
+per-kind chain (codex → anthropic → xai → keyed) with no Antigravity arm, so `/v1/messages` on this Provider
+answers `400 has no API key configured` before any 429 can happen. The classification is already
+**door-neutral** — both doors answer through the shared `failProviderRequest` — so #191 gets the 429 for free
+once it adds the arm, and must not re-implement it.
+[[the-anthropic-door-does-not-use-the-executor-records]].
+
+### Previously — #189 (`c6f644a`)
 
 **#189 LANDED (`c6f644a`, PR #194) — the first real Antigravity turn works, verified live.** Antigravity is
 the **fifth `ProviderExecutor` record**, not a sixth special case. Gate on merged main: **971/971 vitest**,
@@ -103,8 +157,12 @@ extension carries #182.
 
 ## State
 
-- **In flight:** nothing. Working tree clean on main at `c6f644a`, pushed; the #189 branch is merged and
-  deleted. **The relay chain ran legs 1–3 (#187, #188, #189) and is re-armed for leg 4 on #190.**
+- **In flight:** nothing. Working tree clean on main at `6a7e0fe`, pushed; the #190 branch is merged and
+  deleted. **The relay chain ran legs 1–4 (#187, #188, #189, #190) and is armed for leg 5 on #191.**
+- **#190 ✅ `6a7e0fe` (PR #195)** — rate limits answer 429; cooldowns seeded from the server's horizon. Gate on
+  merged main: **991/991 vitest**, compile clean **both** packages. **Five** deliberate-break controls, each
+  failing only the tests that pin its claim — including the one that proves the carrier design (the obvious
+  message-sniffing classifier fails exactly one test). **Verified live** against a real quota-exhausted 429.
 - **#189 ✅ `c6f644a` (PR #194)** — the executor record + the OpenAI door. Gate on merged main: **971/971
   vitest**, compile clean in **both** packages. Six deliberate-break controls, plus a **live** end-to-end
   turn and tool-call round trip after the user signed in. The live run is what caught the CRLF framing bug
@@ -158,7 +216,7 @@ Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #16
 #170 `d656686`, #171 `3e0125e`, #172 `49761d8`, #173 `55daebb`/`v2.0.38`), plus the follow-ups #181 `4ec1a81`,
 #180 `ab2235b` and #183 `819900b`/`v2.0.39`.
 
-**Spec #185 — Antigravity, seven tickets, FOUR landed:**
+**Spec #185 — Antigravity, seven tickets, FIVE landed:**
 
 | # | Ticket | Label | Blocked by |
 |---|---|---|---|
@@ -166,7 +224,7 @@ Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #16
 | ~~187~~ | ~~Pure layer — envelope, tools, signatures, 429, SSE~~ | ✅ **`e04f53b`** + `63453e0` | — |
 | ~~188~~ | ~~Catalog row, kind, creds slice, `AntigravityAuth`~~ | ✅ **`ba8dab3`** (PR #193) | — |
 | ~~189~~ | ~~Executor record + OpenAI door — first real turn~~ | ✅ **`c6f644a`** (PR #194) | — |
-| **190** | Rate limits answer 429; cooldown from server horizon | **`ready-for-agent`** | — |
+| ~~190~~ | ~~Rate limits answer 429; cooldown from server horizon~~ | ✅ **`6a7e0fe`** (PR #195) | — |
 | **191** | Anthropic door — Claude Code driven by Gemini | **`ready-for-agent`** | — |
 | **192** | Release — npm + TUI face, surfaces named | — | #190, #191 |
 
@@ -177,12 +235,13 @@ and exactly one ticket is armed at a time.
 **#188 LANDED 2026-07-29** — squash-merged as **`ba8dab3`** via PR #193, closed. 905/905 vitest, compile
 clean both packages, persistence verified end to end against a real `WispHome`. It was briefly held
 `ready-for-human` mid-session while the credential question below was settled, then merged on the
-maintainer's explicit call. **#189 LANDED 2026-07-29** — squash-merged as **`c6f644a`** via PR #194, closed. 971/971 vitest, compile
-clean both packages, and verified **live** end to end after the user's `/signin antigravity`. **#190 and #191
-are now armed together**, per the re-arming order; #192 closes the spec after both.
+maintainer's explicit call. **#189 LANDED 2026-07-29** — squash-merged as **`c6f644a`** via PR #194, closed.
+971/971 vitest, compile clean both packages, and verified **live** end to end after the user's
+`/signin antigravity`. **#190 LANDED 2026-07-30** — squash-merged as **`6a7e0fe`** via PR #195, closed.
+991/991 vitest, compile clean both packages, five deliberate-break controls, and a real quota-exhausted 429
+driven live. **#191 is the only armed ticket**; #192 closes the spec after it.
 
-**Re-arming order** (one step at a time): #189 lands → label #190 **and** #191 together → then #192, which
-closes #185.
+**Re-arming order** (one step at a time): #190 lands → #191 (already armed) → then #192, which closes #185.
 
 **Credential hygiene, settled 2026-07-29** — [[2026-07-29-a-public-repo-is-a-publishing-decision-not-a-commit]]:
 
@@ -236,7 +295,7 @@ Verified constants are a comment on #188; fixtures at `D:\scratch\antigravity-sp
 | **174** | Antigravity placeholder | **Groomed** → #185. Left open as the tracking issue until #185 closes. |
 | **69** | copilot-wisp launcher | Ungroomed. |
 
-**Closed this session:** #187 (`e04f53b`).
+**Closed this session:** #190 (`6a7e0fe`).
 **Closed previously:** #183 (`819900b`/`v2.0.39`), #182 (`9fd63f0`, ADR-0004), #184
 (`d36688c`/`v2.0.40` + `b672333`).
 
@@ -244,19 +303,23 @@ Verified constants are a comment on #188; fixtures at `D:\scratch\antigravity-sp
 
 **The agent queue is armed. Run `/relay N=1 /preset ticket-loop`.**
 
-It takes the oldest unblocked `ready-for-agent` ticket — **#190** (rate limits answer 429; cooldown seeded
-from the server's stated horizon), then **#191** (the Anthropic door — Claude Code driven by Gemini), then
-**#192**, which closes spec #185. Both #190 and #191 run on **Gemini**, so neither waits on the Claude quota.
+It takes the only unblocked `ready-for-agent` ticket — **#191** (the Anthropic door — Claude Code driven by
+Gemini) — then **#192**, which closes spec #185.
 
-Two things to carry into #190 specifically:
+Three things to carry into #191 specifically:
 
-- It edits **`routing.ts`, which every Provider shares.** The two cooldown channels are separate on purpose —
-  a blip must not write a long horizon, and a long quota window must not be shortened by a blip.
-- The horizon it needs is already produced: `decideAntigravity429` returns `retryAfterMs` alongside all four
-  kinds, and #189 confirmed the classification **live** (`Antigravity API error 429: QUOTA_EXHAUSTED`).
+- **The work is one missing arm, not a subsystem.** That door does not use the executor records at all:
+  `startProviderStream` has its own per-kind chain (codex → anthropic → xai → keyed) and Antigravity simply
+  is not in it, so `/v1/messages` answers `400 has no API key configured` today.
+  [[the-anthropic-door-does-not-use-the-executor-records]].
+- **The 429 answer comes for free.** Both doors answer through the shared `failProviderRequest`, which reads
+  `executorFor(provider).classify` — #190's classification is already door-neutral. Do **not** re-implement it.
+- **The door carries wire behaviour the records do not**: the #139 system split, the #156 diagnosis chain,
+  vision/documents and non-strict tools. That is why #167 left this door alone, and the arm must respect it.
 
 One loose end that is **not** blocking: re-run a Claude-model turn after `2026-07-30T20:55:48Z` to close
-#189's last acceptance criterion.
+#189's last acceptance criterion. As of `2026-07-29T12:00Z` that quota is still exhausted — which is what let
+#190 verify its own 429 path live.
 
 Two user actions still outstanding from before: **install `packages/vscode/wisp-1.10.1.vsix`** (that face is
 not on the marketplace, so it does not carry #182 until installed by hand), and **#170** needs a Kimi Code
@@ -265,7 +328,7 @@ subscription.
 ## Skills for next session
 
 - `/preset pick-up` — session door.
-- `/relay N=1 /preset ticket-loop` — **ran legs 1–3 (#187, #188, #189); leg 4 is armed on #190.**
+- `/relay N=1 /preset ticket-loop` — **ran legs 1–4 (#187, #188, #189, #190); leg 5 is armed on #191.**
 - `packages/tui:verify` — sandboxed CLI verification for TUI command surfaces (isolated `WISP_HOME`).
 - `grill-me` / `/preset init` — still the right shape for **#69**, the last ungroomed ticket.
 
@@ -314,6 +377,8 @@ subscription.
 - [[pick-up]]
 - [[decisions]]
 - [[gotchas]]
+- [[2026-07-30-a-classified-verdict-rides-on-the-error-not-its-message]]
+- [[the-anthropic-door-does-not-use-the-executor-records]]
 - [[2026-07-29-antigravity-narrow-port-never-mint-opaque-tool-ids]]
 - [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
 - [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
