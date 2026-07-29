@@ -18,6 +18,7 @@ import {
 import { isCodexProvider, codexReasoning, codexModelsFrom } from './codex';
 import { isAnthropicProvider, anthropicModelsFrom } from './anthropic';
 import { isXaiProvider, xaiModelsFrom } from './xai';
+import { isAntigravityProvider, ANTIGRAVITY_MODELS } from './antigravity';
 
 // Re-export the peeled modules so `./catalog`'s surface stays complete — sibling modules and the @wisp/core
 // barrel keep importing these from here unchanged while the code now lives in the per-provider files
@@ -502,10 +503,13 @@ export const planZenToGoMigration = (
 
 // One rule for "which curated list backs an OAuth Provider" — shared by the Active-Provider panel state
 // and the per-row Routing-map lists. Keyed kinds answer undefined: they have a live /models route instead.
+// Antigravity takes no catalog argument: models.dev carries no Antigravity provider, so ANTIGRAVITY_MODELS
+// is the whole lineup rather than an offline fallback (#189).
 export const oauthModelOptions = (p: Provider, catalog?: ModelsDevCatalog): string[] | undefined =>
   isCodexProvider(p) ? codexModelsFrom(catalog)
     : isAnthropicProvider(p) ? anthropicModelsFrom(catalog)
     : isXaiProvider(p) ? xaiModelsFrom(catalog)
+    : isAntigravityProvider(p) ? ANTIGRAVITY_MODELS
     : undefined;
 
 // The effort levels the panel offers for a Provider. Mirrors the first-party /effort slider: every

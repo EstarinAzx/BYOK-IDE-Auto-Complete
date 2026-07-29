@@ -105,6 +105,12 @@ export const ANTIGRAVITY_HTTP_USER_AGENT = 'antigravity/hub/2.2.1 darwin/arm64';
 export const antigravityRequestId = (uuid: string): string => `agent-${uuid}`;
 export const antigravityImageRequestId = (nowMs: number, uuid: string): string => `image_gen/${nowMs}/${uuid}/12`;
 
+// The random session-id fallback the reference reaches for when no anchor text exists (#189 owns it — a
+// random value cannot live in a pure layer, so the randomness is INJECTED as a hex string). Same shape as
+// the content-derived id below: '-' + a positive 63-bit integer, so the upstream cannot tell them apart.
+export const antigravityFallbackSessionId = (randomHex: string): string =>
+  `-${(BigInt(`0x${randomHex.slice(0, 16) || '0'}`) & 0x7fffffffffffffffn).toString()}`;
+
 export type AntigravityEnvelopeOpts = { projectId?: string; requestId: string; sessionId?: string };
 
 // The content-derived session id: sha256 of the FIRST user turn's leading text, folded to a positive 63-bit
@@ -873,4 +879,237 @@ export const antigravityStreamEvents = async function* (upstream: AsyncIterable<
   }
 
   for (const call of pendingCalls) yield { type: 'tool_call', call };
+};
+
+// ----------------------------- The model lineup (#189) ----------------------------- //
+
+/*
+ * The thirteen models this backend serves, each with the per-model output cap applyAntigravityFamilyForks
+ * clamps against. Curated like ANTHROPIC_MODELS / XAI_MODELS / CODEX_MODELS — models.dev carries no
+ * Antigravity provider, so there is no dynamic catalog to prefer over this table.
+ *
+ * ⚠ ADVISORY, not a guarantee. #186 asked the upstream's own list and got 24 rows, several of which 400 on
+ * every request shape tried (gemini-3.1-pro-high among them, despite being flagged `recommended`). Listed
+ * here means "offered in the picker", never "known servable"; the correction path is choosing another
+ * model, not reshaping the request.
+ */
+export type AntigravityModelSpec = { id: string; maxCompletionTokens?: number; image?: boolean };
+
+export const ANTIGRAVITY_MODEL_SPECS: AntigravityModelSpec[] = [
+  { id: 'gemini-3.1-pro-low', maxCompletionTokens: 65_535 },
+  { id: 'gemini-pro-agent', maxCompletionTokens: 65_535 },
+  { id: 'gemini-3-flash', maxCompletionTokens: 65_536 },
+  { id: 'gemini-3-flash-agent', maxCompletionTokens: 65_536 },
+  { id: 'gemini-3.6-flash-high', maxCompletionTokens: 65_536 },
+  { id: 'gemini-3.5-flash-low', maxCompletionTokens: 65_535 },
+  { id: 'gemini-3.5-flash-extra-low', maxCompletionTokens: 65_535 },
+  { id: 'gemini-3.1-flash-lite', maxCompletionTokens: 65_535 },
+  { id: 'gemini-3.5-flash-lite', maxCompletionTokens: 65_535 },
+  { id: 'claude-opus-4-6-thinking', maxCompletionTokens: 64_000 },
+  { id: 'claude-sonnet-4-6', maxCompletionTokens: 64_000 },
+  { id: 'gpt-oss-120b-medium', maxCompletionTokens: 32_768 },
+  // Listed on purpose and refused on selection: neither door has an image-output channel (#189).
+  { id: 'gemini-3.1-flash-image', image: true },
+];
+
+// The ids alone — the shape oauthModelOptions and the pickers consume.
+export const ANTIGRAVITY_MODELS: string[] = ANTIGRAVITY_MODEL_SPECS.map((spec) => spec.id);
+
+// The model's output ceiling, fed to applyAntigravityFamilyForks so a request that carries a larger
+// maxOutputTokens is clamped rather than 400'd. undefined = no published cap for this row.
+export const antigravityMaxCompletionTokens = (model: string): number | undefined =>
+  ANTIGRAVITY_MODEL_SPECS.find((spec) => spec.id === model)?.maxCompletionTokens;
+
+// Image models are listed but unusable through either door — no image-output channel exists on the
+// OpenAI or the Anthropic dialect. Unlisted ids fall back to the same substring test the envelope builder
+// uses for requestType, so a new image row is refused before it can stream an empty answer.
+export const isAntigravityImageModel = (model: string): boolean =>
+  ANTIGRAVITY_MODEL_SPECS.find((spec) => spec.id === model)?.image ?? model.includes('image');
+
+// The refusal message, naming the reason. THE five-line feature to delete when a door grows an image
+// channel: this constant, the isAntigravityImageModel check in the executor record, and its test.
+export const antigravityImageRefusal = (model: string): string =>
+  `Antigravity model '${model}' returns images, and neither Bridge door has an image-output channel — pick a text model.`;
+
+// ----------------------------- Hosts, URLs, headers, the throw shape (#189) ----------------------------- //
+
+// The two hosts, daily first. #186 verified daily answering; production is the reference's fallback.
+export const ANTIGRAVITY_DAILY_HOST = 'https://daily-cloudcode-pa.googleapis.com';
+export const ANTIGRAVITY_PROD_HOST = 'https://cloudcode-pa.googleapis.com';
+
+/*
+ * The host chain for a turn. A baseUrl that is anything OTHER than the daily default is a deliberate
+ * override and pins the chain to itself — mirroring the reference, where a configured base_url replaces
+ * the fallback order rather than prefixing it. The catalog row's own baseUrl IS the daily host, so the
+ * ordinary case yields both.
+ *
+ * ⚠ NOT the bootstrap host. The project-id lookup is pinned to PRODUCTION (antigravityAuth.ts) and turns
+ * go to daily; that asymmetry is the reference's and its own test pins it the same way. Neither call is
+ * interchangeable with the other.
+ */
+export const antigravityHostChain = (baseUrl?: string): string[] => {
+  const configured = text(baseUrl).replace(/\/+$/, '');
+  return configured && configured !== ANTIGRAVITY_DAILY_HOST
+    ? [configured]
+    : [ANTIGRAVITY_DAILY_HOST, ANTIGRAVITY_PROD_HOST];
+};
+
+// The turn endpoint. Streaming adds the SSE query flag — without it the "stream" path answers one JSON
+// document and the mapper sees a single chunk.
+export const antigravityTurnUrl = (host: string, stream: boolean): string =>
+  `${host.replace(/\/+$/, '')}/v1internal:${stream ? 'streamGenerateContent?alt=sse' : 'generateContent'}`;
+
+// The mirrored request headers. The client version rides in ANTIGRAVITY_HTTP_USER_AGENT (pinned, shared
+// with the sign-in bootstrap) — the upstream gates on it, and there is no background poller keeping it
+// fresh: a version bump is an edit to that one constant.
+export const antigravityRequestHeaders = (accessToken: string): Record<string, string> => ({
+  'Content-Type': 'application/json',
+  'Authorization': `Bearer ${accessToken}`,
+  'User-Agent': ANTIGRAVITY_HTTP_USER_AGENT,
+});
+
+/*
+ * ⚠ THE THROW SHAPE IS A CONTRACT, not a style preference. routing.ts's isTransientProviderError regexes
+ * String(err) for "API error (429|500|502|503|504)"; a client throwing any other shape silently receives
+ * ZERO retries from the shared bounded retry, and nobody notices until a blip becomes a user-visible
+ * failure. A 429 whose body classifies carries antigravity429Error's reason instead of the raw body —
+ * still the same "API error 429:" prefix, so the predicate keeps matching.
+ */
+export const antigravityApiError = (status: number, body: string): Error => {
+  if (status === 429) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(body); } catch { parsed = undefined; }
+    const classified = antigravity429Error(parsed);
+    if (classified) return new Error(classified.message);
+  }
+  const detail = body.trim().slice(0, 500);
+  return new Error(`Antigravity API error ${status}${detail ? `: ${detail}` : ''}`);
+};
+
+// Whether a failed attempt should move to the NEXT host instead of surfacing. The reference's three
+// conditions, minus its backoff loop (#190 owns cooldown horizons): a transport error — the caller's catch
+// — a 429, and the capacity 503 the upstream words as "no capacity available".
+export const antigravityShouldTryNextHost = (status: number, body: string): boolean =>
+  status === 429 || (status === 503 && body.toLowerCase().includes('no capacity available'));
+
+// ----------------------------- Turns -> the Gemini payload (#189) ----------------------------- //
+
+// One conversation turn in the shape every Wisp client takes, so dispatch stays uniform across backends.
+export type AntigravityTurn = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  images?: { mimeType: string; dataBase64: string }[];
+  toolCalls?: { id: string; name: string; argsJson: string }[];
+  toolResults?: { callId: string; content: string }[];
+};
+
+// Tool arguments as the wire wants them: an object rides as-is, anything else (invalid JSON, a bare
+// scalar) is wrapped under `params` — the reference's fallback, and the only way a non-object survives a
+// field the upstream types as a struct.
+const parseToolArgs = (argsJson: string): Json => {
+  try {
+    const value = JSON.parse(argsJson || '{}');
+    return isObj(value) ? value : { params: value };
+  } catch {
+    return { params: argsJson };
+  }
+};
+
+/*
+ * Wisp turns -> the Gemini generateContent payload buildAntigravityEnvelope then wraps. Four mappings:
+ *   - a system turn becomes request.systemInstruction (role 'user' — this wire's convention);
+ *   - an assistant turn becomes role 'model', text part first then its functionCall parts;
+ *   - a user turn's tool RESULTS ride their own content AHEAD of its text, because
+ *     validateAntigravityFunctionCallPairing forbids call and response parts in one content and requires
+ *     the response content to directly follow the calls it answers;
+ *   - images become inlineData parts on the user content.
+ *
+ * The response content is emitted role 'user' and flipped to 'model' by
+ * normalizeAntigravityFunctionResponses — that quirk lives there, not duplicated here.
+ *
+ * THE BINDING RULE: ids are copied from the turn, never minted. A call that arrived without one stays
+ * without one (the field is omitted, not filled with a hash).
+ */
+export const buildAntigravityPayload = (args: { messages: AntigravityTurn[]; tools?: ToolSpec[] }): Json => {
+  const contents: Json[] = [];
+  const systemParts: Json[] = [];
+
+  // A functionResponse carries the NAME of the call it answers, but a turn's toolResults carry only the
+  // call id — so the names are collected up front. Leaving them 'unknown' costs a round trip through the
+  // upstream's own rejection.
+  const nameByCallId = new Map<string, string>();
+  for (const message of args.messages) {
+    for (const call of message.toolCalls ?? []) if (call.id) nameByCallId.set(call.id, call.name);
+  }
+
+  for (const message of args.messages) {
+    if (message.role === 'system') {
+      if (message.content) systemParts.push({ text: message.content });
+      continue;
+    }
+
+    if (message.role === 'assistant') {
+      const parts: Json[] = [];
+      if (message.content) parts.push({ text: message.content });
+      for (const call of message.toolCalls ?? []) {
+        parts.push({ functionCall: { ...(call.id ? { id: call.id } : {}), name: call.name, args: parseToolArgs(call.argsJson) } });
+      }
+      if (parts.length) contents.push({ role: 'model', parts });
+      continue;
+    }
+
+    const responseParts = (message.toolResults ?? []).map((result) => ({
+      functionResponse: {
+        ...(result.callId ? { id: result.callId } : {}),
+        name: nameByCallId.get(result.callId) ?? 'unknown',
+        response: { result: result.content },
+      },
+    }));
+    if (responseParts.length) contents.push({ role: 'user', parts: responseParts });
+
+    const parts: Json[] = [];
+    if (message.content) parts.push({ text: message.content });
+    for (const image of message.images ?? []) parts.push({ inlineData: { mimeType: image.mimeType, data: image.dataBase64 } });
+    if (parts.length) contents.push({ role: 'user', parts });
+  }
+
+  const request: Json = { contents };
+  if (systemParts.length) request.systemInstruction = { role: 'user', parts: systemParts };
+  const tools = buildAntigravityTools(args.tools ?? []);
+  if (tools.length) request.tools = tools;
+  return { request };
+};
+
+/*
+ * The whole request document, ready to POST: payload -> envelope -> family forks -> schema cleaning ->
+ * response normalization -> signature repair. Pure, so the caller injects the request id (and may pin a
+ * session id); every stage is #187's, this is only their ORDER.
+ *
+ * The order is load-bearing at two points: schema cleaning runs before the content passes so it never sees
+ * a repaired signature as schema data, and normalization runs before signature repair because repair keys
+ * off the FIRST functionCall of a model turn — which normalization can move.
+ */
+export const buildAntigravityRequestBody = (args: {
+  model: string;
+  messages: AntigravityTurn[];
+  tools?: ToolSpec[];
+  projectId?: string;
+  requestId: string;
+  sessionId?: string;
+  fallbackSessionId?: string;
+}): Json => {
+  const payload = buildAntigravityPayload({ messages: args.messages, tools: args.tools });
+  // The stable id must WIN over the fallback — it is upstream cache behaviour, not a nonce, so resolving
+  // it here (rather than passing the random value straight into the envelope, whose opts.sessionId is
+  // consulted FIRST) is what keeps the random value a genuine last resort.
+  const sessionId = text(args.sessionId) || antigravityStableSessionId(payload) || args.fallbackSessionId;
+  let envelope = buildAntigravityEnvelope(args.model, payload, {
+    projectId: args.projectId, requestId: args.requestId, sessionId,
+  });
+  envelope = applyAntigravityFamilyForks(envelope, args.model, antigravityMaxCompletionTokens(args.model));
+  if (antigravityNeedsSchemaSanitization(envelope)) {
+    envelope = sanitizeAntigravityRequestSchemas(envelope, usesAntigravitySchema(args.model));
+  }
+  envelope = normalizeAntigravityFunctionResponses(envelope);
+  return sanitizeAntigravityThoughtSignatures(envelope);
 };

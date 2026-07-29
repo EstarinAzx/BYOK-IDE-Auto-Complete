@@ -28,14 +28,16 @@ import type OpenAI from 'openai';
 import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
   toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, isCodexProvider, isAnthropicProvider, isXaiProvider,
+  isAntigravityProvider, isAntigravityImageModel, antigravityImageRefusal,
   anthropicCacheOutcome, anthropicDiagnosisStale, createAnthropicDiagnosisChain, createAnthropicCacheGrowthTracker,
   classifyCodexErrorMessage, buildStatus,
-  type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type EffortLevel, type BridgeUsage, type AnthropicCacheMissReason, type CodexErrorClass,
+  type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type AntigravityCreds, type EffortLevel, type BridgeUsage, type AnthropicCacheMissReason, type CodexErrorClass,
   type QuotaMeter, type WispStatus,
 } from './catalog';
 import { codexStream } from './codexClient';
 import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
 import { xaiStream } from './xaiClient';
+import { antigravityStream } from './antigravityClient';
 import {
   parseOpenAiChatRequest, buildModelsList, textChunk, toolCallChunk, finalChunk, sseLine, SSE_DONE, chatCompletionsUsage,
   type ChunkMeta, type BridgeChatRequest, type BridgeStreamEvent,
@@ -81,6 +83,12 @@ export type BridgeDeps = {
   // signed-out (a clean 401), never a crash — so this slice ships without touching extension.ts / the TUI.
   xaiSignedIn?: () => Promise<boolean>;
   xaiCreds?: () => Promise<XaiCreds | undefined>;
+  // Antigravity (#189) — the same "usable when signed in" shape, on a THIRD wire (Gemini generateContent
+  // inside a Cloud Code envelope). OPTIONAL for the same reason the xai pair is: a face that omits them
+  // makes the row read signed-out (a clean 401), never a crash. current() returns the bundle refreshed AND
+  // with the Cloud Code project bootstrapped, so the request path can assume projectId when it is gettable.
+  antigravitySignedIn?: () => Promise<boolean>;
+  antigravityCreds?: () => Promise<AntigravityCreds | undefined>;
   effort: () => EffortLevel;                                      // the panel's reasoning Effort — same value the chat path + Inquire use
   activeProviderId: () => string;                                // the panel's Active Provider — the default route for a non-id model (#b: Copilot sends the resolved model name)
   routingMap: () => RoutingMap;                                  // the panel's Routing map (#51) — read live per request so an edit applies to the next call
@@ -193,7 +201,8 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     const keyedPairs = await Promise.all(deps.providers.map(async (p) =>
       [p.id, isCodexProvider(p) ? await deps.codexSignedIn()
         : isAnthropicProvider(p) ? await deps.anthropicSignedIn()
-        : isXaiProvider(p) ? await (deps.xaiSignedIn?.() ?? false) : !!(await deps.keyFor(p))] as const));
+        : isXaiProvider(p) ? await (deps.xaiSignedIn?.() ?? false)
+        : isAntigravityProvider(p) ? await (deps.antigravitySignedIn?.() ?? false) : !!(await deps.keyFor(p))] as const));
     return buildChatModelInfos(deps.providers, {
       keyed: Object.fromEntries(keyedPairs),
       modelMap: deps.modelMap(),
@@ -414,6 +423,28 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
         const upstream = xaiStream({ creds, baseUrl, model, messages, effort: deps.effort(), tools: toCodexResponsesTools(parsed.tools), toolChoice: 'auto', signal });
         return { ok: true, events: mapOAuthStream(upstream) };
+      },
+    },
+    {
+      // Antigravity (#189) — the THIRD wire: a Gemini generateContent payload inside a Cloud Code envelope,
+      // reached by Google OAuth. Its stream already speaks BridgeStreamEvent (the mapper lives in the pure
+      // layer, unit-tested), so unlike the three above it needs no mapOAuthStream hop.
+      id: 'antigravity',
+      matches: isAntigravityProvider,
+      classify: () => undefined,
+      open: async ({ parsed, provider, model, baseUrl, signal }) => {
+        const creds = await deps.antigravityCreds?.();
+        if (!creds) return signedOut(provider);
+        // The image row is LISTED (it is real, and hiding it would make its absence a mystery) and refused
+        // here, before anything opens, naming the reason. Delete this check, the two constants it uses and
+        // its test the day a door grows an image-output channel.
+        if (isAntigravityImageModel(model)) return { ok: false, status: 400, message: antigravityImageRefusal(model) };
+        // bridge.ts lifts system OUT of the turns; buildAntigravityPayload folds a role:'system' message
+        // into request.systemInstruction, so re-attach it as the leading system message. Images ride along
+        // as inlineData parts — #186 confirmed this upstream accepts vision input.
+        const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
+        const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
+        return { ok: true, events: antigravityStream({ creds, baseUrl, model, messages, tools: parsed.tools, signal }) };
       },
     },
     keyedExecutor,
