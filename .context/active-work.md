@@ -7,8 +7,8 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-29 by Opus 5 (relay leg 7 — #172 landed; the relay chain STOPPED here)._
-_At commit: `49761d8` on main, pushed. **No leg 8 was spawned — see below.**_
+_Last updated: 2026-07-29 by Opus 5 (relay leg 7 — #172 landed; chain stopped, then restarted on #171)._
+_At commit: `49761d8` on main, pushed. **Leg 8 spawned on #171 after the block turned out to be stale.**_
 
 ## Current focus
 
@@ -17,11 +17,11 @@ _At commit: `49761d8` on main, pushed. **No leg 8 was spawned — see below.**_
 **#169** (API-key usage), **#170** (the Kimi Provider) and **#172** (the Codex default model). Seven of the
 harvest's nine tickets, every leg gate-green.
 
-**The chain is now blocked on one human decision.** The two remaining tickets are #171 and #173, and neither
-is agent-takeable: #171's `ready-for-agent` label contradicts its own body, and #173 (the release cut) is
-blocked by #171 and nothing else. Leg 7 set `stop: true` on the relay rather than spawn a leg that would
-re-derive the same block and burn a session. **Restarting the relay before #171 is resolved will just stop
-again.**
+**Leg 7 stopped the chain on an apparent block, then the block dissolved on inspection.** #171's body asked
+that its `ready-for-agent` label be withheld pending a response-header recon — but that recon had already been
+completed and written to the gotchas before the relay chain even started, and the note was simply never
+removed. Body corrected, criterion ticked, chain restarted. **Leg 8 is on #171; #173 unblocks behind it and
+ships the harvest.**
 
 **The verdict is still not in.** #165's last acceptance criterion — a bridged Codex session reading non-zero
 `/context` — needs a human with a restarted Bridge. **Seven** shipped tickets now ride on that check.
@@ -74,18 +74,19 @@ again.**
 | ~~169~~ | ~~API-key Providers report real token usage~~ | **DONE — `7b8d73d`** |
 | ~~170~~ | ~~Kimi Provider via device flow~~ | **DONE — `d656686`** |
 | ~~172~~ | ~~Codex Provider default model rejected by ChatGPT-account path~~ | **DONE — `49761d8`** |
-| 171 | Statusline: live context percentage + quota meters | ⚠️ **label contradicts its own body — human call** |
+| **171** | Statusline: live context percentage + quota meters | — (**next** — recon was already done, body corrected 2026-07-29) |
 | 173 | **Cut `wisp-router` 2.0.38** — ship the harvest | **171** (its only remaining blocker) |
 
 Also open, ungroomed: **#69** (copilot-wisp launcher), **#163** (502 observation — #165+#166 are its
 candidate fix; leave open until the live `/context` check confirms).
 
-- **⚠️ #171 carries a contradiction an agent must not resolve on its own.** It is *labelled*
-  `ready-for-agent`, but its body ends with: *"Deliberately left without the `ready-for-agent` label until
-  the recon resolves… an unattended agent should not be sent at a display it cannot source data for. Label
-  it once the header capture answers the question — or split the committed context-percentage half out and
-  label that alone."* Two of its three blockers (#165, #169) are done; the third is the response-header
-  recon, which is the ticket's own first step. **Legs 6 and 7 both honoured the body and skipped it.**
+- **#171 was never actually blocked — resolved 2026-07-29.** Its body carried a note asking that
+  `ready-for-agent` be withheld until the response-header recon resolved. **The recon had already been done**
+  and written into
+  [[both-oauth-providers-ship-quota-headers-codex-rejects-gpt-5-3-codex]] — all three required steps, with
+  the unblocking verdict that both Providers expose utilization headers. The label was applied; the note was
+  never removed. Legs 6 and 7 read the note, honoured it over the label, and skipped — correct on the
+  information they had. Body corrected, recon criterion ticked, audit trail in the ticket comment.
 - **#173 is genuinely blocked, not skipped.** Seven of its eight blockers are closed; #171 is the last.
 - **These edges are body text, not native links** — GraphQL `blockedBy` reports empty for all of them. See
   [[harvest-tickets-carry-body-text-blockers-not-native-links]] before trusting a dependency query. #171 is
@@ -93,22 +94,15 @@ candidate fix; leave open until the live `/context` check confirms).
 
 ## Pick up here
 
-**A human decides #171 first.** Three options, all legitimate:
-
-1. **Do the response-header recon** (the ticket's own first step) — then the ticket is genuinely
-   agent-ready and the relay can be restarted.
-2. **Split it** — carve the committed context-percentage half into its own ticket, label that
-   `ready-for-agent`, leave the quota-meter half unlabelled pending recon.
-3. **Drop the label** on #171 and let #173 ship the harvest without it.
-
-Options 2 and 3 both unblock #173 immediately. Once #171 is resolved either way, restart the relay with the
-command in [[pick-up]] and it will drain the rest.
+The relay is running — leg 8 takes **#171**, then #173 cuts the release. Do not re-plan; the tickets carry
+their own acceptance criteria. #171's quota-meter half is now fully specified in its body (header names,
+units, and the four consumption traps), so the work is plumbing a header snapshot through the Bridge, not
+discovery.
 
 ## Skills for next session
 
-- `/preset pick-up` — session door.
-- `/relay N=1 /preset ticket-loop` — exact command preserved in [[pick-up]]; **only restart it after #171
-  is resolved**, or it will stop again on the first firing.
+- `/preset pick-up` — session door (the baton points straight at the relay).
+- `/relay N=1 /preset ticket-loop` — exact command preserved in [[pick-up]].
 - `packages/tui:verify` — sandboxed CLI verification for TUI command-surface changes.
 
 ## Open questions

@@ -14,38 +14,43 @@ closed with **three of four acceptance criteria machine-checked**. The Codex Pro
 `gpt-5.6-sol` — an id the ChatGPT-account path actually accepts. Gate was **759/759** (758 → 759, exactly the
 one new test) and `bun run compile` clean in **both** packages.
 
-## The queue is empty for agents — the relay STOPPED itself
+## The one next task: ticket #171
 
-**No leg 8 was spawned, and that is deliberate.** `.claude/relay/ticket-loop.md` now carries `stop: true`.
+**The relay stopped after leg 7, then was restarted — #171 turned out not to be blocked at all.**
 
-Two tickets remain and **neither is agent-takeable**:
+`ready-for-agent` = **#171, #173** (2 left). **#171 is next**, then #173 unblocks behind it and the harvest
+ships.
 
-- **#171** — labelled `ready-for-agent`, but its own body says it should not be. See the landmine below.
-- **#173** (the release cut) — genuinely blocked. Seven of its eight blockers are closed; **#171 is the
-  last one.**
+**The recon #171 waited on was already done before the relay chain even started.** Its body carried a note
+asking that the label be withheld "until the recon resolves"; the recon was completed and written into
+`.context/gotchas/both-oauth-providers-ship-quota-headers-codex-rejects-gpt-5-3-codex.md`, the label was
+applied, and **the note was never removed**. Legs 6 and 7 both read the note, honoured it over the label, and
+skipped — correct on the information they had. The body has now been corrected and the recon criterion ticked
+(see the 2026-07-29 comment on #171 for the full account).
 
-So the chain is blocked on exactly one thing, and it is a human's call. Spawning another leg would only
-re-derive this same state and burn a session.
-
-## The one next task: decide what #171 is
-
-Three legitimate options — pick one:
-
-1. **Do the response-header recon** (it is the ticket's own first step). Then #171 is genuinely agent-ready
-   and the whole chain unblocks.
-2. **Split it** — carve the committed context-percentage half into its own ticket and label *that*
-   `ready-for-agent`; leave the quota-meter half unlabelled pending recon.
-3. **Drop the `ready-for-agent` label** on #171 and let #173 ship the harvest without it.
-
-Options 2 and 3 unblock #173 immediately. Option 1 unblocks everything.
-
-**Once #171 is resolved, restart the relay** — it will drain the rest:
+The relay chain is live again (`.claude/relay/ticket-loop.md`, `stop: false`, leg 8), so a leg should already
+be working this. If no leg is running, re-issue:
 
 ```
 /relay N=1 /preset ticket-loop -> after the ticket's gate (tests green + landed, or ready-for-human relabel), run /preset wrap-up gateless: eyeball gate auto-go (unattended), /context-update, rewrite .context/pick-up.md to the next unblocked ready-for-agent ticket or 'queue empty', commit .context on main — never the ticket branch. At leg boot also read .context/pick-up.md.
 ```
 
-Restarting it **before** #171 is resolved will just stop again on the first firing.
+## Where #171's code goes (read this before opening a file)
+
+Two halves, both now confirmed sourceable.
+
+- **Context percentage — arithmetic on what already exists.** Every Provider reports real usage as of #165 +
+  #169, and `codexModelCaps` holds the per-model window. **It must render above 100% rather than clamping** —
+  a 122% reading is a conversation already doomed upstream, and showing it before the request fails is the
+  entire point of the ticket.
+- **Quota meters — the real work is plumbing, not discovery.** Both Providers ship utilization headers
+  (Anthropic `anthropic-ratelimit-unified-*`, Codex `x-codex-*`), but **Wisp currently discards response
+  headers**. The job is carrying a header snapshot through the Bridge to where the statusline can read it.
+- The statusline script itself is `plugins/slot/statusline/wisp-statusline.js` (the `wisp-slot` plugin).
+- **Consumption traps are recorded in the gotcha and inlined in the ticket body** — units differ (fraction vs
+  integer percent), window meaning differs (named vs primary/secondary + `*-window-minutes`), Python-style
+  `True`/`False` booleans mixed with lowercase `true`, and the keyword-regex trap that made the recon's own
+  first pass miss `x-codex-primary-used-percent`.
 
 ## What #172 actually changed (for #173's release notes)
 
@@ -60,11 +65,12 @@ Restarting it **before** #171 is resolved will just stop again on the first firi
 
 ## Landmines
 
-- **⚠️ #171's label lies.** Verbatim from its body: *"Deliberately left without the `ready-for-agent` label
-  until the recon resolves. Half of this ticket is not yet known to be possible, and an unattended agent
-  should not be sent at a display it cannot source data for."* **Legs 6 and 7 both honoured the body and
-  skipped it.** Do not let a future leg silently take it — this is the sharper cousin of
-  [[harvest-tickets-carry-body-text-blockers-not-native-links]]: *the label can lie too.*
+- **⚠️ RESOLVED — but the lesson inverted.** #171's body said the `ready-for-agent` label should be withheld
+  pending recon; legs 6 and 7 honoured that and skipped. The recon had **already been done** — so the label
+  was right and *the prose* was stale. The trap is not "the label can lie" but **either side can go stale,
+  and a body note is not automatically the more current one.** When they disagree, check the underlying
+  artifact (here: did the gotcha entry exist?) rather than picking whichever reads louder. Sharper cousin of
+  [[harvest-tickets-carry-body-text-blockers-not-native-links]].
 - **A model list is not an accepted list.** `CODEX_MODELS` answers "which Codex ids exist"; the
   ChatGPT-account path separately answers "which a subscription may send", and it is **narrower**. The new
   test whitelists **live-probed** accepted ids (`gpt-5.6-sol`, `gpt-5.4`) rather than pattern-matching the
