@@ -11,42 +11,44 @@ Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the 
 
 **Last session (2026-07-30, relay leg 6): #192 CUT, NOT PUBLISHED.** PR **#198** (`c49532c`) bumps the TUI
 package to **2.0.41** and writes its changelog. Gate: **1009/1009 vitest**, `bun run compile` clean in **both**
-packages. #192 relabelled **`ready-for-human`**; the chain stopped rather than spawning leg 7.
+packages.
 
-## Queue: `queue empty`
+**Leg 6 held at the tag push; the maintainer then waved the hold off. #192 is `ready-for-agent` again and
+relay leg 7 is spawned to publish.**
 
-**No `ready-for-agent` ticket exists.** `/relay N=1 /preset ticket-loop` will find nothing and stop
-immediately — that is correct, not a failure. The next move is a human one.
+## Queue: #192 — the release. **Publishing is AUTHORIZED.**
 
-## The next move is yours: publish, or wave the hold off
+**⚠ DO NOT RESTART #192. PR #198 already exists and is yours — RESUME it.** The ticket-loop idempotency guard
+(step 4) fires on branch `ticket/192-antigravity-release`; the correct response is **resume**, *not* "comment
+on the collision and relabel `ready-for-human`". Relabelling here stalls the release for nothing.
 
-Spec #185 is complete except for one act, and that act cannot be undone.
+The hold that stopped leg 6 was a judgement call carried from leg 5, not something #192 asks for. It has been
+lifted explicitly. **Merging PR #198 and pushing the `v2.0.41` tag — which publishes publicly and permanently
+to npm — is expected of this leg.** #192's newest comment (`issuecomment-5117931020`) carries the same
+instructions.
 
-```
-gh pr merge 198 --squash --repo EstarinAzx/Wisp-Router
-git checkout main && git pull && git tag v2.0.41 && git push origin v2.0.41
-```
+### Order of operations
 
-**Why an agent stopped here.** An npm version can never be republished, and it is public. Every other ticket in
-this spec had a worst case of "a merge to your own repo." This one does not.
+1. **Merge** — `gh pr merge 198 --squash --repo EstarinAzx/Wisp-Router`. Then re-run the gate on merged
+   `main`: `bun run test` **and** `bun run compile` in **both** packages (root + `packages/tui`).
+2. **Tag** — `git checkout main && git pull && git tag v2.0.41 && git push origin v2.0.41`. The tag must equal
+   `packages/tui/package.json` **exactly**; `release.yml` verifies it and fails loud otherwise.
+3. **Watch `release.yml`** across **all four** runners (win32-x64, darwin-arm64, darwin-x64, linux-x64).
+   Platform packages publish **best-effort** — npm's spam filter has 403'd them before, and the shim falls
+   back to the GitHub release download. Only the **thin shell** must land.
+4. **Verify past the registry read** — install into a scratch dir and **execute the bins**. A read alone
+   passes on a broken build.
+5. **Install 2.0.40 as a control and confirm it FAILS** the check 2.0.41 passes
+   ([[verifying-a-fix-release-needs-the-previous-version-as-a-control]]). Suggested credential-free control:
+   aim a family route at an Antigravity target — that provider id does not exist on 2.0.40. Any control works
+   so long as the **old version fails**.
+6. **npm 404 on a version its own job just published = propagation lag.** Check the job log + dist-tags, then
+   retry. Do **not** re-tag.
+7. **Close #192 and spec #185.** Clear #192's `ready-for-agent` label by hand — a `Closes #N` merge closes but
+   does not relabel, and the next frontier query would re-pick it.
+8. **Label #197 `ready-for-agent`** — the last act. It is unlabelled on purpose, blocked on this publish.
 
-**Why the PR is also unmerged.** A release commit sitting on `main` untagged is a trap for the next agent: it
-would see `2.0.41` in `package.json`, `2.0.40` on npm, and reasonably conclude a tag push is owed. Keeping it
-on the branch keeps `main` honest about what is published.
-
-**This is a judgement call carried from leg 5, not something #192 asks for.** If you would rather the chain
-just shipped it, say so in one word and it will.
-
-### After the tag — #192's remaining criteria
-
-- [ ] `release.yml` green across **all four** runners (win32-x64, darwin-arm64, darwin-x64, linux-x64)
-- [ ] Published version verified **past the registry read** — real install into a scratch dir, **bins
-      executed**. A read alone passes on a broken build
-- [ ] **2.0.40 installed as a control and FAILING** the check 2.0.41 passes
-      ([[verifying-a-fix-release-needs-the-previous-version-as-a-control]])
-- [ ] npm 404 on a version its own job just published = propagation lag; check the job log + dist-tags, retry
-- [ ] **Close spec #185**
-- [ ] **Label #197 `ready-for-agent`** — that re-arms the chain for the extension face
+Then the queue is dry → stop, no leg 8.
 
 ## What #192 found: the ticket's own premise was wrong
 

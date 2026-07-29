@@ -416,25 +416,17 @@ Verified constants are a comment on #188; fixtures at `D:\scratch\antigravity-sp
 
 ## Pick up here
 
-**The agent queue is DRY. The next move is a human one: publish 2.0.41, or wave the hold off.**
+**The hold is LIFTED. #192 is `ready-for-agent` and relay leg 7 is publishing 2.0.41.**
 
-Everything reversible in spec #185 is done. What is left is one irreversible act, and it is deliberately not
-an agent's to take:
+The maintainer waved off leg 6's hold on 2026-07-30. **Merging PR #198 and pushing the `v2.0.41` tag is
+authorized** — that publishes publicly and permanently to npm, and it is expected of leg 7, not an overstep.
 
-```
-gh pr merge 198 --squash --repo EstarinAzx/Wisp-Router
-git checkout main && git pull && git tag v2.0.41 && git push origin v2.0.41
-```
+**⚠ Leg 7 must RESUME PR #198, not restart #192.** The ticket-loop idempotency guard fires on branch
+`ticket/192-antigravity-release`; the right answer is resume, not "collision → `ready-for-human`".
 
-Then watch `release.yml` across all four runners, and finish #192's remaining criteria: install the published
-version into a scratch dir and **run the bins** (a registry read alone passes on a broken build), install
-**2.0.40 as a control** and confirm it **fails** a check 2.0.41 passes, treat an npm 404 on a just-published
-version as propagation lag (check the job log + dist-tags, retry). Then **close spec #185**, and label **#197**
-`ready-for-agent` so a later leg can cut the vsix.
-
-**If you would rather the chain just shipped it, say so** — the hold is a judgement call carried from leg 5,
-not something #192 asks for. Re-running `/relay N=1 /preset ticket-loop` alone will **not** resume: #192 is
-`ready-for-human`, so the frontier is empty until a label moves.
+Order: merge → re-gate on merged main → tag → watch `release.yml` on all four runners → verify **past the
+registry read** with the bins executed → **2.0.40 as a failing control** → close #192 + spec #185 (clearing
+#192's label by hand) → label **#197** `ready-for-agent` last.
 
 One loose end that is **not** blocking: re-run a Claude-model turn after `2026-07-30T20:55:48Z` to close
 #189's last acceptance criterion. As of `2026-07-29T12:00Z` that quota is still exhausted — which is what let
