@@ -29,7 +29,8 @@ import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
   toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, isCodexProvider, isAnthropicProvider, isXaiProvider,
   anthropicCacheOutcome, anthropicDiagnosisStale, createAnthropicDiagnosisChain, createAnthropicCacheGrowthTracker,
-  type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type EffortLevel, type BridgeUsage, type AnthropicCacheMissReason,
+  classifyCodexErrorMessage,
+  type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type EffortLevel, type BridgeUsage, type AnthropicCacheMissReason, type CodexErrorClass,
 } from './catalog';
 import { codexStream } from './codexClient';
 import { anthropicStream, type AnthropicStreamEvent } from './anthropicClient';
@@ -125,7 +126,28 @@ const sendJson = (res: http.ServerResponse, status: number, body: unknown): void
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
 };
-const sendError = (res: http.ServerResponse, status: number, message: string): void => sendJson(res, status, { error: { message } });
+// #166: `type` rides the body when the failure was classified, so a client reading the error object sees the
+// condition and not just prose. Omitted otherwise — every pre-existing caller keeps its exact shape.
+const sendError = (res: http.ServerResponse, status: number, message: string, type?: string): void =>
+  sendJson(res, status, { error: { ...(type ? { type } : {}), message } });
+
+// #166: pull the FIRST event out of a provider stream before a door commits its 200 SSE head. The provider
+// streams are async generators, so calling one performs NO IO — the upstream request, and any 4xx it throws,
+// happens on the first pull. Writing the head first therefore locked every pre-stream failure into a 200 with
+// an empty body, leaving no status to answer with; priming moves the throw ahead of the head, which is what
+// makes a classified status reachable at all. The pulled event is re-yielded first, so the consumer sees the
+// identical sequence it saw before.
+const primeStream = async <T>(source: AsyncIterable<T>): Promise<AsyncIterable<T>> => {
+  const it = source[Symbol.asyncIterator]();
+  const first = await it.next();
+  return {
+    [Symbol.asyncIterator]: async function* () {
+      if (first.done) return;
+      yield first.value;
+      yield* { [Symbol.asyncIterator]: () => it };
+    },
+  };
+};
 
 // The non-streaming reply envelope. bridge.ts is deliberately streaming-only (it emits SSE chunks), so when a
 // client asks stream:false this glue assembles the drained stream into one OpenAI chat.completion object.
@@ -168,6 +190,18 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   // routes until its plan window resets, so a dead codex doesn't eat every request (and the user doesn't
   // babysit the Routing map). One instance per Bridge host, like the diagnosis chain below.
   const cooldowns = createProviderCooldowns();
+
+  // #166: classify a failed Codex turn into the condition the backend actually reported, so the door answers
+  // with a status the client can act on — an exceeded window as a 400 (Claude Code compacts) instead of a 502
+  // (Claude Code retries a request that cannot succeed). The log line names the classified code so the four
+  // cases are tellable apart in operation. A non-Codex Provider, or a body matching none of the conditions →
+  // undefined, and the caller keeps its 502: an unknown failure must stay a gateway error.
+  const classifyProviderError = (provider: Provider, err: unknown): CodexErrorClass | undefined => {
+    if (!isCodexProvider(provider)) return undefined;
+    const classified = classifyCodexErrorMessage(String(err));
+    if (classified) deps.log(`[bridge] ${provider.id} failure classified code=${classified.code} -> HTTP ${classified.status} (#166)`);
+    return classified;
+  };
 
   // Record a provider error against the cooldown store; a recognized usage-limit 429 logs the horizon once.
   const noteProviderError = (providerId: string, err: unknown): void => {
@@ -237,7 +271,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     // chat-completions path there are no fragments to reduce — collect the calls and emit each as one chunk.
     const calls: AssembledToolCall[] = [];
     try {
-      const upstream = codexStream({ creds, baseUrl, model: modelId, messages, effort: standardEffortToCodex(deps.effort()), tools, toolChoice: 'auto', signal: controller.signal });
+      // #166: primed, so an upstream rejection throws BEFORE the 200 head below and the catch still has a
+      // status to answer with.
+      const upstream = await primeStream(codexStream({ creds, baseUrl, model: modelId, messages, effort: standardEffortToCodex(deps.effort()), tools, toolChoice: 'auto', signal: controller.signal }));
       if (parsed.stream) {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
         for await (const ev of upstream) {
@@ -266,7 +302,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       deps.log(`[bridge] error ${provider.id} ${String(err)}`);
       noteProviderError(provider.id, err);
       // A signed-out / refresh-failed Codex throws here — a clean 502 (or end if the SSE head is already out).
-      if (res.headersSent) res.end(); else sendError(res, 502, `provider request failed: ${String(err)}`);
+      // #166: a classified failure answers with its own status instead, so the client is told what to do.
+      const classified = classifyProviderError(provider, err);
+      if (res.headersSent) res.end();
+      else if (classified) sendError(res, classified.status, classified.message, classified.type);
+      else sendError(res, 502, `provider request failed: ${String(err)}`);
     }
   };
 
@@ -681,6 +721,10 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         return;
       }
 
+      // #166: prime BEFORE the head — this door is Claude Code's route, so it is where a pre-stream rejection
+      // used to become a 200 with an empty body (or, once headers were out, an unclassifiable 502).
+      const primed = await primeStream(eventsSource);
+
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       const enc = createAnthropicSseEncoder(meta);
       // message_start is deferred until the first upstream usage event (the Anthropic wire's first frame,
@@ -691,7 +735,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       let lastUsage: BridgeUsage | undefined;               // message_delta carries the final cumulative counts
       let lastDiagnosis: { messageId: string; missReason?: AnthropicCacheMissReason } | undefined; // #156: message_start's server diagnosis
       const ensureStarted = (): void => { if (!started) { res.write(enc.start()); started = true; } };
-      for await (const ev of eventsSource) {
+      for await (const ev of primed) {
         if (ev.type === 'usage') { lastUsage = ev.usage; enc.setUsage(ev.usage); ensureStarted(); continue; }
         // #156: door-internal like usage — never a wire frame (the door's synthesized message_start doesn't
         // carry diagnostics; inbound passthrough is deliberately not built, same call as the betas).
@@ -746,7 +790,11 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       noteProviderError(provider.id, err);
       // Head already out (mid-stream failure) → write a proper Anthropic `error` event so Claude Code shows the
       // real message instead of "empty or malformed"; otherwise a clean 502.
+      // #166: this door IS Claude Code's route, so it is where a wrong 502 caused the retry loop — a classified
+      // failure answers with its own status. Mid-stream the head is gone, so the frame stays as it was.
+      const classified = classifyProviderError(provider, err);
       if (res.headersSent) { res.write(anthropicErrorFrame(String(err))); res.end(); }
+      else if (classified) sendError(res, classified.status, classified.message, classified.type);
       else sendError(res, 502, `provider request failed: ${String(err)}`);
     }
   };

@@ -267,6 +267,91 @@ export const responsesUsage = (response: any): BridgeUsage | undefined => {
   };
 };
 
+// ----------------------------- Codex error classification (#166) ----------------------------- //
+
+// Every failed Codex turn used to leave the Bridge as `502 provider request failed`, whatever went wrong.
+// That is the wrong instruction: a 502 says "the server broke, retry", so Claude Code retried requests that
+// could never succeed — most damagingly an over-window conversation, which only grows on the retry. These
+// four conditions are the ones the Codex backend actually reports, and three of them are things the client
+// can act on once it is told.
+//
+// The pure mirror of parseUsageLimitReset in routing.ts: a matcher over what the backend said, unit-testable
+// without a socket. The Bridge does the status mapping.
+export type CodexErrorClass = {
+  status: number;   // the HTTP status the door answers with
+  code: string;     // stable + greppable — the Bridge log names it, so the four cases are tellable apart
+  type: string;     // the error type written onto the wire body
+  message: string;  // what the client is actually shown
+};
+
+// The backend expresses one condition several ways — an upstream `code`, an error `type`, or only prose in
+// the message — so each condition matches on all three, lowercased substrings against the raw body. Order
+// matters only in that the first match wins; the four are mutually exclusive in practice.
+const CODEX_ERROR_CONDITIONS: { match: string[]; result: CodexErrorClass }[] = [
+  {
+    // codes · prose. The recorded 502 wall (#163) is the third form: prose only, no code.
+    match: ['context_length_exceeded', 'context_window_exceeded',
+      'exceeds the context window', 'context window exceeded', 'maximum context length', 'context length exceeded'],
+    result: {
+      status: 400, code: 'context_length_exceeded', type: 'invalid_request_error',
+      message: 'The conversation exceeds this Codex model\'s context window. Compact or clear the conversation and retry.',
+    },
+  },
+  {
+    // codes · prose. Both vocabularies ride this wire — the API says "reasoning", the client says "thinking".
+    match: ['invalid_thinking_signature', 'invalid_reasoning_signature',
+      'thinking signature', 'reasoning signature'],
+    result: {
+      status: 400, code: 'invalid_thinking_signature', type: 'invalid_request_error',
+      message: 'Codex rejected a replayed thinking signature. Start a fresh turn without the prior reasoning block.',
+    },
+  },
+  {
+    // code · prose. Deliberately NOT matching the bare `previous_response_id` param name: too loose a needle
+    // here would relabel an unrelated failure, and an unknown failure must stay a gateway error.
+    match: ['previous_response_not_found', 'previous response not found', 'previous response with id'],
+    result: {
+      status: 400, code: 'previous_response_not_found', type: 'invalid_request_error',
+      message: 'Codex no longer has the previous response for this turn. Retry the turn fresh.',
+    },
+  },
+  {
+    // codes · type · prose — including the two local guards codexClient throws before any request goes out.
+    match: ['invalid_api_key', 'invalid_token', 'token_expired', 'account_deactivated',
+      'authentication_error', 'invalid_authentication',
+      'not signed in', 'account id missing', 'invalid api key', 'missing bearer', 'token has expired'],
+    result: {
+      status: 401, code: 'auth_unavailable', type: 'authentication_error',
+      message: 'Codex credentials are unavailable or expired. Sign in to Codex again.',
+    },
+  },
+];
+
+// The auth condition is also reachable by status alone — a 401 with an opaque (or empty) body is still an
+// authentication failure. 403 is deliberately NOT included: the ChatGPT path also 403s model rejections, and
+// telling the user to sign in again for those would be a confidently wrong diagnosis.
+const CODEX_AUTH = CODEX_ERROR_CONDITIONS[CODEX_ERROR_CONDITIONS.length - 1].result;
+
+// Classify one failed Codex round-trip. Anything unmatched returns undefined and the caller keeps its
+// current behaviour — that fallthrough is the load-bearing part: a real outage must never hide behind a
+// client-error status the client would stop retrying.
+export const classifyCodexError = (status: number, body: string): CodexErrorClass | undefined => {
+  const hay = body.toLowerCase();
+  const matched = CODEX_ERROR_CONDITIONS.find((c) => c.match.some((needle) => hay.includes(needle)));
+  if (matched) return matched.result;
+  return status === 401 ? CODEX_AUTH : undefined;
+};
+
+// The Bridge never holds the Response — only the Error the client threw, the same position
+// parseUsageLimitReset works from. codexResponsesRequest formats `Codex API error <status>: <body>`, so
+// recover the pair from it. A throw carrying no status (a response.failed frame, a local sign-in guard)
+// still classifies on its prose — otherwise the commonest auth failure would be the one case left at 502.
+const CODEX_API_ERROR = /Codex API error (\d{3})(?::\s*([\s\S]*))?/;
+export const classifyCodexErrorMessage = (message: string): CodexErrorClass | undefined => {
+  const m = CODEX_API_ERROR.exec(message);
+  return m ? classifyCodexError(Number(m[1]), m[2] ?? '') : classifyCodexError(0, message);
+};
+
 // Reassemble streamed Responses function-call events into whole tool calls — the Responses analogue of
 // assembleToolCalls. A call is announced by response.output_item.added (carrying id/call_id/name + maybe
 // an initial args fragment); its arguments then stream as response.function_call_arguments.delta events

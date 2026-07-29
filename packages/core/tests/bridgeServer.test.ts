@@ -128,3 +128,77 @@ describe('Bridge — Grok dispatch (#95)', () => {
     });
   });
 });
+
+// #166: a failed Codex turn used to leave either door as `502 provider request failed`, whatever went wrong.
+// A 502 tells Claude Code "the server broke, retry" — so it retried an oversized conversation that could only
+// get bigger. These assert the door answers with the classified status instead, on BOTH doors, and that an
+// unrecognised failure still stays a 502.
+describe('Bridge — classified Codex failures (#166)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const CODEX: Provider = { id: 'codex', label: 'Codex', baseUrl: 'https://chatgpt.com/backend-api/codex', defaultModel: 'gpt-5.4', apiKeyEnv: '', kind: 'codex' };
+
+  // Deps whose only usable Provider is Codex, signed in with the account id the Responses request requires.
+  const codexDeps = (over: Partial<BridgeDeps> = {}): BridgeDeps => makeDeps({
+    providers: [CODEX],
+    codexSignedIn: async () => true,
+    codexCreds: async () => ({ accessToken: 'tok', accountId: 'acct' }),
+    xaiSignedIn: async () => false,
+    xaiCreds: async () => undefined,
+    activeProviderId: () => 'codex',
+    ...over,
+  });
+
+  // The recorded failure verbatim (#163): the backend rejects on its own window with a 400 naming the cause.
+  const windowRejection = () => new Response(
+    '{"error":{"message":"Your input exceeds the context window of this model.","type":"invalid_request_error","code":"context_length_exceeded"}}',
+    { status: 400 },
+  );
+
+  // OpenAI door — the exceeded window comes back as a client error naming the cause, not a gateway error.
+  it('answers an exceeded context window with 400 on the OpenAI door', async () => {
+    vi.stubGlobal('fetch', async () => windowRejection());
+    await runServer(codexDeps(), async (port) => {
+      const { status, body } = await post(port, '/v1/chat/completions', { model: 'codex', stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(400);
+      expect(JSON.parse(body).error.type).toBe('invalid_request_error');
+    });
+  });
+
+  // Anthropic door — THIS is Claude Code's route, and the one where a 502 caused the retry loop.
+  it('answers an exceeded context window with 400 on the Anthropic door', async () => {
+    vi.stubGlobal('fetch', async () => windowRejection());
+    await runServer(codexDeps(), async (port) => {
+      const { status } = await post(port, '/v1/messages', { model: 'codex', max_tokens: 100, stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(400);
+    });
+  });
+
+  // An expired / revoked credential is an authentication error, so the user is told to sign in again.
+  it('answers an unavailable credential with 401', async () => {
+    vi.stubGlobal('fetch', async () => new Response('{"error":{"message":"Missing bearer token.","type":"authentication_error"}}', { status: 401 }));
+    await runServer(codexDeps(), async (port) => {
+      const { status } = await post(port, '/v1/messages', { model: 'codex', max_tokens: 100, stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(401);
+    });
+  });
+
+  // The safety property, end to end: a genuine upstream outage must NOT be relabelled a client error.
+  it('keeps 502 for an unrecognised upstream failure', async () => {
+    vi.stubGlobal('fetch', async () => new Response('{"error":{"message":"internal server error"}}', { status: 500 }));
+    await runServer(codexDeps(), async (port) => {
+      const { status } = await post(port, '/v1/chat/completions', { model: 'codex', stream: true, messages: [{ role: 'user', content: 'hi' }] });
+      expect(status).toBe(502);
+    });
+  });
+
+  // The operator's handle on the four cases: the Bridge log names the classified code.
+  it('logs the classified code', async () => {
+    vi.stubGlobal('fetch', async () => windowRejection());
+    const lines: string[] = [];
+    await runServer(codexDeps({ log: (m) => lines.push(m) }), async (port) => {
+      await post(port, '/v1/chat/completions', { model: 'codex', stream: true, messages: [{ role: 'user', content: 'hi' }] });
+    });
+    expect(lines.some((l) => l.includes('context_length_exceeded'))).toBe(true);
+  });
+});

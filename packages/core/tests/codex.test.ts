@@ -5,6 +5,7 @@ import {
   isCodexProvider, isCodexSignedIn,
   buildCodexResponsesBody, reduceResponsesTextEvents, extractResponsesText, parseSseBlock,
   responsesIncompleteReason, responsesUsage,
+  classifyCodexError, classifyCodexErrorMessage,
   decodeJwtPayload, parseChatgptAccountId, shouldRefreshCodexToken,
   parseCodexAuthJson, codexReasoning, standardEffortToCodex, codexModelCaps, CODEX_MODELS, codexModelsFrom,
   toCodexResponsesTools, reduceResponsesToolCalls,
@@ -717,6 +718,85 @@ describe('responsesUsage (#165)', () => {
   // A non-numeric total is not usable data — treat it as absent rather than coerce it to NaN.
   it('returns undefined when the token totals are not numbers', () => {
     expect(responsesUsage({ usage: { input_tokens: 'lots', output_tokens: 3 } })).toBeUndefined();
+  });
+});
+
+// #166: the four conditions the Codex backend actually reports, recognised in every wire form it uses for
+// them. The backend says the same thing three ways — an upstream `code`, an error `type`, or only prose in
+// the message — so each condition is exercised in each form. The unmatched case is the load-bearing one: a
+// body matching nothing must classify as nothing, or a real outage hides behind a confidently wrong status.
+describe('classifyCodexError (#166)', () => {
+  // --- Context too large: the condition behind the recorded 502 wall (#163). 400 so the client compacts. ---
+  it('recognises an exceeded context window by upstream code, by error type and by message prose', () => {
+    const byCode = classifyCodexError(400, '{"error":{"code":"context_length_exceeded","message":"nope"}}');
+    const byProse = classifyCodexError(400, '{"error":{"message":"Your input exceeds the context window of this model."}}');
+    const byAltProse = classifyCodexError(400, '{"error":{"message":"This model\'s maximum context length is 400000 tokens."}}');
+    for (const c of [byCode, byProse, byAltProse]) {
+      expect(c?.status).toBe(400);
+      expect(c?.code).toBe('context_length_exceeded');
+      expect(c?.type).toBe('invalid_request_error');
+    }
+  });
+
+  // --- Invalid thinking signature: diagnosable rather than mysterious. ---
+  it('recognises a rejected thinking signature by upstream code and by message prose', () => {
+    expect(classifyCodexError(400, '{"error":{"code":"invalid_reasoning_signature"}}')?.code).toBe('invalid_thinking_signature');
+    expect(classifyCodexError(400, '{"error":{"message":"Invalid thinking signature for item rs_1."}}')?.code).toBe('invalid_thinking_signature');
+    expect(classifyCodexError(400, '{"error":{"message":"The reasoning signature could not be verified."}}')?.status).toBe(400);
+  });
+
+  // --- Previous response not found: the turn can be retried fresh. ---
+  it('recognises a missing previous response by upstream code and by message prose', () => {
+    expect(classifyCodexError(400, '{"error":{"code":"previous_response_not_found"}}')?.code).toBe('previous_response_not_found');
+    expect(classifyCodexError(404, '{"error":{"message":"Previous response with id \'resp_abc\' not found."}}')?.code).toBe('previous_response_not_found');
+    expect(classifyCodexError(400, '{"error":{"message":"Previous response with id \'resp_abc\' not found."}}')?.status).toBe(400);
+  });
+
+  // --- Auth unavailable: told to sign in again, not shown a gateway failure. ---
+  it('recognises unavailable auth by status, by upstream code, by error type and by message prose', () => {
+    expect(classifyCodexError(401, '')?.code).toBe('auth_unavailable');
+    expect(classifyCodexError(400, '{"error":{"code":"invalid_api_key"}}')?.code).toBe('auth_unavailable');
+    expect(classifyCodexError(400, '{"error":{"type":"authentication_error"}}')?.code).toBe('auth_unavailable');
+    expect(classifyCodexError(0, 'Not signed in to Codex.')?.code).toBe('auth_unavailable');
+    expect(classifyCodexError(401, '')?.status).toBe(401);
+    expect(classifyCodexError(401, '')?.type).toBe('authentication_error');
+  });
+
+  // The whole safety property: an unrecognised failure returns NOTHING, so the caller keeps its 502 and a
+  // real upstream outage is never relabelled as a client error the client would stop retrying.
+  it('returns undefined for a body matching none of the four conditions', () => {
+    expect(classifyCodexError(500, '{"error":{"message":"internal server error"}}')).toBeUndefined();
+    expect(classifyCodexError(502, 'Bad Gateway')).toBeUndefined();
+    expect(classifyCodexError(429, '{"error":{"type":"usage_limit_reached","resets_in_seconds":551032}}')).toBeUndefined();
+    expect(classifyCodexError(0, '')).toBeUndefined();
+  });
+
+  // Every condition carries a non-empty human message — it is what the client is actually shown.
+  it('always carries a non-empty message', () => {
+    expect(classifyCodexError(400, '{"error":{"code":"context_length_exceeded"}}')?.message).toBeTruthy();
+  });
+});
+
+// The Bridge never holds the Response — only the Error the client threw, exactly the position
+// parseUsageLimitReset works from. This is the adapter between the two.
+describe('classifyCodexErrorMessage (#166)', () => {
+  // The thrown form codexClient produces: `Codex API error <status>: <body>`, wrapped by String(err).
+  it('classifies the thrown "Codex API error <status>: <body>" form', () => {
+    expect(classifyCodexErrorMessage('Error: Codex API error 400: {"error":{"code":"context_length_exceeded"}}')?.code)
+      .toBe('context_length_exceeded');
+    expect(classifyCodexErrorMessage('Error: Codex API error 401.')?.code).toBe('auth_unavailable');
+  });
+
+  // A throw carrying no status at all (a response.failed frame, a local sign-in guard) still classifies on
+  // its prose — otherwise the most common auth failure would be the one case that stayed a 502.
+  it('classifies a throw that carries no HTTP status on its prose alone', () => {
+    expect(classifyCodexErrorMessage('Error: Not signed in to Codex.')?.code).toBe('auth_unavailable');
+    expect(classifyCodexErrorMessage('Error: Codex account id missing — sign out and sign in to Codex again.')?.code).toBe('auth_unavailable');
+  });
+
+  // Unrecognised prose stays unclassified, so the caller keeps its 502.
+  it('returns undefined for an unrecognised throw', () => {
+    expect(classifyCodexErrorMessage('Error: Codex stream ended before completion — the connection dropped.')).toBeUndefined();
   });
 });
 
