@@ -151,11 +151,13 @@ export const isTransientProviderError = (message: string): boolean =>
 
 // The per-provider cooldown store — one instance per Bridge host (the bridgeServer owns it, mirroring the
 // diagnosis chain). noteUsageLimit returns the cooldown seconds when the error was a usage-limit 429
-// (caller logs it), undefined otherwise; noteTransient is its short-channel twin, returning seconds only on
-// the failure that actually trips the cooldown. coolingUntil feeds the fallback log line's timestamp and
-// reports the LATER of the two horizons, so a live plan window is never masked by a 30s blip.
+// (caller logs it), undefined otherwise; noteQuotaWindow is its #190 twin for a record that classified the
+// failure itself; noteTransient is the short-channel one, returning seconds only on the failure that
+// actually trips the cooldown. coolingUntil feeds the fallback log line's timestamp and reports the LATER
+// of the two horizons, so a live plan window is never masked by a 30s blip.
 export type ProviderCooldowns = {
   noteUsageLimit: (providerId: string, errorMessage: string) => number | undefined;
+  noteQuotaWindow: (providerId: string, seconds: number) => void;
   noteTransient: (providerId: string, errorMessage: string) => number | undefined;
   cooling: (providerId: string) => boolean;
   coolingUntil: (providerId: string) => number | undefined; // epoch ms, undefined when not cooling
@@ -181,6 +183,17 @@ export const createProviderCooldowns = (
       if (seconds === undefined) return undefined;
       usageUntil.set(providerId, now() + seconds * 1000);
       return seconds;
+    },
+    // #190: the SAME long channel, seeded from a horizon the Provider's own record already classified rather
+    // than re-parsed out of an error message. noteUsageLimit is the door for Codex's wire, which states its
+    // horizon in the body text this module can match; this is the door for a record that did its own parsing
+    // and hands over the number. Both write usageUntil and ONLY usageUntil — the blip channel is a different
+    // map reachable only from noteTransient, so neither can ever be written from the other side. That
+    // separation is the whole point (see the #168 banner): a blip must not sideline a provider for days, and
+    // a multi-day window must not be shortened to seconds.
+    noteQuotaWindow: (providerId, seconds) => {
+      if (!Number.isFinite(seconds) || seconds <= 0) return; // a missing or nonsense horizon is not a cooldown
+      usageUntil.set(providerId, now() + seconds * 1000);
     },
     noteTransient: (providerId, errorMessage) => {
       if (!isTransientProviderError(errorMessage)) return undefined;

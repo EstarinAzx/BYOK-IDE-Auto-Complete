@@ -19,6 +19,7 @@ import {
   antigravityMaxCompletionTokens, isAntigravityImageModel, antigravityImageRefusal,
   antigravityHostChain, antigravityTurnUrl, antigravityRequestHeaders,
   antigravityApiError, antigravityShouldTryNextHost, antigravityFallbackSessionId,
+  antigravityFailureOf, ANTIGRAVITY_QUOTA_EXHAUSTED_CODE, ANTIGRAVITY_RATE_LIMITED_CODE,
   buildAntigravityPayload, buildAntigravityRequestBody,
   validateAntigravityFunctionCallPairing, antigravityStableSessionId,
   oauthModelOptions, PROVIDERS,
@@ -172,6 +173,86 @@ describe('antigravityApiError', () => {
 
   it('survives a 429 body that is not JSON at all', () => {
     expect(() => antigravityApiError(429, '<html>502 gateway</html>')).not.toThrow();
+  });
+});
+
+// ----------------------------- The classified failure carried on the Error (#190) ----------------------------- //
+
+/*
+ * #190 makes Antigravity the first record to answer a rate limit as 429 instead of a gateway fault, and to
+ * seed a cooldown from the horizon the server stated. Both consumers read the verdict OFF the Error rather
+ * than out of its message. These pin that the carrier is present exactly when the pure layer classified and
+ * absent exactly when it declined — that boundary IS the retry / no-retry decision.
+ */
+
+const quota429 = (reason: string, retryDelay?: string): string => JSON.stringify({
+  error: {
+    code: 429, status: 'RESOURCE_EXHAUSTED', message: 'rate limited',
+    details: [
+      { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason },
+      ...(retryDelay ? [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay }] : []),
+    ],
+  },
+});
+
+describe('antigravityFailureOf (#190)', () => {
+  it('carries the classified 429 and the horizon the server actually stated', () => {
+    const failure = antigravityFailureOf(antigravityApiError(429, quota429('QUOTA_EXHAUSTED', '1h30m')));
+    expect(failure?.status).toBe(429);
+    expect(failure?.code).toBe(ANTIGRAVITY_QUOTA_EXHAUSTED_CODE);
+    expect(failure?.cooldownSeconds).toBe(5_400); // the server's own 1h30m — never a default picked here
+  });
+
+  it('a spent window with NO stated horizon still classifies, and invents no cooldown of its own', () => {
+    const failure = antigravityFailureOf(antigravityApiError(429, quota429('QUOTA_EXHAUSTED')));
+    expect(failure?.code).toBe(ANTIGRAVITY_QUOTA_EXHAUSTED_CODE);
+    expect(failure?.cooldownSeconds).toBeUndefined(); // the caller picks the fallback; this layer does not guess
+  });
+
+  // A sub-five-minute rate limit is the blip flavour: answered 429, but it must never write the long channel.
+  it('a short rate limit classifies WITHOUT a cooldown horizon', () => {
+    const failure = antigravityFailureOf(antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '10s')));
+    expect(failure?.code).toBe(ANTIGRAVITY_RATE_LIMITED_CODE);
+    expect(failure?.cooldownSeconds).toBeUndefined();
+  });
+
+  // The boundary that matters: below the instant-retry threshold nothing is carried, so the bounded retry runs.
+  it('carries NOTHING for a 429 the pure layer declined, or for a non-429', () => {
+    expect(antigravityFailureOf(antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '1s')))).toBeUndefined();
+    expect(antigravityFailureOf(antigravityApiError(429, 'slow down'))).toBeUndefined();
+    expect(antigravityFailureOf(antigravityApiError(503, 'no capacity available'))).toBeUndefined();
+  });
+
+  /*
+   * ⚠ THIS is why the verdict is carried rather than re-read from the message. A DECLINED 429 quotes the raw
+   * upstream body, and that body uses the very same words as a classified one — same status, same reason.
+   * A string matcher over the message classifies both identically, and classifying the declined one stops
+   * the bounded retry that declining exists to allow.
+   */
+  it('the declined message is indistinguishable from a classified one by its words alone', () => {
+    const declined = antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '1s')).message;
+    const classified = antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '10m')).message;
+    for (const message of [declined, classified]) {
+      expect(message).toContain('429');
+      expect(message).toContain('RATE_LIMIT_EXCEEDED');
+    }
+    // Same vocabulary, opposite verdicts — only the carrier tells them apart.
+    expect(antigravityFailureOf(antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '1s')))).toBeUndefined();
+    expect(antigravityFailureOf(antigravityApiError(429, quota429('RATE_LIMIT_EXCEEDED', '10m')))).toBeDefined();
+  });
+
+  it('answers undefined for anything that is not a carrying Error', () => {
+    expect(antigravityFailureOf(new Error('Codex API error 429: usage_limit_reached'))).toBeUndefined();
+    expect(antigravityFailureOf('a string')).toBeUndefined();
+    expect(antigravityFailureOf(undefined)).toBeUndefined();
+    expect(antigravityFailureOf(null)).toBeUndefined();
+  });
+
+  // The attachment must not disturb the retryability contract the message shape IS.
+  it('attaching the verdict leaves the message shape untouched', () => {
+    const err = antigravityApiError(429, quota429('QUOTA_EXHAUSTED', '2h'));
+    expect(err.message).toBe('Antigravity API error 429: QUOTA_EXHAUSTED');
+    expect(isTransientProviderError(String(err))).toBe(true);
   });
 });
 

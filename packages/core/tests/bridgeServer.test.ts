@@ -5,7 +5,8 @@ import { createServer } from 'http';
 import * as http from 'http';
 import type { AddressInfo } from 'net';
 import { createBridgeServer, type BridgeDeps } from '../src/bridgeServer';
-import { MAX_PROVIDER_ATTEMPTS, TRANSIENT_FAILURES_BEFORE_COOLDOWN, TRANSIENT_COOLDOWN_SECONDS } from '../src/routing';
+import { MAX_PROVIDER_ATTEMPTS, TRANSIENT_FAILURES_BEFORE_COOLDOWN, TRANSIENT_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS } from '../src/routing';
+import { ANTIGRAVITY_QUOTA_EXHAUSTED_CODE } from '../src/catalog';
 import type { Provider } from '../src/catalog';
 
 // The Grok catalog row — id 'xai', the subscription-proxy base (grok-build routes there).
@@ -417,5 +418,128 @@ describe('Bridge — API-key Provider usage (#169)', () => {
       expect(body).not.toContain('event:');
       expect(JSON.parse(body).choices[0].message.content).toBe('Hello from the key');
     });
+  });
+});
+
+// ---------------- #190: Antigravity answers rate limits as 429 and seeds the long cooldown channel ---------------- //
+
+/*
+ * Every executor record used to return undefined from classify, so EVERY rate limit on every Provider left
+ * the Bridge as a 502 — a gateway fault, which is neither what happened nor something a client can act on.
+ * Antigravity is the first record to say 429. These drive the real listener, because the boundary that
+ * matters (classified vs declined) is exactly where the bounded retry does or does not run.
+ */
+describe('Bridge — Antigravity rate limits (#190)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const ANTIGRAVITY: Provider = {
+    id: 'antigravity', label: 'Antigravity', baseUrl: 'https://daily-cloudcode-pa.googleapis.com',
+    defaultModel: 'gemini-3.1-pro-low', apiKeyEnv: '', kind: 'antigravity-oauth',
+  };
+
+  // projectId is a PLACEHOLDER on purpose — a real Cloud Code project id is account-identifying and never
+  // belongs in this repo (see .context/decisions, 2026-07-29).
+  const antigravityDeps = (over: Partial<BridgeDeps> = {}): BridgeDeps => makeDeps({
+    providers: [ANTIGRAVITY],
+    xaiSignedIn: async () => false,
+    xaiCreds: async () => undefined,
+    antigravitySignedIn: async () => true,
+    antigravityCreds: async () => ({ accessToken: 'tok', projectId: 'example-project-1' }),
+    activeProviderId: () => 'antigravity',
+    ...over,
+  });
+
+  // The live 429 shape #189 actually received from the upstream.
+  const quota429 = (reason: string, retryDelay?: string) => () => new Response(JSON.stringify({
+    error: {
+      code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Resource has been exhausted',
+      details: [
+        { '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason },
+        ...(retryDelay ? [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay }] : []),
+      ],
+    },
+  }), { status: 429 });
+
+  // A 429 moves to the next host before it surfaces, so ONE attempt is two upstream calls (#189's host walk).
+  const CALLS_PER_ATTEMPT = 2;
+
+  const countingFetch = (make: () => Response) => {
+    const state = { calls: 0 };
+    vi.stubGlobal('fetch', async () => { state.calls += 1; return make(); });
+    return state;
+  };
+
+  const chat = (port: number) =>
+    post(port, '/v1/chat/completions', { model: 'antigravity', stream: true, messages: [{ role: 'user', content: 'hi' }] });
+
+  it('answers a spent quota window with 429, not 502, and does not spend the retries', async () => {
+    const state = countingFetch(quota429('QUOTA_EXHAUSTED', '1h'));
+    await runServer(antigravityDeps(), async (port) => {
+      const { status, body } = await chat(port);
+      expect(status).toBe(429);
+      expect(JSON.parse(body).error.type).toBe('rate_limit_error');
+    });
+    expect(state.calls).toBe(CALLS_PER_ATTEMPT); // one attempt — a classified failure can never succeed on a retry
+  });
+
+  /*
+   * NOT COVERED ON THE ANTHROPIC DOOR, AND NOT A #190 GAP. That door does not shape requests through the
+   * executor records at all — startProviderStream carries its own per-kind chain (codex → anthropic → xai →
+   * keyed) and has no Antigravity arm, so `/v1/messages` on this Provider falls through to the keyed tail and
+   * answers `400 has no API key configured` before any 429 can happen. That arm is #191's whole subject.
+   *
+   * The classification itself is already door-neutral: BOTH doors answer through the one shared
+   * failProviderRequest, which reads executorFor(provider).classify. So #191 gets the 429 for free the moment
+   * it wires the arm — there is nothing for it to re-do here, only an arm to add.
+   */
+
+  // At or above the instant-retry threshold the rate limit is the client's business, not a gateway fault.
+  it('answers an at-threshold rate limit with 429', async () => {
+    const state = countingFetch(quota429('RATE_LIMIT_EXCEEDED', '30s'));
+    await runServer(antigravityDeps(), async (port) => {
+      expect((await chat(port)).status).toBe(429);
+    });
+    expect(state.calls).toBe(CALLS_PER_ATTEMPT);
+  });
+
+  /*
+   * The boundary, and the whole reason the verdict is carried on the Error rather than sniffed out of its
+   * message: BELOW the threshold the pure layer declines, the raw upstream body (which says RESOURCE_EXHAUSTED
+   * and RATE_LIMIT_EXCEEDED, exactly like a classified one) becomes the message, and the bounded retry must
+   * still run. A message-matching classifier passes every test above and breaks this one.
+   */
+  it('leaves a below-threshold 429 to the bounded retry, and it stays a 502', async () => {
+    const state = countingFetch(quota429('RATE_LIMIT_EXCEEDED', '1s'));
+    await runServer(antigravityDeps(), async (port) => {
+      expect((await chat(port)).status).toBe(502);
+    });
+    expect(state.calls).toBe(MAX_PROVIDER_ATTEMPTS * CALLS_PER_ATTEMPT);
+  });
+
+  /*
+   * The operator's handle: the log names the classified code and the horizon it seeded. Driven ENOUGH TIMES
+   * to trip the blip channel if the spent window were also counted there — a spent quota window must not
+   * accumulate blip credit, or a genuine hiccup after the window resets would cool early on a streak it did
+   * not earn. That is what "checked first, then return" in noteProviderError buys.
+   */
+  it('logs the classified code and cools on the LONG channel only, from the stated horizon', async () => {
+    countingFetch(quota429('QUOTA_EXHAUSTED', '2h'));
+    const lines: string[] = [];
+    await runServer(antigravityDeps({ log: (m) => lines.push(m) }), async (port) => {
+      for (let i = 0; i < TRANSIENT_FAILURES_BEFORE_COOLDOWN; i++) await chat(port);
+    });
+    expect(lines.some((l) => l.includes(ANTIGRAVITY_QUOTA_EXHAUSTED_CODE))).toBe(true);
+    const cooled = lines.find((l) => l.includes('#190') && l.includes('cooling down'));
+    expect(cooled).toContain('120m'); // the server's own 2h, not a default anyone picked
+    expect(lines.some((l) => l.includes('#168') && l.includes('cooling down'))).toBe(false);
+  });
+
+  // A spent window the server gave no horizon for still cools — on #161's short default, never on nothing.
+  it('falls back to the default horizon when the server stated none', async () => {
+    countingFetch(quota429('QUOTA_EXHAUSTED'));
+    const lines: string[] = [];
+    await runServer(antigravityDeps({ log: (m) => lines.push(m) }), async (port) => { await chat(port); });
+    const cooled = lines.find((l) => l.includes('#190') && l.includes('cooling down'));
+    expect(cooled).toContain(`${Math.round(DEFAULT_COOLDOWN_SECONDS / 60)}m`);
   });
 });
