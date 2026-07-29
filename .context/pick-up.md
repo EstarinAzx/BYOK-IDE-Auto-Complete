@@ -18,24 +18,29 @@ closed with every acceptance criterion checked. **Spec #164 is complete — all 
 **There is no `ready-for-agent` ticket. The relay chain has stopped and should not be restarted** until
 something is labelled for it; with an empty queue it will pick nothing, write `queue empty`, and stop again.
 
-The highest-value thing to do is the **live Bridge session** that has been pending for nine tickets. One
-restart covers four checks — see *The live session* below.
+The **live Bridge session that had been pending for nine tickets has now run, and the decisive check
+passed** — see below. What remains is two small turns (#169, #172), then triage.
 
-## The live session (one trip, four checks)
+## The live session — ran 2026-07-29 on 2.0.38. Two of four checks passed.
 
-Restart the Bridge on this build, then bridge a session through **Claude Code / the Anthropic door** (not
-curl against `/v1/chat/completions` — the OpenAI door deliberately drops usage events):
+- **#165 ✅ / #163 diagnosis confirmed.** A bridged **Codex** session (`sonnet` → `codex/gpt-5.6-sol`)
+  reported **non-zero usage on 7/7 turns**, with `cacheW=0` throughout while `cacheR` grew — the
+  Responses-wire fingerprint, so the numbers are genuinely the Codex mapping and not Anthropic usage leaking
+  in. The 502s were a usage-reporting bug; the tighter-OAuth-cap hypothesis is not needed. **#163 stays
+  open** — the mechanism is proven, but proving a 15-occurrence cluster *stopped* needs a stretch of use, not
+  another session. Evidence on #165.
+- **#171 ✅ (writer half).** `status.json` carried `211214 / 1000000 → 21%` plus meters `5h 55% · 7d 27%` —
+  arithmetic correct, and Anthropic **fractions** correctly normalized to 0..100. The `ctx …%` **badge still
+  will not appear** until the `wisp-slot` plugin ships the reader (#180). Judge by the file.
+- **#169 ⬜ still to do.** A bridged session on a **keyed** Provider — a `glm` or `deepseek` alias (OpenCode
+  Go) is the quickest — must report non-zero tokens. Watch for a **400 naming `stream_options`** rather than
+  silence: that is the untested failure mode, and the fix would be a per-row opt-out flag, not removing the
+  opt-in for everyone.
+- **#172 ⬜ still to do.** A fresh Codex sign-in that never opens the model picker completes a turn.
 
-1. **#165 / #163 — the verdict.** Bridge a **Codex** session, read `/context`. **Non-zero ⇒ the diagnosis
-   was right** and the 502 cluster should stop recurring. **Still zero ⇒ the tighter-OAuth-cap hypothesis is
-   back.** Leave #163 open until this runs. Nine shipped tickets ride on it.
-2. **#171 — the snapshot.** After a real turn, `~/.wisp/status.json` should exist. **Judge #171 by that
-   file, not by the badge** — the `ctx …%` reader ships in the `wisp-slot` plugin, which is **not bumped
-   yet** (#180). Absent file ⇒ `recordStatus` never fired.
-3. **#169 — keyed usage.** A session on the **default** Provider (OpenCode Go) must report non-zero tokens
-   in `/context`. Watch for a **400 naming `stream_options`** rather than silence — that is the untested
-   failure mode, and the fix would be a per-row opt-out flag, not removing the opt-in for everyone.
-4. **#172 — the Codex default.** A fresh Codex sign-in that never opens the model picker completes a turn.
+**How to check usage — do NOT read `status.json` for this.** It is global and your own bridged turn
+overwrites it; use the per-session Claude Code transcript instead, folded by `message.id`.
+[[status-json-is-global-so-it-cannot-observe-another-session]].
 
 Also still open by hand: **#167's** manual criterion (one turn each through Codex, Anthropic and Grok), and
 **#170's** two criteria (needs a Kimi Code subscription — `wisp` → `/signin kimi`; the sign-in doubles as the
@@ -106,6 +111,7 @@ the ticket that touches that file next.
 - [[overview]]
 - [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
 - [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
+- [[status-json-is-global-so-it-cannot-observe-another-session]]
 - [[2026-07-29-quota-is-a-side-channel-not-a-bridge-stream-event]]
 - [[2026-07-29-a-model-list-is-not-an-accepted-list-whitelist-the-probed-ids]]
 - [[2026-07-29-oauth-credentialed-but-keyed-on-the-wire-resolves-at-the-keyfor-seam]]

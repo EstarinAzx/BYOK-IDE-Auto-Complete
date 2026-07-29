@@ -21,8 +21,15 @@ tickets — #165 (Responses-wire usage), #166 (error classification), #167 (the 
 verified by a real install into a scratch dir (2 packages — thin shell + platform binary) with both bins
 executed.
 
-**The decisive live check is still outstanding, and now nine shipped tickets ride on it.** See *User action
-pending*.
+**The decisive live check RAN, and it passed.** A bridged Codex session (`sonnet` → `codex/gpt-5.6-sol`) on
+2.0.38 reports **non-zero usage on 7/7 turns**, with the Responses-wire signature (`cacheW` always 0 while
+`cacheR` grows) proving the numbers come from the Codex mapping and not from Anthropic usage leaking in.
+**#165's last criterion is met and #163's diagnosis is confirmed** — the 502s were a usage-reporting bug, not
+a window bug, and the tighter-OAuth-cap hypothesis is not needed. **#171's writer half is verified too** —
+`status.json` carried real numbers with the arithmetic and the fraction→percent normalization correct.
+
+**#163 stays open on purpose:** the mechanism is confirmed, the *outcome* is not. Proving a 15-occurrence
+cluster stopped is a matter of living on this build, not of one more session.
 
 ## State
 
@@ -49,12 +56,16 @@ pending*.
     [[a-bom-in-wisp-config-silently-empties-the-whole-config]].
   - **`overview.md` corrected** — it still said 13 built-ins / four Provider kinds; #170 made it **14 +
     Custom and five kinds**. Counted from `PROVIDERS`, not guessed.
-- **User action pending** (all want the **same session** — one Bridge restart covers the first four):
-  - **Verify #165 live** — restart the Bridge on this build, bridge a Codex session, read `/context`. This is
-    the #163 verdict; see [[pick-up]] for what each outcome means.
-  - **Verify #171 live** — same trip: a real turn should leave `~/.wisp/status.json`. ⚠ The `ctx …%` badge
-    will **not** appear until the `wisp-slot` plugin is bumped (#180) — the reader half is not shipped yet.
-    Judge #171 by the file, not the badge.
+- **Verified live 2026-07-29 on 2.0.38** (user ran the session; evidence recorded on the tickets):
+  - **#165 ✅** — 7/7 Codex-served turns report non-zero usage. `cacheW=0` throughout with `cacheR` growing =
+    the Responses-wire fingerprint, so the numbers are genuinely the Codex mapping. Read from the **Claude
+    Code transcript** (per-session, durable), folded by `message.id`.
+  - **#171 ✅ (writer half)** — `status.json` carried `contextTokens 211214 / 1000000 → 21%` and meters
+    `5h 55% · 7d 27%`, i.e. Anthropic **fractions** correctly normalized to 0..100. The *reader* half is
+    still unshipped (#180), so **no `ctx …%` badge appears yet** — judge by the file, not the badge.
+  - **#163 → diagnosis confirmed, ticket left open.** Closing it needs a stretch of use with no refusal in
+    the 217k–245k band, not another check.
+- **User action still pending** (one bridged session covers the first three):
   - **Verify #169 live** — a bridged session on the **default** Provider (OpenCode Go) must report non-zero
     tokens in `/context`. Run it through Claude Code / the Anthropic door, not curl against
     `/v1/chat/completions` (the OpenAI door deliberately drops usage events). Watch for a **400 naming
@@ -88,15 +99,15 @@ Spec #164 complete. All nine tickets shipped:
 |---|---|---|
 | **180** | Ship the harvest to the vsix + `wisp-slot` plugin | Two more outward-facing publishes #173 never authorized; one criterion (install the `.vsix` in a real host) is unreachable unattended. Flip to `ready-for-agent` to pre-stage the bumps, changelogs and `bun run package`. |
 | **181** | BOM in `config.json` silently empties the whole config | Small and agent-doable; the open question filed with it is a design call — tolerate the BOM or **fail loud**? Today it does neither. |
-| **163** | The 502 observation | #165+#166 are its candidate fix. **Leave open until the live `/context` check runs.** |
+| **163** | The 502 observation | **Diagnosis confirmed live** (#165's usage now flows). Stays open until a stretch of use shows no refusal in the 217k–245k band — absence of a 15-occurrence cluster can't be proven in one session. |
 | **69** | copilot-wisp launcher | Ungroomed. |
 
 ## Pick up here
 
-**No agent work is queued.** The highest-value next move is a human one: the **live Bridge session** that
-settles #163/#165 and covers #169, #171 and #172 in one trip. After that, triage #180 and #181 — both are
-`ready-for-human` only to stop the relay auto-grabbing them, and #181 in particular is a small, safe,
-agent-sized fix the moment you flip its label.
+**No agent work is queued.** The big live check is **done and passed** (#165, #171). What is left is small:
+one bridged turn on a **keyed** Provider for #169 (a `glm` or `deepseek` alias), and a fresh Codex sign-in
+for #172. Then triage #180 and #181 — both are `ready-for-human` only to stop the relay auto-grabbing them,
+and #181 in particular is a small, safe, agent-sized fix the moment you flip its label.
 
 Do **not** restart the relay chain expecting work: with no `ready-for-agent` ticket it will pick nothing,
 write `queue empty`, and stop.
@@ -120,9 +131,13 @@ write `queue empty`, and stop.
   read as signed-out.
 - **Is the 30-minute staleness window on the statusline snapshot right?** Picked cold (#171). One constant in
   `wisp-statusline.js`; revisiting it needs #180 shipped first.
-- **Should the snapshot be per-session rather than global?** `status.json` is one file per machine, so two
-  concurrent bridged sessions overwrite each other. The model-match guard hides most of it; two sessions on
-  the SAME family still cross. Deliberately unsolved — no evidence it bites yet.
+- **Should the snapshot be per-session rather than global?** **Now has evidence — it bites.** `status.json` is
+  one file per machine, and while verifying #165 from a *second* bridged session every read came back
+  `anthropic/claude-opus-5` because the reading session's own turn had overwritten it microseconds earlier.
+  Two bridged sessions clobber each other **continuously, not occasionally**. The model-match guard hides
+  cross-family clobbering from the *badge* but does not stop the *write*, so the file only ever describes the
+  most recent turn on the machine. Fine for the statusline's real purpose (one session, its own badge); useless
+  for anything that wants to **observe** a session. [[status-json-is-global-so-it-cannot-observe-another-session]].
 - **Which Codex ids does the ChatGPT-account path actually accept?** Only `gpt-5.6-sol` and `gpt-5.4` probed
   200; `gpt-5.3-codex` and bare `gpt-5.6` probed 400. The rule behind the split is unknown, so the test
   whitelists rather than pattern-matches.
@@ -140,3 +155,4 @@ write `queue empty`, and stop.
 - [[gotchas]]
 - [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
 - [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
+- [[status-json-is-global-so-it-cannot-observe-another-session]]
