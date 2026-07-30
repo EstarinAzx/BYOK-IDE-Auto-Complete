@@ -10,8 +10,9 @@ Run: node plugins/slot/statusline/check.js   (exit 0 = pass, 1 = fail)
 Why this exists: wisp-statusline.js runs out-of-process under Claude Code, so vitest never sees it, and it
 necessarily RE-IMPLEMENTS resolveRoute (packages/core/src/routing.ts) in plain JS. That duplicate drifted
 once already — it knew families and not aliases, so every aliased route (`sol`, `grok`) rendered a bare
-`wisp` row with the previous Provider's quota as the only reading. These four cases pin the resolution order
-and the degrade ladder; they are not a test suite and need no framework.
+`wisp` row with the previous Provider's quota as the only reading. These cases pin the resolution order, the
+degrade ladder, and which Provider's reading is allowed to lead the block; they are not a test suite and
+need no framework.
 */
 
 const fs = require('node:fs');
@@ -94,7 +95,41 @@ ok('grok demotes both readings', /codex {2}5h 22%/.test(out) && /anthropic {2}5h
 out = render({ id: 'sol', display_name: 'gpt-5.6-sol' }, null);
 ok('bare route row', out.trim() === 'wisp │ sol → gpt-5.6-sol │ codex', out);
 
+// 5. status.json is ONE global slot, so a second bridged session on another Provider owns the top level and
+//    pushes THIS route's reading into the ledger. The route's own Provider must still lead the block, aged —
+//    reading only the top level printed the other session's numbers as if they were this session's.
+out = render({ id: 'sol', display_name: 'gpt-5.6-sol' }, {
+  updatedAt: now,
+  providerId: 'anthropic',
+  model: 'claude-opus-5',
+  contextPercent: 13,
+  meters: [{ label: '5h', percent: 16 }, { label: '7d', percent: 37 }],
+  providers: { codex: { updatedAt: now - 9 * 60_000, model: 'gpt-5.6-sol', meters: [{ label: '7d', percent: 1 }] } },
+});
+ok('displaced route leads with its own Provider', /7d {2}[●○]{10} +1%/.test(out), out);
+ok('displaced reading is stamped aged', /7d {2}[●○]{10} +1%.*9m ago/.test(out), out);
+ok('displaced route claims no context', !out.includes('ctx '), out);
+ok('displacing Provider demoted', /anthropic {2}5h 16%.*7d 37% {2}just now/.test(out), out);
+
+// 6. The route's Provider has reported NOTHING (never turned, or pruned): no meter row may be invented, and
+//    the other Provider's reading stays a dated tail row rather than becoming the block's only reading.
+out = render({ id: 'sol', display_name: 'gpt-5.6-sol' }, {
+  updatedAt: now, providerId: 'anthropic', model: 'claude-opus-5', contextPercent: 13, meters: [{ label: '5h', percent: 16 }],
+});
+ok('unmeasured Provider gets no bar', !/[●○]/.test(out), out);
+ok('unmeasured Provider still routes', out.includes('sol → gpt-5.6-sol'), out);
+ok('unmeasured Provider keeps the other dated', /anthropic {2}5h 16% {2}just now/.test(out), out);
+
+// 7. A quota window belongs to the ACCOUNT, a context reading to the CONVERSATION: a sibling model on the
+//    same Provider spends the same window, so its meters count — its context percentage does not.
+out = render({ id: 'sol', display_name: 'gpt-5.6-sol' }, {
+  updatedAt: now, providerId: 'codex', model: 'gpt-5.6-terra', contextPercent: 44, meters: [{ label: '7d', percent: 3 }],
+});
+ok('sibling model shares the account window', /7d {2}[●○]{10} +3%/.test(out), out);
+ok('sibling model does not share context', !out.includes('ctx '), out);
+ok('sibling reading is stamped aged', /7d {2}[●○]{10} +3%.*just now/.test(out), out);
+
 fs.rmSync(home, { recursive: true, force: true });
 
 if (failures) { console.error(`\n${failures} failing check(s)`); process.exit(1); }
-console.log('wisp-statusline: 10/10 checks passed');
+console.log('wisp-statusline: 20/20 checks passed');

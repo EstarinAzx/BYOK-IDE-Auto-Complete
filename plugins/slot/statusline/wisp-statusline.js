@@ -24,7 +24,8 @@ Renders a multi-row BLOCK, not a badge:
       codex  7d 7%                 3h ago
 
 Row 1 is the route — a family or an alias, whichever the picked model resolved through. The middle
-rows are the ACTIVE Provider's quota windows, live for this turn. The
+rows are the ACTIVE Provider's quota windows — its live reading when this session's turn wrote the
+snapshot, otherwise its ledger entry stamped with an age. The
 tail rows are every OTHER Provider the ledger remembers, dimmed and stamped with their age — a limit
 you are not currently spending is still a limit worth seeing, but it is never presented as current.
 
@@ -130,6 +131,25 @@ const live = status && now - (status.updatedAt || 0) < STATUS_MAX_AGE_MS && stat
   ? status
   : undefined;
 
+// The ACTIVE Provider's own quota, wherever it currently lives. status.json is ONE global slot, so the last
+// bridged turn on the MACHINE owns the top level — a second session on another Provider pushes this route's
+// reading down into the `providers` ledger, and reading only the top level then prints that other session's
+// numbers as if they were yours. mergeStatus evicts the active Provider from the ledger, so a Provider is in
+// exactly one of the two places: check both. Keyed on providerId, not model, because a quota window belongs
+// to the ACCOUNT — a sibling model on the same Provider spends the same window. Context keeps the stricter
+// model test above: that one belongs to the conversation.
+// Either place is pruned on read at the ledger's own max age: nothing rewrites status.json while nothing
+// runs, so an idle machine would otherwise render yesterday's limits as this session's.
+const quotaSource = (() => {
+  if (!target?.providerId || !status) return undefined;
+  if (status.providerId === target.providerId && status.meters?.length) {
+    return { meters: status.meters, updatedAt: status.updatedAt || 0, live: Boolean(live) };
+  }
+  const entry = status.providers?.[target.providerId];
+  return entry?.meters?.length ? { meters: entry.meters, updatedAt: entry.updatedAt || 0, live: false } : undefined;
+})();
+const activeQuota = quotaSource && now - quotaSource.updatedAt <= LEDGER_MAX_AGE_MS ? quotaSource : undefined;
+
 const rows = [];
 
 const head = [paint(PURPLE, 'wisp')];
@@ -145,8 +165,12 @@ rows.push(head.join(paint(DIM, ' │ ')));
 
 // --------------------------------- Meter rows --------------------------------- //
 
-const activeMeters = live?.meters || [];
+const activeMeters = activeQuota?.meters || [];
 const labelWidth = Math.max(3, ...activeMeters.map((m) => String(m.label).length));
+// The reading's age, stamped ONCE on the group's first row when it did not come from this session's own
+// turn. A window's level is still the account's level minutes later, so an aged reading is worth showing —
+// but never worth passing off as this turn's.
+let ageStamp = activeQuota && !activeQuota.live ? ageLabel(now - activeQuota.updatedAt) : undefined;
 
 for (const meter of activeMeters) {
   if (typeof meter.percent !== 'number') continue;
@@ -158,20 +182,26 @@ for (const meter of activeMeters) {
     bar(meter.percent),
     paint(scale(meter.percent), `${meter.percent}%`.padStart(5)),
     reset ? `  ${paint(DIM, '↻')} ${paint(LABEL, reset)}` : '',
+    ageStamp ? `  ${paint(FAINT, ageStamp)}` : '',
   ].join(''));
+  ageStamp = undefined;
 }
 
 // ------------------------------ Remembered rows ------------------------------ //
 
-// Providers whose limits are known but not being spent right now: the ledger's entries, plus the active
-// snapshot itself when it aged out (its meters are still the last thing that wire said about the account).
+// Providers whose limits are known but not being spent right now: the ledger's entries, plus the top-level
+// snapshot when another session's Provider wrote it (its meters are still the last thing that wire said).
+// The route's OWN Provider is excluded from both — it is the meter rows above, and rendering it twice would
+// present the same wire as current and stale at once.
 const remembered = [];
 if (status) {
-  if (!live && status.meters?.length && status.providerId) {
+  if (status.meters?.length && status.providerId && status.providerId !== target?.providerId) {
     remembered.push({ id: status.providerId, updatedAt: status.updatedAt || 0, meters: status.meters });
   }
   for (const [id, entry] of Object.entries(status.providers || {})) {
-    if (entry?.meters?.length) remembered.push({ id, updatedAt: entry.updatedAt || 0, meters: entry.meters });
+    if (entry?.meters?.length && id !== target?.providerId) {
+      remembered.push({ id, updatedAt: entry.updatedAt || 0, meters: entry.meters });
+    }
   }
 }
 
