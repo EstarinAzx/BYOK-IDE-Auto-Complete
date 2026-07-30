@@ -8,7 +8,8 @@ Depends on:
 
 Data shapes:
   stdin — Claude Code statusline JSON; model at { model: { id, display_name } }
-  config.json — { routing: { families: { [family]: { providerId, model } } },
+  config.json — { routing: { families: { [family]: { providerId, model } },
+                             aliases: [{ name, target: { providerId, model } }] },
                   snapshots: { [row]: { providerId, model } | null }, ... }
   status.json — the Bridge's per-turn snapshot (#171):
                 { updatedAt, providerId, model, contextTokens?, contextWindow?,
@@ -22,7 +23,8 @@ Renders a multi-row BLOCK, not a badge:
       7d  ●●●●○○○○○○   35%  ↻ Sun 9:59pm
       codex  7d 7%                 3h ago
 
-Row 1 is the route. The middle rows are the ACTIVE Provider's quota windows, live for this turn. The
+Row 1 is the route — a family or an alias, whichever the picked model resolved through. The middle
+rows are the ACTIVE Provider's quota windows, live for this turn. The
 tail rows are every OTHER Provider the ledger remembers, dimmed and stamped with their age — a limit
 you are not currently spending is still a limit worth seeing, but it is never presented as current.
 
@@ -111,9 +113,15 @@ const now = Date.now();
 // --------------------------------- The route --------------------------------- //
 
 // Resolved live from config on every refresh, so a mid-session Slot rebind shows up on the next repaint.
-const modelName = `${stdin.model?.id || ''} ${stdin.model?.display_name || ''}`.toLowerCase();
-const family = ['haiku', 'sonnet', 'opus', 'fable'].find((f) => modelName.includes(f));
-const target = (family && cfg.routing?.families?.[family]) || undefined;
+// Lookup order mirrors resolveRoute (packages/core/src/routing.ts): an exact ALIAS match wins BEFORE the
+// family fuzzy. Matching families only was the hole — an aliased route (`sol`, `grok`, `gemini`) resolved to
+// no Target at all, so the row lost its model/provider and the live verdict below could never pass, leaving
+// the previous Provider's reading as the only thing on screen.
+const names = [stdin.model?.id, stdin.model?.display_name].filter(Boolean).map((n) => String(n).toLowerCase());
+const alias = (cfg.routing?.aliases || []).find((a) => names.includes(String(a.name).toLowerCase()));
+const family = alias ? undefined : ['haiku', 'sonnet', 'opus', 'fable'].find((f) => names.join(' ').includes(f));
+const route = alias?.name || family;
+const target = alias?.target || (family && cfg.routing?.families?.[family]) || undefined;
 const heldCount = Object.keys(cfg.snapshots || {}).length;
 
 // The snapshot is only THIS session's turn when it is both recent and about the model we are routed to —
@@ -125,7 +133,7 @@ const live = status && now - (status.updatedAt || 0) < STATUS_MAX_AGE_MS && stat
 const rows = [];
 
 const head = [paint(PURPLE, 'wisp')];
-if (target?.model) head.push(`${paint(PURPLE, family)} ${paint(DIM, '→')} ${paint(TEXT, target.model)}`);
+if (target?.model) head.push(`${paint(PURPLE, route)} ${paint(DIM, '→')} ${paint(TEXT, target.model)}`);
 // Rendered verbatim, including past 100% — a 122% reading is a conversation already over the window and
 // doomed upstream, and seeing it BEFORE the request fails is the point.
 if (typeof live?.contextPercent === 'number') {

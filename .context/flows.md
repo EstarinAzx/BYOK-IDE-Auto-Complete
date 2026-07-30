@@ -1,7 +1,7 @@
 ---
 type: flows
 project: wisp
-updated: 2026-07-16
+updated: 2026-07-30
 tags: [flows]
 ---
 # Flows
@@ -75,6 +75,22 @@ tags: [flows]
 3. packages/tui/src/modes.ts:41 — mode payload `{ kind:'bridge', address, secret }`.
 4. packages/tui/src/app.tsx:526 — `{mode.kind === 'bridge' && <BridgeScreen address secret cols={panelCols} />}`.
 5. packages/tui/src/infoScreens.tsx:29-72 — pure JSX: title, ● up · port, door rows, claude-wisp, wisp-slot rec, amber Advisor warning, Esc footer.
+
+## Statusline quota — provider wire → status.json → block
+- **Question:** why does the statusline show the anthropic ledger row and no active-provider quota when the session route is an alias to codex?  **Lens:** bug
+- **Summary:** The statusline re-implemented route resolution as family-word matching only, so an **aliased** model (`sol`) resolved to no Target — collapsing the route row to bare `wisp`, failing the `status.model === target.model` live test, and demoting the previous Provider's reading to the only visible row. Fixed by mirroring `resolveRoute`'s alias-before-family order.
+- **Entry:** plugins/slot/statusline/wisp-statusline.js:115 (route resolution from `config.json`)
+- **Key files:** plugins/slot/statusline/wisp-statusline.js, packages/core/src/routing.ts, packages/core/src/status.ts, packages/core/src/bridgeServer.ts, packages/core/src/homeStore.ts
+- **Updated:** 2026-07-30
+
+### Hops
+1. `packages/core/src/bridgeServer.ts:626-645` — `startProviderStream` pins `modelId = pinnedModel` (the Target's model) and threads `onQuota` into `codexStream`/`anthropicStream` only. `xai`/`antigravity`/keyed arms pass none, so those Providers never report.
+2. `packages/core/src/codexClient.ts:75` / `anthropicClient.ts:180` — parse utilization off the **response head** (`parseCodexQuota` / `parseAnthropicQuota`, `status.ts:92,115`), normalized to 0..100 percent.
+3. `packages/core/src/bridgeServer.ts:843` — `recordStatus(buildStatus({ provider, model: result.model, usage, meters }))`; `result.model` is the resolved Target model, so `status.model` equals `target.model` exactly.
+4. `packages/core/src/homeStore.ts:110` → `status.ts:196` `mergeStatus` — the previous Provider's meters fold into `providers` (24h ledger); the incoming Provider's key is deleted from it (`status.ts:204`), so the ledger never holds the active wire.
+5. `plugins/slot/statusline/wisp-statusline.js:115-121` — **the bug**: alias lookup was absent. Now alias-exact → family-fuzzy, mirroring `routing.ts:60-91` (which orders provider-id → alias → family → active).
+6. `wisp-statusline.js:126` — `live` = status fresh (<30m) **and** `status.model === target.model`; only then do the ctx field + bar rows render.
+7. `wisp-statusline.js:167-188` — everything else demotes: aged-out active snapshot + every `providers` entry, dimmed and age-stamped, max 2 rows.
 
 ## Related
 
