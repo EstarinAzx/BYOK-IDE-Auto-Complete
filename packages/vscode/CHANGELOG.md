@@ -4,6 +4,49 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] — 2026-07-30
+
+**Antigravity reaches the extension face.** npm `wisp-router` 2.0.41 carried the new Provider to the
+terminal face on 2026-07-30; this is the half npm can never deliver, because the extension **bundles
+its own copy of `@wisp/core`** — and this face is not a bystander: the extension hosts a Bridge and a
+side panel of its own, and both were wired for Antigravity in #188 and #189. Cut as #197, the bump
+the 2.0.41 release cut recorded as owed. (Spec #185, tickets #187–#191)
+
+### Added
+
+- **The Antigravity Provider (#187–#191).** A Google Cloud Code wire, reached with a browser OAuth
+  sign-in rather than an API key. Thirteen Gemini models with per-model output caps appear in the
+  **model picker, native chat and Inquire**; the image-generation row is refused up front, by name,
+  rather than failing somewhere inside a stream. **Sign-in happens in the terminal**, not the panel:
+  run `wisp` → `/signin antigravity` and approve in the browser. Both faces share owner-only
+  `~/.wisp/auth.json`, so the extension's row lights up once approved — the same posture as Kimi, and
+  deliberately so: the panel shows a truthful signed-in status and points at the command rather than
+  offering a button it cannot run.
+- **The extension's own Bridge answers for it (#189, #191).** The extension constructs an
+  `AntigravityAuth` so its Bridge can refresh the stored token bundle and bootstrap the Cloud Code
+  project before a turn — the shape it already uses for Kimi — and passes `antigravitySignedIn` /
+  `antigravityCreds` into its own `createBridgeServer`. A user who never installs the npm package
+  still reaches Antigravity through both Bridge doors from the editor: the OpenAI door through the
+  Provider's executor record, and the Anthropic door through its own per-kind chain — so Claude Code
+  bridged through the extension runs on Gemini too. Tool calls carry the upstream's own call ids
+  untouched; vision and documents ride the one attachment shape this wire takes.
+
+### Fixed
+
+- **A rate limit no longer leaves the extension-hosted Bridge as a `502` (#190).** No executor record
+  classified anything, so a quota exhaustion was reported as a gateway fault — neither what happened
+  nor actionable. The classification path in the bundled core is now live and door-neutral; Antigravity
+  is the first Provider to use it, answering `429` with a cooldown horizon taken from what the server
+  actually said. Other Providers are unchanged pending their own records; the widening is additive.
+
+### Surfaces
+
+- **The `wisp` vsix 1.11.0** (this release) — everything above: the #188/#189 extension wiring plus
+  the full Antigravity Provider (#187–#191) in the bundled `@wisp/core`.
+- **npm `wisp-router` 2.0.41** — already carries #187–#191 to the terminal face (TUI, `wisp serve`,
+  and the `claude-wisp` launcher); published 2026-07-30, nothing further owed.
+- **The `wisp-slot` Claude Code plugin** — untouched by #185, nothing owed. Stays at **1.6.0**.
+
 ## [1.10.1] — 2026-07-29
 
 A single fix, carried here because the extension **bundles its own copy of the engine** — no
