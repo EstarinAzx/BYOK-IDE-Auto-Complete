@@ -12,7 +12,19 @@ _At commit: `5592f44` on main — pushed, tag `v2.0.42` published._
 
 ## Current focus
 
-**The statusline redesign is done and released.** The user's complaint was shape, not data: #171's readings
+**Second pass, `f565e94` — the block was naming the wrong Provider on an aliased route.** Reported from a
+screenshot: session routed to `sol` (→ `codex/gpt-5.6-sol`), block showed a bare `wisp` row plus
+`anthropic 5h 5% · 7d 36% 7m ago`. Cause was in the reader, not the ledger — `wisp-statusline.js` duplicates
+`resolveRoute` and the duplicate knew only the family-fuzzy rung, so an alias resolved to no Target at all
+(no model, no providerId, and `status.model === target.model` unreachable, which is what left the previous
+Provider's reading as the only row). Now mirrors **alias exact → family fuzzy**. `wisp-slot` **1.7.1**;
+`plugins/slot/statusline/check.js` added (10 assertions, real script, sandboxed `WISP_HOME`, no framework),
+control-verified: **5 of 10 fail against the pre-fix file**. Flow recorded in [[flows]].
+
+**Filed #200** (`ready-for-agent`) — the recon that had been sitting unfiled: four wires never call
+`onQuota`, so the ledger can only ever hold two Providers.
+
+**Prior pass — the statusline redesign is done and released.** The user's complaint was shape, not data: #171's readings
 shipped as a one-line badge (`[WISP fable→claude-fable-5 ctx 7% 5h 11% 7d 35%]`) that looked like a copy of
 the caveman/ponytail badges beside it, and CLIProxyAPI's stacked meter panel was held up as the target.
 Two halves landed in one commit:
@@ -44,14 +56,12 @@ Two halves landed in one commit:
 
 ## Pick up here
 
-**No active work — pick a new task.** `gh issue list --label ready-for-agent --state open` is the gate.
+**#200 is the one agent-ready ticket.** `gh issue list --label ready-for-agent --state open` is the gate.
 
-If the next task is the natural follow-on, it is one of these, none groomed:
-
-1. **Grok / Antigravity report no quota headers.** Only Codex (`x-codex-*`) and Anthropic
-   (`anthropic-ratelimit-unified-*`) wire `onQuota`; `xaiClient.ts` and `antigravityClient.ts` do not, so
-   those Providers never appear in the ledger. A recon ticket (capture the response heads, see what those
-   wires actually return) is the honest shape — inventing meters is the #171 failure.
+1. **#200** — recon on the four wires with no `onQuota` (xai, antigravity, keyed ×2): capture the real
+   response heads, record a verdict each, file follow-up implementation tickets only for wires whose verdict
+   is `parseable meter`. Needs live sign-ins; an unreachable wire is recorded as *not captured*, never
+   guessed. Capture-only by construction — no parser and no `status.ts` change lands in it.
 2. **#69** — copilot-wisp launcher, ungroomed. `grill-me` / `/preset init`.
 3. **#163** — waiting, not working (watch the 217k–245k band for refusals).
 

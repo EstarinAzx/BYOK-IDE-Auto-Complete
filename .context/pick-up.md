@@ -9,27 +9,35 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Last session (2026-07-30): the statusline redesign shipped — `5592f44` on main, `wisp-router@2.0.42`
+**Latest (2026-07-30, second pass): `f565e94` on main — `wisp-slot` 1.7.1.** The block was showing the
+*wrong* Provider's quota on an aliased route. It re-implements `resolveRoute` in plain JS (it runs
+out-of-process and cannot import core) and the copy knew only the family-fuzzy rung, so `sol` resolved to no
+Target: route row collapsed to bare `wisp`, the `status.model === target.model` live test could never pass,
+and the previous Provider's reading was the only thing left on screen. Fixed by mirroring the real order
+(**alias exact before family fuzzy**). `plugins/slot/statusline/check.js` now pins it — 10 assertions
+through the real script under a sandboxed `WISP_HOME`, no framework; **verified against the pre-fix file as
+a control (5 of 10 fail there)**. Filed #200 for the wires that report nothing.
+
+**Prior pass (2026-07-30): the statusline redesign shipped — `5592f44` on main, `wisp-router@2.0.42`
 published, `wisp-slot` 1.7.0.** The user's complaint was shape, not data: #171's readings were a one-line
 badge that looked like a copy of the caveman/ponytail badges beside it. It is now a block — route row, a
 colour-scaled `●○` bar per quota window with its reset time, and a dimmed row per other Provider whose
 limits are known, stamped with the reading's age. `status.json` gained a **quota ledger** so a route switch
 stops erasing what the other wire last said.
 
-## Queue: EMPTY
+## Queue: #200
 
-`gh issue list --label ready-for-agent --state open` — verify by query, not by this note. No relay re-arm
-until new tickets are groomed and labelled.
+`gh issue list --label ready-for-agent --state open` — verify by query, not by this note.
 
-Open issues, none agent-ready:
+- **#200** — *ready-for-agent.* Recon: capture the response heads on the four wires that never call
+  `onQuota` (xai, antigravity, keyed ×2) and record a verdict each. Capture only — **no parser, no
+  `onQuota` threading, no `status.ts` change lands in it**. Needs live sign-ins; a wire that cannot be
+  reached is recorded as *not captured*, never guessed.
+
+Open, not agent-ready:
 
 - **#163** — waiting, not working (watch the 217k–245k band for refusals).
 - **#69** — copilot-wisp launcher, ungroomed. `grill-me` / `/preset init` is the right shape.
-
-Natural follow-on, unfiled: **Grok and Antigravity report no quota headers**, so they never appear in the
-ledger. Only `codexClient.ts` and `anthropicClient.ts` wire `onQuota`. A *recon* ticket (capture the
-response heads, see what those wires actually return) is the honest shape — inventing meters is exactly the
-#171 failure.
 
 ## What this session shipped (evidence, reusable)
 
@@ -64,6 +72,12 @@ response heads, see what those wires actually return) is the honest shape — in
 
 Statusline / status.json:
 
+- **The statusline DUPLICATES `resolveRoute`** — it runs out-of-process under Claude Code and cannot import
+  `@wisp/core`, so `wisp-statusline.js:115-121` re-implements the lookup in plain JS. It has drifted once
+  (aliases missing). Change `routing.ts:60-91` → check the copy, and run
+  `node plugins/slot/statusline/check.js` (exit code is the verdict).
+- **A wrong-Provider reading looks identical to a stale one.** Both render as the dimmed dated row, because
+  a route that fails to resolve makes `live` unreachable. Suspect resolution before suspecting the ledger.
 - **An empty `providers` map is usually correct, not a bug.** The ledger never holds the *active* Provider,
   so a machine where only one Provider ever serves has an empty map. Check whether a second Provider has
   actually served a turn before debugging.
