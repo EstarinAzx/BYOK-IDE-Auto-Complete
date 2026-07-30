@@ -34,6 +34,32 @@ describe('wispHomeDir', () => {
   });
 });
 
+// ----------------------------- status snapshot ----------------------------- //
+
+describe('status read/write', () => {
+  // The wiring under test is read-previous → merge → write: without the read, a route switch would blank
+  // the outgoing Provider's meters, which is the whole point of the ledger.
+  test('a route switch keeps the outgoing Provider in the ledger', () => {
+    const h = home();
+    h.writeStatus({ updatedAt: 1_000, providerId: 'codex', model: 'gpt-5.4', meters: [{ label: '7d', percent: 7 }] });
+    h.writeStatus({ updatedAt: 2_000, providerId: 'anthropic', model: 'claude-fable-5', meters: [{ label: '5h', percent: 4 }] });
+
+    const status = h.readStatus();
+    expect(status?.providerId).toBe('anthropic');
+    expect(status?.providers).toEqual({
+      codex: { updatedAt: 1_000, model: 'gpt-5.4', meters: [{ label: '7d', percent: 7 }] },
+    });
+  });
+
+  test('missing and unparseable snapshots read as undefined', () => {
+    const h = home();
+    expect(h.readStatus()).toBeUndefined();
+    h.writeStatus({ updatedAt: 1, providerId: 'p', model: 'm' });
+    writeFileSync(join(dir, '.wisp', 'status.json'), '{ not json');
+    expect(h.readStatus()).toBeUndefined();
+  });
+});
+
 // ----------------------------- read/write config ----------------------------- //
 
 describe('config read/write', () => {

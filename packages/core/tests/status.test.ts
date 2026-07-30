@@ -4,7 +4,8 @@ import { describe, it, expect } from 'vitest';
 import {
   parseAnthropicQuota, parseCodexQuota, quotaWindowLabel,
   contextTokens, contextPercent, contextWindowFor, buildStatus,
-  type Provider, type BridgeUsage,
+  mergeStatus, QUOTA_LEDGER_MAX_AGE_MS,
+  type Provider, type BridgeUsage, type WispStatus,
 } from '../src/catalog';
 
 // The two live header dumps from the #171 recon, verbatim (see the project gotcha). Kept whole rather than
@@ -209,5 +210,53 @@ describe('buildStatus', () => {
     expect(status.meters).toBeUndefined();
     expect(status.contextTokens).toBe(5);
     expect(status.contextPercent).toBeUndefined();
+  });
+});
+
+// ----------------------------- The ledger ----------------------------- //
+
+const snap = (over: Partial<WispStatus> = {}): WispStatus => ({
+  updatedAt: 1_000_000, providerId: 'anthropic', model: 'claude-fable-5', ...over,
+});
+
+describe('mergeStatus', () => {
+  it('remembers the previous Provider once the route moves to another one', () => {
+    const prev = snap({ providerId: 'codex', model: 'gpt-5.4', meters: [{ label: '7d', percent: 7 }] });
+    const merged = mergeStatus(prev, snap({ updatedAt: 1_000_500, meters: [{ label: '5h', percent: 4 }] }));
+    expect(merged.providerId).toBe('anthropic');
+    expect(merged.providers).toEqual({
+      codex: { updatedAt: 1_000_000, model: 'gpt-5.4', meters: [{ label: '7d', percent: 7 }] },
+    });
+  });
+
+  // The live reading is the top-level snapshot; a leftover entry for the same wire would render twice.
+  it('evicts the now-active Provider from the ledger', () => {
+    const prev = snap({
+      providerId: 'anthropic',
+      providers: { codex: { updatedAt: 999_000, model: 'gpt-5.4', meters: [{ label: '7d', percent: 7 }] } },
+    });
+    const merged = mergeStatus(prev, snap({ updatedAt: 1_000_500, providerId: 'codex', model: 'gpt-5.4' }));
+    expect(merged.providers).toBeUndefined();
+  });
+
+  // Nothing measured, nothing to remember — an empty entry would claim the wire reported a limit.
+  it('does not remember a Provider that reported no meters', () => {
+    const merged = mergeStatus(snap({ providerId: 'codex' }), snap({ updatedAt: 1_000_500 }));
+    expect(merged.providers).toBeUndefined();
+  });
+
+  it('drops an entry older than the ledger window', () => {
+    const stale = { updatedAt: 1, model: 'gpt-5.4', meters: [{ label: '7d', percent: 7 }] };
+    const merged = mergeStatus(
+      snap({ updatedAt: QUOTA_LEDGER_MAX_AGE_MS + 2, providers: { codex: stale } }),
+      snap({ updatedAt: QUOTA_LEDGER_MAX_AGE_MS + 2 }),
+    );
+    expect(merged.providers).toBeUndefined();
+  });
+
+  it('carries the ledger through when there is no previous snapshot', () => {
+    expect(mergeStatus(undefined, snap({ meters: [{ label: '5h', percent: 4 }] }))).toEqual(
+      snap({ meters: [{ label: '5h', percent: 4 }] }),
+    );
   });
 });

@@ -6,6 +6,68 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.42] — 2026-07-30
+
+**The statusline becomes a panel, and stops forgetting.** #171 shipped the readings as a one-line badge —
+`[WISP fable→claude-fable-5 ctx 7% 5h 11% 7d 35%]` — a run of numbers with no shape, sat next to other
+badges. And they lived exactly one turn: the Bridge overwrote `~/.wisp/status.json` after every bridged
+turn, so the moment a route moved from Codex to Anthropic, what Codex had just said about your weekly
+limit was gone.
+
+### Changed
+
+- **`wisp-slot` 1.7.0 — the statusline badge is now a block.** Row one is the route; below it, one bar per
+  quota window with its percentage and when it refills; below that, a dimmed row per other Provider whose
+  limits are known, stamped with the age of the reading.
+
+  ```
+  wisp │ opus → claude-opus-5 │ ctx 17% │ anthropic
+    5h  ●●○○○○○○○○   16%  ↻ 2:00pm
+    7d  ●●●●○○○○○○   35%  ↻ Mon 4:00am
+    codex  7d 7% · 5h 0%   3h ago
+  ```
+
+  Bars and percentages are colour-scaled on the bands you act on (green / amber / red / spent), so a
+  window running out is visible without reading a number. It prints **no leading newline** — the composing
+  statusline decides where the block starts, and an unbridged session still prints nothing at all. The
+  wiring snippets in `plugins/slot/README.md` changed shape accordingly.
+
+- **A stale snapshot now costs its context reading, not its meters.** Past 30 minutes, or on a model that
+  does not match the session's resolved Target, `ctx` still disappears — that number describes a finished
+  conversation. The quota rows survive as remembered ones with their age shown: a window belongs to the
+  account, not to the conversation.
+
+### Added
+
+- **A quota ledger in the status snapshot.** `status.json` gains a `providers` map — every Provider that
+  reported a limit in the last 24 hours, keyed by Provider id, each with the meters it reported and when.
+  The Provider serving the current turn is never in the map; it *is* the top-level snapshot, and holding
+  both would let a reader render the same wire twice, once stale. Only quota carries across a switch:
+  context fill belongs to the live conversation, so another Provider's old percentage would describe a
+  window this session is not spending.
+
+- **`WispHome.readStatus()`**, the read half of the snapshot the store could only write before. Unlike
+  `config.json` and `auth.json` a snapshot that does not parse is simply replaced — #182's
+  never-overwrite rule protects stores holding something the user cannot regenerate, and this file is one
+  turn of telemetry.
+
+### Surfaces
+
+- **npm `wisp-router` 2.0.42** — this release. The hosted Bridge (`wisp serve`, `claude-wisp`) starts
+  writing the ledger; nothing else in the CLI changes. **The block renders without it** — only the
+  remembered-Provider rows need this version.
+- **`wisp-slot` 1.7.0** — the reader, and the whole visible half of this entry. Ships through the plugin
+  marketplace on merge, independent of the npm publish.
+- **vsix** — the extension bundles its own `@wisp/core`, so it gains the ledger when next packaged. It
+  also loses a stale `[WISP] statusline badge` mention in the side panel's plugin blurb. **Not cut this
+  pass**: 1.11.0 is still the newest build and is not installed yet.
+
+### Notes
+
+- Two Providers report utilization headers: Codex (`x-codex-*`) and Anthropic
+  (`anthropic-ratelimit-unified-*`). Grok and Antigravity report none, so they never appear in the
+  ledger — inventing a meter for them would be exactly the confident wrong number #171 exists to avoid.
+
 ## [2.0.41] — 2026-07-30
 
 **Antigravity** — a sixth Provider, and the first one that reaches Claude Code and the OpenAI-speaking

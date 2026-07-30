@@ -1,4 +1,4 @@
-// ---------------- wisp-statusline.js — Wisp badge for a composed statusline ---------------- //
+// ---------------- wisp-statusline.js — Wisp block for a composed statusline ---------------- //
 
 /*
 Depends on:
@@ -12,7 +12,21 @@ Data shapes:
                   snapshots: { [row]: { providerId, model } | null }, ... }
   status.json — the Bridge's per-turn snapshot (#171):
                 { updatedAt, providerId, model, contextTokens?, contextWindow?,
-                  contextPercent?, meters?: [{ label, percent, resetAt? }] }
+                  contextPercent?, meters?: [{ label, percent, resetAt? }],
+                  providers?: { [id]: { updatedAt, model, meters } } }
+
+Renders a multi-row BLOCK, not a badge:
+
+    wisp │ fable → claude-fable-5 │ ctx 38% │ anthropic
+      5h  ●●○○○○○○○○   11%  ↻ 9:04pm
+      7d  ●●●●○○○○○○   35%  ↻ Sun 9:59pm
+      codex  7d 7%                 3h ago
+
+Row 1 is the route. The middle rows are the ACTIVE Provider's quota windows, live for this turn. The
+tail rows are every OTHER Provider the ledger remembers, dimmed and stamped with their age — a limit
+you are not currently spending is still a limit worth seeing, but it is never presented as current.
+
+No leading newline: the composing statusline owns where the block starts (see plugins/slot/README.md).
 */
 
 const fs = require('node:fs');
@@ -23,54 +37,148 @@ const path = require('node:path');
 
 const wispHome = process.env.WISP_HOME || path.join(os.homedir(), '.wisp');
 
-// Same two-part check as the SessionStart hook; unbridged sessions get no badge.
+// Same two-part check as the SessionStart hook; unbridged sessions get no block.
 if (!process.env.ANTHROPIC_BASE_URL || !fs.existsSync(wispHome)) process.exit(0);
 
-// A snapshot older than this is a previous session's turn, not this one's. Showing it would be a confident
-// wrong number — the one thing #171 forbids — so it ages out and the fields simply disappear.
+// A snapshot older than this is a previous session's turn, not this one's. Its CONTEXT reading is then a
+// confident wrong number — the one thing #171 forbids — so it ages out. Its quota meters do not: a window
+// belongs to the account, not the conversation, so they demote to a dated row instead of vanishing.
 const STATUS_MAX_AGE_MS = 30 * 60 * 1000;
 
-// --------------------------------- Badge assembly --------------------------------- //
+// Mirrors QUOTA_LEDGER_MAX_AGE_MS in packages/core/src/status.ts. Pruning on read as well as on write is
+// what keeps an idle machine from showing yesterday's limits: nothing rewrites status.json while nothing runs.
+const LEDGER_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-// Resolve the session's family live from config on every refresh, so a
-// mid-session Slot rebind shows up on the next repaint. The held-Snapshot count
-// comes from the same config read (the Wisp snapshot store). Any failure along
-// the way degrades to the bare badge rather than lying.
-let badge = '[WISP]';
-let heldCount = 0;
-try {
-  const stdin = JSON.parse(fs.readFileSync(0, 'utf8'));
-  const cfg = JSON.parse(fs.readFileSync(path.join(wispHome, 'config.json'), 'utf8'));
-  heldCount = Object.keys(cfg.snapshots || {}).length;
-  const name = `${stdin.model?.id || ''} ${stdin.model?.display_name || ''}`.toLowerCase();
-  const family = ['haiku', 'sonnet', 'opus', 'fable'].find((f) => name.includes(f));
-  const target = family && cfg.routing?.families?.[family];
-  if (target?.model) {
-    // #171: the live cost of the session, from the snapshot the Bridge writes after each turn. Read in its
-    // OWN try so a missing/corrupt status.json costs the readings, never the model badge itself.
-    // ponytail: one line, appended fields — this is a badge inside a composed statusline row, so the
-    // reference screenshot's stacked meter rows would fight every other badge sharing the line.
-    let live = '';
-    try {
-      const status = JSON.parse(fs.readFileSync(path.join(wispHome, 'status.json'), 'utf8'));
-      // Both guards are about honesty, not tidiness: a stale snapshot describes a finished session, and a
-      // snapshot for another model describes another route's window. Either way the number would be wrong.
-      const fresh = Date.now() - (status.updatedAt || 0) < STATUS_MAX_AGE_MS;
-      if (fresh && status.model === target.model) {
-        // Rendered verbatim, including past 100% — a 122% reading is a conversation already over the window
-        // and doomed upstream, and seeing it BEFORE the request fails is the point.
-        if (typeof status.contextPercent === 'number') live += ` ctx ${status.contextPercent}%`;
-        for (const m of status.meters || []) live += ` ${m.label} ${m.percent}%`;
-      }
-    } catch { /* no snapshot yet, or unreadable — the badge just carries no readings */ }
-    badge = `[WISP ${family}→${target.model}${live}]`;
+const BAR_CELLS = 10;
+const MAX_REMEMBERED_ROWS = 2;
+
+// --------------------------------- Paint --------------------------------- //
+
+// xterm-256. Wisp purple is 141 — the nearest 256-color to the TUI theme's #a78bfa.
+const PURPLE = 141, TEXT = 252, LABEL = 244, DIM = 240, FAINT = 238, SNAP = 208;
+
+const paint = (code, text) => `\x1b[38;5;${code}m${text}\x1b[0m`;
+
+// Utilization → colour. The bands are the ones a user acts on: green is fine, amber is "plan the session",
+// red is "this window is nearly gone", bright red is spent-or-over. Context percent uses the same ramp, so
+// a full window and a full context look equally alarming — because they cost the same thing.
+const scale = (percent) => (percent >= 100 ? 196 : percent >= 80 ? 203 : percent >= 50 ? 179 : 114);
+
+// Ambiguous-width glyphs on purpose: ●/○ are what the reference statusline uses and what reads as a meter
+// at a glance. They are single-width everywhere except terminals configured to treat CJK-ambiguous as wide.
+const bar = (percent) => {
+  // A non-zero reading never renders as an empty bar — floor it at one cell. 0% and 3% mean different
+  // things, and rounding 3% down to nothing would make an account that has started spending look untouched.
+  const cells = Math.round((percent / 100) * BAR_CELLS);
+  const filled = percent <= 0 ? 0 : Math.max(1, Math.min(BAR_CELLS, cells));
+  return paint(scale(percent), '●'.repeat(filled)) + paint(FAINT, '○'.repeat(BAR_CELLS - filled));
+};
+
+// ------------------------------- Time labels ------------------------------- //
+
+const clockTime = (date) =>
+  date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/\s+/g, '').toLowerCase();
+
+// When a window refills. Same-day resets are the common case and need no date; anything further out gets a
+// weekday, because "9:59pm" three days from now would read as tonight.
+const resetLabel = (epochSeconds) => {
+  const date = new Date(epochSeconds * 1000);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const sameDay = date.toDateString() === new Date().toDateString();
+  return sameDay ? clockTime(date) : `${date.toLocaleDateString([], { weekday: 'short' })} ${clockTime(date)}`;
+};
+
+const ageLabel = (ms) => {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.round(minutes / 60)}h ago`;
+};
+
+// --------------------------------- Reads --------------------------------- //
+
+// Every read is independently fallible: a missing status.json must cost the readings, never the route row.
+const readJson = (file) => {
+  try { return JSON.parse(fs.readFileSync(path.join(wispHome, file), 'utf8')); } catch { return undefined; }
+};
+
+const stdin = (() => { try { return JSON.parse(fs.readFileSync(0, 'utf8')); } catch { return {}; } })();
+
+const cfg = readJson('config.json') || {};
+const status = readJson('status.json');
+const now = Date.now();
+
+// --------------------------------- The route --------------------------------- //
+
+// Resolved live from config on every refresh, so a mid-session Slot rebind shows up on the next repaint.
+const modelName = `${stdin.model?.id || ''} ${stdin.model?.display_name || ''}`.toLowerCase();
+const family = ['haiku', 'sonnet', 'opus', 'fable'].find((f) => modelName.includes(f));
+const target = (family && cfg.routing?.families?.[family]) || undefined;
+const heldCount = Object.keys(cfg.snapshots || {}).length;
+
+// The snapshot is only THIS session's turn when it is both recent and about the model we are routed to —
+// otherwise it describes another route's window. Meters survive that verdict as history; context does not.
+const live = status && now - (status.updatedAt || 0) < STATUS_MAX_AGE_MS && status.model === target?.model
+  ? status
+  : undefined;
+
+const rows = [];
+
+const head = [paint(PURPLE, 'wisp')];
+if (target?.model) head.push(`${paint(PURPLE, family)} ${paint(DIM, '→')} ${paint(TEXT, target.model)}`);
+// Rendered verbatim, including past 100% — a 122% reading is a conversation already over the window and
+// doomed upstream, and seeing it BEFORE the request fails is the point.
+if (typeof live?.contextPercent === 'number') {
+  head.push(`${paint(LABEL, 'ctx')} ${paint(scale(live.contextPercent), `${live.contextPercent}%`)}`);
+}
+if (target?.providerId) head.push(paint(LABEL, target.providerId));
+if (heldCount) head.push(paint(SNAP, heldCount > 1 ? `!SNAP×${heldCount}` : '!SNAP'));
+rows.push(head.join(paint(DIM, ' │ ')));
+
+// --------------------------------- Meter rows --------------------------------- //
+
+const activeMeters = live?.meters || [];
+const labelWidth = Math.max(3, ...activeMeters.map((m) => String(m.label).length));
+
+for (const meter of activeMeters) {
+  if (typeof meter.percent !== 'number') continue;
+  const reset = typeof meter.resetAt === 'number' ? resetLabel(meter.resetAt) : undefined;
+  rows.push([
+    '  ',
+    paint(LABEL, String(meter.label).padStart(labelWidth)),
+    '  ',
+    bar(meter.percent),
+    paint(scale(meter.percent), `${meter.percent}%`.padStart(5)),
+    reset ? `  ${paint(DIM, '↻')} ${paint(LABEL, reset)}` : '',
+  ].join(''));
+}
+
+// ------------------------------ Remembered rows ------------------------------ //
+
+// Providers whose limits are known but not being spent right now: the ledger's entries, plus the active
+// snapshot itself when it aged out (its meters are still the last thing that wire said about the account).
+const remembered = [];
+if (status) {
+  if (!live && status.meters?.length && status.providerId) {
+    remembered.push({ id: status.providerId, updatedAt: status.updatedAt || 0, meters: status.meters });
   }
-} catch {}
+  for (const [id, entry] of Object.entries(status.providers || {})) {
+    if (entry?.meters?.length) remembered.push({ id, updatedAt: entry.updatedAt || 0, meters: entry.meters });
+  }
+}
 
-// Snapshot marker rides on any badge form — visibility must not depend on the model
-// match. ASCII on purpose: wide ⚠ glyphs overlap the next cell in some terminals.
-if (heldCount) badge = badge.replace(/\]$/, heldCount > 1 ? ` !SNAP×${heldCount}]` : ' !SNAP]');
+const shown = remembered
+  .filter((e) => now - e.updatedAt <= LEDGER_MAX_AGE_MS)
+  .sort((a, b) => b.updatedAt - a.updatedAt)
+  .slice(0, MAX_REMEMBERED_ROWS);
 
-// Wisp purple — the signature accent (#a78bfa in the TUI theme; xterm 141 is the nearest
-// 256-color). Joins the colored badge row (caveman orange, elucidate purple, ponytail pink).
-process.stdout.write(`\x1b[38;5;141m${badge}\x1b[0m`);
+for (const entry of shown) {
+  const readings = entry.meters
+    .filter((m) => typeof m.percent === 'number')
+    .map((m) => `${paint(LABEL, m.label)} ${paint(scale(m.percent), `${m.percent}%`)}`)
+    .join(paint(FAINT, ' · '));
+  if (!readings) continue;
+  rows.push(`  ${paint(LABEL, entry.id)}  ${readings}  ${paint(FAINT, ageLabel(now - entry.updatedAt))}`);
+}
+
+process.stdout.write(rows.join('\n'));

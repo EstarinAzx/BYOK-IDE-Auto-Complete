@@ -19,7 +19,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { isUnusableStore, parseWispAuth, parseWispConfig, serializeWispStore, type WispAuth, type WispConfig } from './home';
-import type { WispStatus } from './status';
+import { mergeStatus, type WispStatus } from './status';
 
 // ----------------------------- Paths ----------------------------- //
 
@@ -93,11 +93,25 @@ export class WispHome {
   // Secrets file — owner-only (0o600) per ADR-0002.
   writeAuth = (patch: Partial<WispAuth>): WispAuth => this.merge(AUTH_FILE, parseWispAuth, patch, 0o600);
 
-  // #171: overwrite the statusline snapshot. Whole-file write, not a merge — every field is recomputed
-  // per turn, so a leftover key from a previous turn's Provider would be a stale reading, not a default.
+  // The previous snapshot, or undefined when there is none / it does not parse. Unlike config.json and
+  // auth.json this file is NEVER protected from overwrite (#182's rule is about stores that hold something
+  // the user cannot regenerate) — a corrupt status.json is one turn of telemetry, and the next turn fixes it.
+  readStatus = (): WispStatus | undefined => {
+    const raw = this.readRaw(STATUS_FILE);
+    if (raw === undefined) return undefined;
+    try { return JSON.parse(raw) as WispStatus; } catch { return undefined; }
+  };
+
+  // #171: overwrite the statusline snapshot. Every field of the ACTIVE Provider is recomputed per turn, so
+  // the write is whole-file rather than a key merge — a leftover key would be a stale reading, not a
+  // default. The one thing carried across is the quota ledger: mergeStatus moves the outgoing Provider's
+  // meters into `providers` so a route switch does not blank what the other wire last said about itself.
   // Failures are swallowed: telemetry must never take a turn down.
   writeStatus = (status: WispStatus): void => {
-    try { this.writeRaw(STATUS_FILE, `${JSON.stringify(status, null, 2)}\n`, 0o644); } catch { /* best-effort */ }
+    try {
+      const merged = mergeStatus(this.readStatus(), status);
+      this.writeRaw(STATUS_FILE, `${JSON.stringify(merged, null, 2)}\n`, 0o644);
+    } catch { /* best-effort */ }
   };
 
   // Watch the DIRECTORY, not the files — atomic rename-swaps replace the inode, which silently kills

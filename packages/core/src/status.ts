@@ -11,6 +11,8 @@
  *   - WispStatus: what the Bridge drops in ~/.wisp/status.json after a bridged turn, and the statusline
  *     script reads back. Every field past updatedAt/providerId/model is OPTIONAL on purpose — a missing
  *     field renders as a missing field, never as a zero (#171: a fabricated reading is worse than a blank).
+ *   - WispProviderQuota: one REMEMBERED Provider's last meters, kept in the `providers` ledger so a route
+ *     switch does not erase what the other wire last said about itself.
  *
  * The two upstreams report utilization in different shapes and different UNITS (Anthropic a 0..1 fraction
  * over named windows, Codex an integer percent over primary/secondary whose size only *-window-minutes
@@ -30,6 +32,15 @@ import type { BridgeUsage } from './shared';
 // resetAt is epoch SECONDS, absent when the upstream didn't say.
 export type QuotaMeter = { label: string; percent: number; resetAt?: number };
 
+// One Provider's last known quota reading, as remembered AFTER the route moved on to another Provider.
+// Only the meters survive: context fill belongs to the live conversation, so another Provider's old
+// context percentage would describe a window this session is not spending.
+export type WispProviderQuota = {
+  updatedAt: number;      // epoch MS — the reader shows the age, because a remembered meter is a past one
+  model: string;
+  meters: QuotaMeter[];
+};
+
 // The snapshot written after a bridged turn. contextTokens/contextWindow/contextPercent travel together —
 // all three or none — so a reader can show the raw counts or the percentage without recomputing either.
 export type WispStatus = {
@@ -40,6 +51,9 @@ export type WispStatus = {
   contextWindow?: number;
   contextPercent?: number;
   meters?: QuotaMeter[];
+  // Every OTHER Provider that has reported quota recently, keyed by Provider id. The active Provider is
+  // never in here — it is the top-level snapshot. Absent when nothing else is remembered.
+  providers?: Record<string, WispProviderQuota>;
 };
 
 // ----------------------------- Window labels ----------------------------- //
@@ -162,4 +176,35 @@ export const buildStatus = ({ now, provider, model, usage, meters }: BuildStatus
     ...(percent !== undefined ? { contextPercent: percent } : {}),
     ...(meters?.length ? { meters } : {}),
   };
+};
+
+// ----------------------------- The ledger ----------------------------- //
+
+// How long a remembered Provider's meters stay in the ledger. A day outlives the short window (5h) and
+// covers most of a long one (7d), and the reader prints the entry's AGE, so an old reading is labelled
+// rather than disguised. Past this it is dropped: an unbounded ledger would accumulate Providers the
+// account no longer uses and quietly present last week's limits as news.
+export const QUOTA_LEDGER_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+// Fold the previous snapshot into the new one so the statusline can show every Provider that reported a
+// limit lately, not only the one that happened to serve this turn.
+//
+// Only quota survives a switch, and only when the Provider actually reported some: a Provider with no
+// meters has nothing to remember, and writing an empty entry would claim it was measured. The active
+// Provider is always evicted from the ledger — its live reading is the top-level snapshot, and keeping
+// both would let the reader render the same wire twice, once stale.
+export const mergeStatus = (prev: WispStatus | undefined, next: WispStatus): WispStatus => {
+  const ledger: Record<string, WispProviderQuota> = { ...prev?.providers };
+
+  // The previously active Provider becomes a remembered one — this is the only place entries are born.
+  if (prev?.meters?.length && prev.providerId) {
+    ledger[prev.providerId] = { updatedAt: prev.updatedAt, model: prev.model, meters: prev.meters };
+  }
+
+  delete ledger[next.providerId];
+  for (const [id, entry] of Object.entries(ledger)) {
+    if (next.updatedAt - entry.updatedAt > QUOTA_LEDGER_MAX_AGE_MS) delete ledger[id];
+  }
+
+  return { ...next, ...(Object.keys(ledger).length ? { providers: ledger } : {}) };
 };

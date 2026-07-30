@@ -647,7 +647,7 @@ export const App = () => {
 
         {/* The plugin makes bridged sessions self-aware — nudge here, where Claude Code gets wired. */}
         <p class="hint">
-          Recommended: the wisp-slot Claude Code plugin — session announcement, [WISP] statusline badge, and the Slot skill for bridged sessions. Install: <code class="snippet">/plugin marketplace add EstarinAzx/Wisp-Router</code>
+          Recommended: the wisp-slot Claude Code plugin — session announcement, a live statusline block (route, context, quota meters), and the Slot skill for bridged sessions. Install: <code class="snippet">/plugin marketplace add EstarinAzx/Wisp-Router</code>
         </p>
 
         {/* Advisor now works through Wisp — the door plays the server-tool role (2.0.21). Note it where the wiring happens. */}
