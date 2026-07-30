@@ -1,7 +1,7 @@
 ---
 type: gotcha
 project: wisp
-updated: 2026-07-29
+updated: 2026-07-30
 tags: [context, gotcha, statusline, bridge]
 ---
 
@@ -26,6 +26,16 @@ match the session's resolved Target, which hides cross-family clobbering *from t
 about the **write**. The file is only ever a reliable description of *the most recent turn on the machine*,
 whoever made it.
 
+**It also DISPLACES a session's own reading, which is a rendering bug, not just an observation one.**
+Discovered 2026-07-30: the guard above suppresses the wrong reading but does not go find the right one. A
+`sonnet → codex` session sat next to an `opus → anthropic` session that turns constantly, so the top level
+was anthropic's continuously — and the codex reading, correctly ledgered by `mergeStatus`, was never read
+back. The block rendered anthropic's `5h`/`7d` pair as its only quota row, in a codex session. The reader now
+looks in **both** places keyed on `providerId`
+([[2026-07-30-the-statusline-finds-its-quota-by-provider-in-either-of-two-places]]). So: the global slot's
+consequence is not only "you can't watch another session" — it is **"your own reading may not be where you
+look for it"**, and any new consumer of `status.json` must check the ledger too.
+
 **What to use instead.** For verifying that a session reported usage, read the **Claude Code transcript** —
 per-session, durable, and it carries the real numbers:
 
@@ -45,4 +55,6 @@ tooling, or a second face. Tracked as an open question in [[active-work]], delib
 - [[gotchas]]
 - [[cc-transcript-rows-are-blocks-not-messages]]
 - [[2026-07-29-quota-is-a-side-channel-not-a-bridge-stream-event]]
+- [[2026-07-30-the-statusline-finds-its-quota-by-provider-in-either-of-two-places]]
+- [[the-statusline-duplicates-resolveroute-and-drifts]]
 - [[active-work]]

@@ -36,10 +36,18 @@ Two related traps in the same area:
   because the wiring is missing. #200 captured all four: Grok's `x-ratelimit-*` never decrement and have no
   reset field, Antigravity and opencode put nothing quota-shaped on the head at all
   ([[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]). Do not file this as a gap.
+- **Codex on a Plus plan has exactly ONE window, so waiting for a 5h codex bar is waiting forever.** Captured
+  live 2026-07-30 off `chatgpt.com/backend-api/codex`: `x-codex-primary-window-minutes: 10080` (→ `7d`) with
+  `x-codex-secondary-window-minutes: 0`, and `parseCodexQuota` correctly refuses a slot without both a
+  reading and a window size (`status.ts:88-91`) — so a codex session renders a single `7d` row, never a pair.
+  A `5h`/`7d` pair in the block is **Anthropic's**, which is the tell for the displacement bug
+  ([[2026-07-30-the-statusline-finds-its-quota-by-provider-in-either-of-two-places]]). The head also carries
+  `x-codex-plan-type`, `x-codex-active-limit` and `x-codex-credits-*`, none of which are windows.
 
 ## Related
 
 - [[gotchas]]
 - [[2026-07-30-a-quota-window-belongs-to-the-account-a-context-reading-to-the-conversation]]
 - [[status-json-is-global-so-it-cannot-observe-another-session]]
+- [[2026-07-30-the-statusline-finds-its-quota-by-provider-in-either-of-two-places]]
 - [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]

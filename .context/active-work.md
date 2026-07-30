@@ -7,48 +7,66 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-30 15:45 by Opus 5 (1M) (auto)_
-_At commit: `175c694` on main. Released: `wisp-router@2.0.42`, `wisp-slot` 1.7.1._
+_Last updated: 2026-07-30 17:05 by Opus 5 (1M) (auto)_
+_At commit: `3974441` on main. Released: `wisp-router@2.0.42`, `wisp-slot` 1.7.2._
 
 ## Current focus
 
-**Nothing in flight. The tracker queue is empty.**
+**Nothing in flight. The tracker queue is empty.** This pass was a user-reported statusline bug, diagnosed
+and fixed off-tracker.
 
-**#200 closed recon-complete — and the answer was "build nothing".** The last ticket in the queue asked which
-of the four wires that never call `onQuota` (xai, antigravity, keyed ×2) actually report quota on their
-response head. All four were driven with real turns and captured; **none earned `parseable meter`**, so no
-child implementation ticket was filed. That was the acceptance criterion, not a shortcut.
+**"Why isn't my codex quota showing up? It's showing anthropic's instead."** Second time that sentence has
+been reported, different cause. Screenshot showed a complete route row — `wisp │ sonnet → gpt-5.6-sol │
+codex` — and beneath it `anthropic 5h 15% · 7d 37% just now` as the only quota reading.
 
-The substance, in one line each:
+Two findings, in order:
 
-- **xai has the headers and they are a trap.** `x-ratelimit-limit/remaining-requests|tokens` ride both
-  endpoints (public `api.x.ai` and the subscription proxy `cli-chat-proxy.grok.com`) and **never move** —
-  `864/864` across 3 fully-drained `grok-build` turns, `8300/8300` across 2 on `grok-4.5` — with **no
-  `x-ratelimit-reset*` header at all**. Advertised plan ceilings, not readings.
-- **antigravity puts nothing quota-shaped on the head**, twice, drained (only `server-timing` + transport
-  noise). Credits exist on a separate endpoint the reference **polls**, reporting an absolute balance with no
-  window and no reset — and empty on this free-tier account.
-- **keyed opencode-go: nothing on the head.** Which retires the `.withResponse()` question at
-  `bridgeServer.ts:703` for free. `opencode-zen` shares the credential and answered `401 CreditsError`
-  (no balance) → recorded *not captured*.
+1. **Codex quota was never broken.** Two drained turns against `chatgpt.com/backend-api/codex` returned
+   `x-codex-primary-used-percent: 1` / `x-codex-primary-window-minutes: 10080`, and one bridge turn on
+   `claude-sonnet-5` wrote `status.json` with `providerId: codex`, a `7d` meter, and anthropic correctly
+   folded into `providers`. The whole write path works end to end.
+2. **The reader looked in one place.** `status.json` is **one global slot**, so the top-level snapshot is the
+   last turn on the *machine*, not this session. A concurrent `opus → anthropic` session owned it
+   continuously; the codex reading sat in the `providers` ledger, unread, because the block only trusted the
+   top level for a live reading. So it rendered the other session's windows where this session's quota
+   belongs. In the reported frame codex had not turned at all, so no reading existed anywhere — the fixed
+   block correctly shows the route row alone.
 
-Full capture in [[quota-recon]]; the reasoning is settled in
-[[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]].
+**Also settled in passing:** codex on a Plus plan has **exactly one window** —
+`x-codex-secondary-window-minutes: 0`, which `parseCodexQuota` correctly refuses. A codex session renders a
+single `7d` row and never a pair, so **a `5h`/`7d` pair in the block is Anthropic's**. That is now the
+fastest tell for this bug.
 
 ## State
 
 - **In flight:** nothing.
-- **Done this pass:**
-  - `.context/quota-recon.md` — the #200 capture: per-wire response heads verbatim (credentials redacted),
-    a verdict each, and why no follow-up ticket exists.
-  - `.context/decisions/2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter.md`
-  - `.context/gotchas/a-cancelled-response-body-cannot-test-whether-a-counter-decrements.md`
-  - `.context/gotchas/loadcodeassist-answers-with-the-account-email-inside-it.md`
-  - Amended [[an-empty-quota-ledger-is-usually-correct-not-broken]] — the two-wire limit is now **settled**
-    (their heads carry nothing usable), not a pending gap someone should file.
-  - **No source change.** The recon script was a throwaway `bun` file, deleted; the ticket branch was
-    deleted unused because the only deliverable was a note, and `.context/` belongs on main.
+- **Done this pass** (`3974441`, main, wisp-slot **1.7.2**):
+  - `plugins/slot/statusline/wisp-statusline.js` — reader-only fix. The meter rows are now the route's own
+    Provider's windows, looked up by **`providerId`** in the top-level snapshot *or*
+    `status.providers[<id>]`; aged readings stamp their age on the group's first row; the route's Provider is
+    excluded from the tail rows. `ctx` keeps the stricter **model** match; both sources prune on read at 24h.
+  - `plugins/slot/statusline/check.js` — 10 → **20 assertions**, three new cases: cross-session displacement,
+    a Provider that has reported nothing, and a sibling model on the same Provider.
+  - `.context/decisions/2026-07-30-the-statusline-finds-its-quota-by-provider-in-either-of-two-places.md`
+  - Amended three gotchas: [[status-json-is-global-so-it-cannot-observe-another-session]] (it displaces your
+    own reading, not just other sessions'), [[the-statusline-duplicates-resolveroute-and-drifts]] (the symptom
+    has two causes; the route row distinguishes them), [[an-empty-quota-ledger-is-usually-correct-not-broken]]
+    (codex Plus = one `7d` window).
+  - Both recon probes were throwaway `bun` files under gitignored `out/`, deleted.
 - **Blocked:** nothing. Every open item is human-optional (below).
+
+## Verification
+
+- `node plugins/slot/statusline/check.js` → **20/20**, exit 0.
+- **Control:** `git show HEAD~1:plugins/slot/statusline/wisp-statusline.js` + the new `check.js` → **4 failing**
+  (`displaced route leads with its own Provider`, `displaced reading is stamped aged`, `sibling model shares
+  the account window`, `sibling reading is stamped aged`). Without the control the new assertions prove nothing
+  ([[verifying-a-fix-release-needs-the-previous-version-as-a-control]]).
+- **Live render** against the real `~/.wisp/`, both routes: sonnet leads with
+  `7d ●○○○○○○○○○ 1% ↻ Wed 4:59pm  4m ago` and anthropic drops to the dimmed tail; opus keeps its own two bars
+  with `codex 7d 1% 4m ago` in the tail.
+- **No package gate run** — nothing under `packages/` was touched, so `bun run test` / `typecheck` / `compile`
+  had nothing to say about this diff. `check.js` is the whole gate for a statusline-only change.
 
 ## Pick up here
 
@@ -65,22 +83,20 @@ user brings new work. **Do not invent a ticket to keep a loop fed.**
 
 ## Skills for next session
 
-- `/preset pick-up` — the baton at [[pick-up]] is current as of `175c694`.
+- `/preset pick-up` — the baton at [[pick-up]] is current as of `3974441`.
 - `packages/tui:verify` — scoped skill (`packages/tui/.claude/skills/verify`). Sandboxed `WISP_HOME` + real
   Bun entry points; use it for any `packages/tui` or core-that-tui-bundles change, and before any npm cut.
 
 ## Open questions
 
-- ~~`/plugin update wisp-slot`~~ — **done**; cache is 1.7.1 and matches the checkout. Was cosmetic either way,
-  since the wrapper hardcodes the checkout path
-  ([[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]).
 - **No release is owed.** `git log v2.0.42..main` per face: `packages/tui`, `packages/core` and
-  `packages/vscode` are all **empty**; only `plugins/` moved (`f565e94`), and that shipped as wisp-slot 1.7.1
-  via `marketplace.json` on main — no tag, no npm cut involved. Four of the six commits since the tag are
-  `docs(context)`. `v2.0.42` remains correct
+  `packages/vscode` are all still **empty** — this pass touched `plugins/` only, shipping as wisp-slot **1.7.2**
+  via `marketplace.json` on main. No tag, no npm cut
   ([[2026-07-30-a-surfaces-section-is-checked-against-the-code-not-copied-from-the-ticket]]).
-- **`packages/vscode/wisp-1.11.0.vsix` still not installed.** No vsix cut this pass either — nothing touched
-  the extension.
+- **`/plugin update wisp-slot`** — cache is at 1.7.1, checkout is now 1.7.2. **Cosmetic**: the wrapper
+  hardcodes the checkout path, so the block the user sees is already the fixed one
+  ([[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]).
+- **`packages/vscode/wisp-1.11.0.vsix` still not installed.** Nothing touched the extension this pass either.
 - Carried over, unchanged: dismiss the two secret-scanning alerts as won't-fix; rotate `bridgeSecret` in
   `~/.wisp/auth.json` (low urgency); **#170** needs a Kimi Code subscription; **#189**'s last criterion (a
   Claude-model turn *completing* on Antigravity after the `2026-07-30T20:55:48Z` reset — note it on closed
@@ -88,24 +104,21 @@ user brings new work. **Do not invent a ticket to keep a loop fed.**
 
 ## Recent context
 
+- **A complete route row plus a foreign quota row means displacement, not resolution.** The two causes of the
+  same complaint are told apart by the route row alone: bare `wisp` → the resolveRoute copy drifted; a named
+  route → the global slot. Costs one glance, saved a whole wrong investigation this pass.
+- **The two-place lookup is safe only because `mergeStatus` evicts the incoming Provider from the ledger** —
+  so a Provider is in exactly one of the two places and the reader can never find two readings for one wire.
+  That eviction rule was written for an unrelated reason; weakening it now breaks the reader.
+- **The write path was proved by driving it, not by reading it.** A direct probe to the Codex backend showed
+  the headers exist; a second probe through the running bridge door (`POST $ANTHROPIC_BASE_URL/v1/messages`,
+  `stream: true`, model `claude-sonnet-5`) showed `status.json` flip to codex with the meter and the ledger
+  entry. Both took under a minute and removed all guesswork about which half was broken.
+- **`stream: false` never records a snapshot** — the non-streaming branch is Claude Code's `/model` validation
+  probe, deliberately excluded (`bridgeServer.ts:843` sits on the streaming path only). A probe that does not
+  stream will look like a Provider that never reports.
 - **`packages/core` has no `compile` script.** The gate there is `bun run typecheck` (`tsc --noEmit`); only
-  `packages/tui` has `compile` (`tsc -p ./`). The older "run `bun run compile` in BOTH packages" wording
-  errors with `Script not found "compile"` in core. Full gate this pass: **1016/1016 vitest**, core
-  `typecheck` clean, tui `compile` clean.
-- **Recon that reads a head must drain the body.** Cancelling the stream means the turn may never be billed,
-  so a `remaining` counter has nothing to move and a dead ceiling looks exactly like an untouched meter. The
-  first #200 pass did this and would have reported the opposite conclusion
-  ([[a-cancelled-response-body-cannot-test-whether-a-counter-decrements]]).
-- **`opencode-zen` needs no key of its own** — `keyId: 'opencode-go'` (`catalog.ts:77`), so one stored key
-  covers both, and two keyed Providers were reachable from a single credential. Its `401` was a *balance*
-  failure, not an auth one.
-- **opencode signals exhaustion by failing the turn** with a typed `CreditsError`, not by reporting a level on
-  a header — closer to the Antigravity 429 verdict path than to a meter.
-- **Antigravity's turns answered on the daily host both times** (chain position 1/2), so the production
-  fallback went unexercised; `loadCodeAssist` remains pinned to production. The asymmetry the code warns about
-  is real and still current.
-- **The ledger reading empty on this machine is still correct, not broken** — every turn is
-  `opus → anthropic`, and the active Provider is deliberately never in the ledger.
+  `packages/tui` has `compile` (`tsc -p ./`). Carried forward — untested this pass, no package changed.
 
 ## Related
 
@@ -114,9 +127,12 @@ user brings new work. **Do not invent a ticket to keep a loop fed.**
 - [[decisions]]
 - [[gotchas]]
 - [[quota-recon]]
-- [[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]
+- [[2026-07-30-the-statusline-finds-its-quota-by-provider-in-either-of-two-places]]
 - [[2026-07-30-a-quota-window-belongs-to-the-account-a-context-reading-to-the-conversation]]
+- [[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]
 - [[2026-07-29-quota-is-a-side-channel-not-a-bridge-stream-event]]
-- [[a-cancelled-response-body-cannot-test-whether-a-counter-decrements]]
+- [[status-json-is-global-so-it-cannot-observe-another-session]]
+- [[the-statusline-duplicates-resolveroute-and-drifts]]
 - [[an-empty-quota-ledger-is-usually-correct-not-broken]]
+- [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]
 - [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]
