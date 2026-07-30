@@ -9,55 +9,39 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Latest (2026-07-30, second pass): `f565e94` on main — `wisp-slot` 1.7.1.** The block was showing the
-*wrong* Provider's quota on an aliased route. It re-implements `resolveRoute` in plain JS (it runs
-out-of-process and cannot import core) and the copy knew only the family-fuzzy rung, so `sol` resolved to no
-Target: route row collapsed to bare `wisp`, the `status.model === target.model` live test could never pass,
-and the previous Provider's reading was the only thing left on screen. Fixed by mirroring the real order
-(**alias exact before family fuzzy**). `plugins/slot/statusline/check.js` now pins it — 10 assertions
-through the real script under a sandboxed `WISP_HOME`, no framework; **verified against the pre-fix file as
-a control (5 of 10 fail there)**. Filed #200 for the wires that report nothing.
+**Latest (2026-07-30, third pass): #200 closed recon-complete — the answer was "build nothing".** The last
+queue ticket asked which of the four wires that never call `onQuota` (xai, antigravity, keyed ×2) report quota
+on their response head. All four were driven with real turns and captured; **none earned `parseable meter`**,
+so **no child implementation ticket was filed** — that was the acceptance criterion, not a shortcut. xai *has*
+`x-ratelimit-*` on both endpoints and they are a trap: `864/864` across 3 fully-drained `grok-build` turns,
+`8300/8300` across 2 on `grok-4.5`, and **no `x-ratelimit-reset*` at all** — advertised plan ceilings, not
+readings. Antigravity and opencode-go put nothing quota-shaped on the head. Capture in [[quota-recon]],
+reasoning in [[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]. **No source changed**;
+the ticket branch was deleted unused and the notes landed on main.
 
-**Prior pass (2026-07-30): the statusline redesign shipped — `5592f44` on main, `wisp-router@2.0.42`
-published, `wisp-slot` 1.7.0.** The user's complaint was shape, not data: #171's readings were a one-line
-badge that looked like a copy of the caveman/ponytail badges beside it. It is now a block — route row, a
-colour-scaled `●○` bar per quota window with its reset time, and a dimmed row per other Provider whose
-limits are known, stamped with the reading's age. `status.json` gained a **quota ledger** so a route switch
-stops erasing what the other wire last said.
+**Prior pass: `f565e94` — `wisp-slot` 1.7.1.** The statusline block was showing the *wrong* Provider's quota on
+an aliased route, because the out-of-process copy of `resolveRoute` knew only the family-fuzzy rung. Fixed by
+mirroring the real order (**alias exact before family fuzzy**); `plugins/slot/statusline/check.js` pins it with
+10 assertions, control-verified (5 of 10 fail against the pre-fix file).
 
-## Queue: #200
+## Queue: EMPTY
 
-`gh issue list --label ready-for-agent --state open` — verify by query, not by this note.
+`gh issue list --label ready-for-agent --state open` returns nothing. **Verify by query, not by this note.**
 
-- **#200** — *ready-for-agent.* Recon: capture the response heads on the four wires that never call
-  `onQuota` (xai, antigravity, keyed ×2) and record a verdict each. Capture only — **no parser, no
-  `onQuota` threading, no `status.ts` change lands in it**. Needs live sign-ins; a wire that cannot be
-  reached is recorded as *not captured*, never guessed.
+Two open issues, neither agent-ready:
 
-Open, not agent-ready:
+- **#69** — copilot-wisp launcher, ungroomed backlog. `grill-me` / `/preset init` is the right shape.
+- **#163** — waiting, not working (watch the 217k–245k band for Anthropic `stop_reason=refusal`).
 
-- **#163** — waiting, not working (watch the 217k–245k band for refusals).
-- **#69** — copilot-wisp launcher, ungroomed. `grill-me` / `/preset init` is the right shape.
-
-## What this session shipped (evidence, reusable)
-
-- Core: `status.ts` gains `WispProviderQuota` / `WispStatus.providers` / pure `mergeStatus`;
-  `homeStore.ts` gains `readStatus()` and read-merge-writes the ledger.
-- Reader: `plugins/slot/statusline/wisp-statusline.js` rewritten badge → block, **no leading newline**
-  (the composing statusline owns layout). `~/.claude/hooks/statusline-wrapper.ps1` — **outside the repo** —
-  captures it and prefixes a newline only when non-empty.
-- Gate: **1016/1016 vitest**, `bun run compile` clean in **both** packages, `wisp routing` text/JSON/bad-flag
-  unchanged in a sandbox home, and the ledger driven end to end through the real `@wisp/core` resolution.
-- **Release verified with the 2.0.41 control**: the compiled `wisp.exe` carries `mergeStatus` /
-  `readStatus` / `QUOTA_LEDGER_MAX_AGE_MS` at 2.0.42 and scores **0** on the identical grep at 2.0.41.
-  `release.yml` run 30506981631 green.
+A `ticket-loop` firing that lands here should **stop the loop** rather than invent work. Grooming #69, or
+picking something off "Waiting on the user", are the honest next moves.
 
 ## Waiting on the user
 
-- **`/plugin update wisp-slot`** — hygiene only, and safe to ignore. Install record is 1.6.0, checkout is
-  1.7.0; the block the user sees comes from the checkout via the wrapper, and hooks/skills did not move.
-- **Install `packages/vscode/wisp-1.11.0.vsix`** — still not installed. No vsix was cut this pass on
-  purpose; the extension gains the ledger when next packaged.
+- **`/plugin update wisp-slot`** — hygiene only, safe to ignore. Install record is 1.6.0, checkout is 1.7.1;
+  the block the user sees runs from the checkout via the wrapper, and hooks/skills did not move.
+- **Install `packages/vscode/wisp-1.11.0.vsix`** — still not installed. Nothing touched the extension this
+  pass, so no new vsix was cut.
 - **Dismiss the two secret-scanning alerts** as "won't fix" —
   [#1 Client ID](https://github.com/EstarinAzx/Wisp-Router/security/secret-scanning/1),
   [#2 Client Secret](https://github.com/EstarinAzx/Wisp-Router/security/secret-scanning/2). Settled
@@ -70,22 +54,33 @@ Open, not agent-ready:
 
 ## Landmines (durable — keep carrying)
 
+Quota / recon:
+
+- **Only two wires report quota, and that is SETTLED, not a gap.** codex + anthropic call `onQuota`; xai,
+  antigravity and the keyed path never will, because their heads carry nothing usable. Do not file it as
+  missing work ([[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]).
+- **Recon that reads a response head must DRAIN the body.** Cancelling means the turn may never be billed, so
+  a `remaining` counter has nothing to move and a dead ceiling looks identical to an untouched meter. Fire
+  2–3 consecutive completed turns, or the finding is worthless
+  ([[a-cancelled-response-body-cannot-test-whether-a-counter-decrements]]).
+- **`loadCodeAssist` returns the account email** inside `upgradeSubscriptionUri`, percent-encoded (`%40`),
+  under a key no `email`/`id` pattern matches. Redact on the **value**, not the key name
+  ([[loadcodeassist-answers-with-the-account-email-inside-it]]).
+- **An empty `providers` map is usually correct** — the ledger never holds the *active* Provider.
+
 Statusline / status.json:
 
 - **The statusline DUPLICATES `resolveRoute`** — it runs out-of-process under Claude Code and cannot import
   `@wisp/core`, so `wisp-statusline.js:115-121` re-implements the lookup in plain JS. It has drifted once
   (aliases missing). Change `routing.ts:60-91` → check the copy, and run
   `node plugins/slot/statusline/check.js` (exit code is the verdict).
-- **A wrong-Provider reading looks identical to a stale one.** Both render as the dimmed dated row, because
-  a route that fails to resolve makes `live` unreachable. Suspect resolution before suspecting the ledger.
-- **An empty `providers` map is usually correct, not a bug.** The ledger never holds the *active* Provider,
-  so a machine where only one Provider ever serves has an empty map. Check whether a second Provider has
-  actually served a turn before debugging.
+- **A wrong-Provider reading looks identical to a stale one.** Both render as the dimmed dated row, because a
+  route that fails to resolve makes `live` unreachable. Suspect resolution before suspecting the ledger.
 - **The block the user sees runs from the repo checkout, not the plugin cache** — the wrapper points there
   deliberately, so `/plugin update` does not change what the statusline runs
   ([[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]).
-- **The wrapper lives outside the repo** (`~/.claude/hooks/statusline-wrapper.ps1`) — a change to the
-  block's shape may need it edited too, and that edit is not in any commit.
+- **The wrapper lives outside the repo** (`~/.claude/hooks/statusline-wrapper.ps1`) — a change to the block's
+  shape may need it edited too, and that edit is not in any commit.
 - Never verify usage from `status.json` — it is global
   ([[status-json-is-global-so-it-cannot-observe-another-session]]).
 
@@ -110,35 +105,45 @@ Antigravity (full detail in `active-work.md` history + memory notes):
   [[the-anthropic-door-does-not-use-the-executor-records]].
 - FULL system on this wire, never `systemSplit.stable`. 429 verdict rides ON the Error. Throw shape is a
   CONTRACT (`Antigravity API error <status>`). SSE framing is CRLF — do not "simplify" `sseBlocks`.
-- **A green suite did not catch a dead Provider** — drive a real turn; a live negative is usually the
-  fixture or the model ([[a-live-negative-on-this-wire-is-usually-the-fixture-or-the-model]]).
+- **Turns go to the daily host, `loadCodeAssist` to production** — the asymmetry is deliberate and still current.
+- **A green suite did not catch a dead Provider** — drive a real turn; a live negative is usually the fixture
+  or the model ([[a-live-negative-on-this-wire-is-usually-the-fixture-or-the-model]]).
 - Never mint opaque provider-side tool ids. Credits' cooldown ledger is harmful with one credential.
 
 Credential hygiene ([[2026-07-29-a-public-repo-is-a-publishing-decision-not-a-commit]]):
 
-- Never write account-identifying values into this repo; tests use `example-project-1`. The spike fixtures
-  at `D:\scratch\antigravity-spike\out\` carry live credentials — never read, never copy.
+- Never write account-identifying values into this repo; tests use `example-project-1`. The spike fixtures at
+  `D:\scratch\antigravity-spike\out\` carry live credentials — never read, never copy.
 - Anything credential-shaped bound for this PUBLIC repo is a question for the maintainer.
+- Upstream **error bodies** leak too — opencode's `401 CreditsError` names a billing URL carrying the
+  workspace id. Redact before quoting into a ticket or note.
 
 General:
 
-- **`bun run compile` in BOTH packages**; the test gate is **`bun run test`** (vitest) — bare `bun test`
-  runs Bun's runner, ~53 bogus failures.
+- **`packages/core` has NO `compile` script** — its gate is `bun run typecheck` (`tsc --noEmit`); only
+  `packages/tui` has `compile` (`tsc -p ./`). The old "compile in BOTH packages" wording errors with
+  `Script not found "compile"`. Test gate is **`bun run test`** (vitest) — bare `bun test` runs Bun's runner,
+  ~53 bogus failures.
 - Prefer the scoped **`packages/tui:verify`** skill for tui/core work: sandboxed `WISP_HOME`, real entry points.
-- A store that does not parse is never overwritten — `merge` refuses (#182, ADR-0004). **`status.json` is
-  the documented exception**: it is regenerable telemetry.
+- A store that does not parse is never overwritten — `merge` refuses (#182, ADR-0004). **`status.json` is the
+  documented exception**: it is regenerable telemetry.
 - The `wisp-slot` version lives in TWO files (`plugins/slot/.claude-plugin/plugin.json` +
   `.claude-plugin/marketplace.json`).
 - `.context/` commits go to main, never a ticket branch.
 - No PR CI — only `release.yml` on tag `v*`; the local gate *is* the gate.
 
-Reference clone at `D:\scratch\CLIProxyAPI` (shallow, `c9417c8`, re-clonable, outside the repo). Note: it
-holds **no** statusline script — the panel shape came from the user's screenshot, not that repo.
+Reference clone at `D:\scratch\CLIProxyAPI` (shallow, `c9417c8`, re-clonable, outside the repo). Holds **no**
+statusline script, but **does** hold the Antigravity credits poll
+(`internal/runtime/executor/antigravity_executor_credits.go:453`).
 
 ## Related
 
 - [[active-work]]
 - [[overview]]
+- [[quota-recon]]
+- [[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]
+- [[a-cancelled-response-body-cannot-test-whether-a-counter-decrements]]
+- [[loadcodeassist-answers-with-the-account-email-inside-it]]
 - [[2026-07-30-a-quota-window-belongs-to-the-account-a-context-reading-to-the-conversation]]
 - [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]
 - [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]

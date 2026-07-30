@@ -29,9 +29,13 @@ Two related traps in the same area:
 - **Quota only arrives on a response head.** There is no way to re-read it on demand — no poll, no CLI
   command. If a Provider has not served a turn since the ledger's 24h window opened, its limits are simply
   unknown, and that is not recoverable without spending a turn.
-- **Only two wires report at all.** `codexClient.ts` (`x-codex-*`) and `anthropicClient.ts`
-  (`anthropic-ratelimit-unified-*`) wire `onQuota`; `xaiClient.ts` and `antigravityClient.ts` do not. Grok
-  and Antigravity will never appear in the ledger, no matter how many turns they serve.
+- **Only two wires report at all, and that is now settled rather than pending.** `codexClient.ts`
+  (`x-codex-*`) and `anthropicClient.ts` (`anthropic-ratelimit-unified-*`) wire `onQuota`; `xaiClient.ts`,
+  `antigravityClient.ts` and the keyed path do not. Grok, Antigravity and the keyed Providers will never
+  appear in the ledger no matter how many turns they serve — **because their heads carry nothing usable**, not
+  because the wiring is missing. #200 captured all four: Grok's `x-ratelimit-*` never decrement and have no
+  reset field, Antigravity and opencode put nothing quota-shaped on the head at all
+  ([[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]). Do not file this as a gap.
 
 ## Related
 
