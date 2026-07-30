@@ -71,8 +71,10 @@ user brings new work. **Do not invent a ticket to keep a loop fed.**
 
 ## Open questions
 
-- **`/plugin update wisp-slot`** — hygiene only, safe to ignore. Install record is 1.6.0, checkout is 1.7.1;
-  the block the user sees comes from the checkout via the wrapper, and hooks/skills did not move
+- **`/plugin update wisp-slot`** — hygiene only, safe to ignore. Cache is **1.7.0** (verified on disk; an
+  earlier note said 1.6.0), checkout is 1.7.1. Only the version bump, README, `check.js` and the statusline
+  script moved between them — **no hooks, no skills** — and the block the user sees comes from the checkout
+  via the wrapper, which hardcodes that path
   ([[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]).
 - **`packages/vscode/wisp-1.11.0.vsix` still not installed.** No vsix cut this pass either — nothing touched
   the extension.
