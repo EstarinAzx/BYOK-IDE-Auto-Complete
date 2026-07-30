@@ -7,12 +7,35 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-07-30 by Opus 5 (relay leg 7: #192 PUBLISHED — `wisp-router@2.0.41` is on npm)._
-_At commit: `c2e8447` on main (the squash-merged release cut), tag `v2.0.41` pushed._
-_**Spec #185 is CLOSED. #197 is `ready-for-agent` and the queue is NOT dry — the chain stopped by explicit
-instruction, not because the work ran out.** See "Why the chain stopped" below._
+_Last updated: 2026-07-30 by Fable 5 (#197 LANDED — vsix 1.11.0 cut; the agent queue is EMPTY)._
+_At commit: `6b6299a` on main (the squash-merged vsix bump, PR #199)._
+_**Spec #185 is CLOSED on every face. No open `ready-for-agent` tickets remain — the queue is genuinely
+dry this time, by tracker query, not by prediction.**_
 
 ## Current focus
+
+**#197 LANDED — `wisp` vsix 1.11.0 cut (`6b6299a`, PR #199).** The bump #192's release cut recorded as
+owed: the extension bundles its own `@wisp/core`, so npm 2.0.41 could never deliver #187–#191 to this
+face. Two files only (version + changelog with its own `### Surfaces`, each face derived from
+`git log b672333..main -- <path>`, not copied from the ticket).
+
+Gate: **1009/1009 vitest**, `bun run compile` clean in **BOTH** packages.
+
+**Bundle-verified with the 1.10.1 control** ([[verifying-a-fix-release-needs-the-previous-version-as-a-control]]):
+`wisp-1.11.0.vsix` unzipped — `extension/dist/extension.js` carries `AntigravityAuth` ×2,
+`antigravitySignedIn` ×2, `antigravityCreds` ×3, `antigravity-oauth` ×3, `Antigravity API error` ×4;
+webview `main.js` ×5; bundled manifest reads 1.11.0. The **1.10.1 bundle scores 0** on the identical
+grep in both files — the control fails the check the new vsix passes. No sign-in button added; the
+panel row stays terminal-driven, matching Kimi.
+
+**Tracker hygiene done in the same firing:** #197 closed by the merge and its `ready-for-agent` label
+removed by hand (the close never clears it); **#174 closed** — its stated condition ("open until #185
+closes") was met and exceeded, the arc now being delivered on all three faces.
+
+**What remains is a HUMAN step, not agent work: install `packages/vscode/wisp-1.11.0.vsix` by hand.**
+The face is not on the marketplace; 1.11.0 supersedes the never-installed 1.10.1.
+
+## Previously (relay leg 7)
 
 **RELEASED. `wisp-router@2.0.41` is on npm and `dist-tags.latest` points at it.** Spec #185 delivered end to
 end: #186 (spike) → #187 `e04f53b` → #188 `ba8dab3` → #189 `c6f644a` → #190 `6a7e0fe` → #191 `915d415` →
@@ -271,15 +294,16 @@ extension carries #182.
 
 ## State
 
-- **In flight: PR #198, open and unmerged on purpose.** Branch `ticket/192-antigravity-release` at `c49532c`,
-  pushed. Working tree clean on main at `5e96abc`. **The relay chain ran legs 1–6 (#187, #188, #189, #190,
-  #191, #192) and STOPPED at leg 6** — #192 is `ready-for-human`, the agent queue is dry, and no leg 7 was
-  spawned.
-- **#192 ⏸ CUT, HELD (PR #198, `c49532c`)** — wisp-router **2.0.41**, the Antigravity release. Gate:
-  **1009/1009 vitest**, compile clean **both** packages. Two files only (version + changelog), matching every
-  prior release cut's shape. **The `v2.0.41` tag is not pushed and the PR is not merged** — npm cannot
-  republish a version, so the one irreversible act in this spec is the user's. Its `### Surfaces` check found
-  #192's own body wrong about the extension face; **#197** filed for the owed vsix 1.11.0 bump.
+- **Nothing in flight.** Working tree clean on main at `6b6299a`. The relay chain ran legs 1–7
+  (#187–#192) plus this firing (#197); every spec-#185 ticket is closed and **the agent queue is empty**
+  (`gh issue list --label ready-for-agent --state open` returns nothing).
+- **#197 ✅ `6b6299a` (PR #199)** — vsix **1.11.0**, Antigravity reaches the extension face. Gate:
+  **1009/1009 vitest**, compile clean **both** packages. Bundle-verified against the 1.10.1 control
+  (0 hits on the identical grep). The vsix is **packaged, not installed** — a human step.
+- **#192 ✅ `c2e8447` (PR #198), tag `v2.0.41`, PUBLISHED** — wisp-router **2.0.41** on npm,
+  `dist-tags.latest` points at it, release run green on all five jobs, verified past the registry read
+  with the bins executed and the 2.0.40 control failing. Its `### Surfaces` check found #192's own body
+  wrong about the extension face; **#197** filed — and now landed — for the owed vsix 1.11.0 bump.
 - **#191 ✅ `915d415` (PR #196)** — the Anthropic door's fourth arm; Claude Code driven by Gemini. Gate on
   merged main: **1009/1009 vitest** (991 before), compile clean **both** packages. **Five** deliberate-break
   controls, each failing only its own tests. **Verified live** — a streamed turn, a tool round trip on the
@@ -328,8 +352,9 @@ extension carries #182.
   *usable*, so it must still write, and it does. The vsix was checked in the **bundle**, not the commit:
   `dist/extension.js` inside `wisp-1.10.1.vsix` carries the refusal string and #181's BOM strip.
 - **User action pending:**
-  - **Install `packages/vscode/wisp-1.10.1.vsix`** — packaged this session, not published to the
-    marketplace, so the extension does not carry #182 until it is installed by hand.
+  - **Install `packages/vscode/wisp-1.11.0.vsix`** (supersedes the never-installed 1.10.1) — this face
+    is not on the marketplace, so the extension carries neither #182 nor Antigravity until a vsix is
+    installed by hand.
   - **#170's two criteria** — needs a **Kimi Code subscription**; the sign-in doubles as the
     unverified-constants check (auth host, client id, endpoints were never verified offline and fail loud at
     sign-in with the server's own words).
@@ -343,7 +368,7 @@ Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #16
 #170 `d656686`, #171 `3e0125e`, #172 `49761d8`, #173 `55daebb`/`v2.0.38`), plus the follow-ups #181 `4ec1a81`,
 #180 `ab2235b` and #183 `819900b`/`v2.0.39`.
 
-**Spec #185 — Antigravity, seven tickets, SIX landed, the seventh cut and held:**
+**Spec #185 — Antigravity: CLOSED. All seven tickets landed, the release published:**
 
 | # | Ticket | Label | Blocked by |
 |---|---|---|---|
@@ -353,17 +378,13 @@ Spec #164: all nine shipped (#165 `1971541`, #166 `07969d2`, #167 `c697733`, #16
 | ~~189~~ | ~~Executor record + OpenAI door — first real turn~~ | ✅ **`c6f644a`** (PR #194) | — |
 | ~~190~~ | ~~Rate limits answer 429; cooldown from server horizon~~ | ✅ **`6a7e0fe`** (PR #195) | — |
 | ~~191~~ | ~~Anthropic door — Claude Code driven by Gemini~~ | ✅ **`915d415`** (PR #196) | — |
-| **192** | Release — npm + TUI face, surfaces named | ⏸ **`ready-for-human`** — PR #198 open, tag held | — |
+| ~~192~~ | ~~Release — npm + TUI face, surfaces named~~ | ✅ **`c2e8447`** (PR #198), `v2.0.41` published | — |
 
-**Follow-up filed by #192:**
+**Follow-up filed by #192 — landed:**
 
 | # | Ticket | Label | Blocked by |
 |---|---|---|---|
-| **197** | Antigravity reaches the extension face — vsix 1.11.0 bump owed | **none, deliberately** | #192 |
-
-**#197 is unlabelled on purpose.** `## Blocked by` is body text no frontier query can see, so labelling it now
-would hand the next leg the extension release before the npm cut it depends on had merged. Label it
-`ready-for-agent` **after** `v2.0.41` is published.
+| ~~197~~ | ~~Antigravity reaches the extension face — vsix 1.11.0~~ | ✅ **`6b6299a`** (PR #199) | ~~#192~~ |
 
 **#186 PASSED 2026-07-29 — access confirmed, gate lifted, #188 labelled.** The rule that put the gate there
 still governs the rest: `## Blocked by` is body text, not native links, so **labels are the only real gate**
@@ -437,40 +458,34 @@ Verified constants are a comment on #188; fixtures at `D:\scratch\antigravity-sp
 | # | Ticket | Note |
 |---|---|---|
 | **163** | The 502 observation | Diagnosis confirmed. Open pending a stretch of clean use in the 217k–245k band. Closing it is *waiting*, not working. |
-| **174** | Antigravity placeholder | **Groomed** → #185. Left open as the tracking issue until #185 closes. |
+| ~~174~~ | ~~Antigravity placeholder~~ | **Closed 2026-07-30** — its condition ("open until #185 closes") met; the arc is delivered on all three faces. |
 | **69** | copilot-wisp launcher | Ungroomed. |
 
-**Closed this session:** #190 (`6a7e0fe`).
-**Closed previously:** #183 (`819900b`/`v2.0.39`), #182 (`9fd63f0`, ADR-0004), #184
-(`d36688c`/`v2.0.40` + `b672333`).
+**Closed this session:** #197 (`6b6299a`, PR #199), #174 (tracking placeholder, condition met).
+**Closed previously:** #185 + #192 (`c2e8447`/`v2.0.41`), #191 (`915d415`), #190 (`6a7e0fe`),
+#189 (`c6f644a`), #188 (`ba8dab3`), #187 (`e04f53b`), #186 (spike), #183 (`819900b`/`v2.0.39`),
+#182 (`9fd63f0`, ADR-0004), #184 (`d36688c`/`v2.0.40` + `b672333`).
 
 ## Pick up here
 
-**The hold is LIFTED. #192 is `ready-for-agent` and relay leg 7 is publishing 2.0.41.**
+**The queue is EMPTY — spec #185 is delivered on every face and no `ready-for-agent` ticket exists.**
+There is no next ticket to arm; what remains splits into human steps and grooming:
 
-The maintainer waved off leg 6's hold on 2026-07-30. **Merging PR #198 and pushing the `v2.0.41` tag is
-authorized** — that publishes publicly and permanently to npm, and it is expected of leg 7, not an overstep.
-
-**⚠ Leg 7 must RESUME PR #198, not restart #192.** The ticket-loop idempotency guard fires on branch
-`ticket/192-antigravity-release`; the right answer is resume, not "collision → `ready-for-human`".
-
-Order: merge → re-gate on merged main → tag → watch `release.yml` on all four runners → verify **past the
-registry read** with the bins executed → **2.0.40 as a failing control** → close #192 + spec #185 (clearing
-#192's label by hand) → label **#197** `ready-for-agent` last.
-
-One loose end that is **not** blocking: re-run a Claude-model turn after `2026-07-30T20:55:48Z` to close
-#189's last acceptance criterion. As of `2026-07-29T12:00Z` that quota is still exhausted — which is what let
-#190 verify its own 429 path live.
-
-Two user actions still outstanding from before: **install `packages/vscode/wisp-1.10.1.vsix`** (that face is
-not on the marketplace, so it does not carry #182 until installed by hand), and **#170** needs a Kimi Code
-subscription.
+- **Install `packages/vscode/wisp-1.11.0.vsix` by hand** (supersedes the never-installed 1.10.1; this
+  face is not on the marketplace, so nothing carries #182 or Antigravity into the editor until then).
+- **#189's last criterion** — a Claude-model turn *completing* on Antigravity after the quota resets
+  `2026-07-30T20:55:48Z` (≈ 08:55 NZ time 07-31). Not blocking; a note on closed #189 when done.
+- **#170** — needs a Kimi Code subscription.
+- **#163** — waiting, not working: watch for refusals in the 217k–245k band.
+- **#69** — the last ungroomed ticket; `grill-me` / `/preset init` is the right shape when picked up.
+- Housekeeping: ~19 stale local `ticket/*` branches from landed work; two secret-scanning alerts to
+  dismiss as won't-fix.
 
 ## Skills for next session
 
 - `/preset pick-up` — session door.
-- `/relay N=1 /preset ticket-loop` — **ran legs 1–6 (#187, #188, #189, #190, #191, #192) and stopped: #192 is
-  `ready-for-human` and the queue is dry.** Re-arm by publishing 2.0.41 and labelling #197.
+- `/relay N=1 /preset ticket-loop` — the chain that shipped #187–#192 and #197. **Nothing to re-arm**
+  until new tickets are groomed and labelled.
 - `packages/tui:verify` — sandboxed CLI verification for TUI command surfaces (isolated `WISP_HOME`).
 - `grill-me` / `/preset init` — still the right shape for **#69**, the last ungroomed ticket.
 
