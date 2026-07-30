@@ -71,11 +71,14 @@ user brings new work. **Do not invent a ticket to keep a loop fed.**
 
 ## Open questions
 
-- **`/plugin update wisp-slot`** — hygiene only, safe to ignore. Cache is **1.7.0** (verified on disk; an
-  earlier note said 1.6.0), checkout is 1.7.1. Only the version bump, README, `check.js` and the statusline
-  script moved between them — **no hooks, no skills** — and the block the user sees comes from the checkout
-  via the wrapper, which hardcodes that path
+- ~~`/plugin update wisp-slot`~~ — **done**; cache is 1.7.1 and matches the checkout. Was cosmetic either way,
+  since the wrapper hardcodes the checkout path
   ([[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]).
+- **No release is owed.** `git log v2.0.42..main` per face: `packages/tui`, `packages/core` and
+  `packages/vscode` are all **empty**; only `plugins/` moved (`f565e94`), and that shipped as wisp-slot 1.7.1
+  via `marketplace.json` on main — no tag, no npm cut involved. Four of the six commits since the tag are
+  `docs(context)`. `v2.0.42` remains correct
+  ([[2026-07-30-a-surfaces-section-is-checked-against-the-code-not-copied-from-the-ticket]]).
 - **`packages/vscode/wisp-1.11.0.vsix` still not installed.** No vsix cut this pass either — nothing touched
   the extension.
 - Carried over, unchanged: dismiss the two secret-scanning alerts as won't-fix; rotate `bridgeSecret` in

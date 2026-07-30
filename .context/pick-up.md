@@ -38,12 +38,10 @@ picking something off "Waiting on the user", are the honest next moves.
 
 ## Waiting on the user
 
-- **`/plugin update wisp-slot`** — hygiene only, safe to ignore. Cache is **1.7.0** (verified
-  `~/.claude/plugins/cache/wisp-router/wisp-slot/`, not 1.6.0 as an earlier note said), checkout is 1.7.1.
-  `git diff 5592f44..HEAD -- plugins/slot/` is version bump + README + `check.js` + the statusline script —
-  **no hooks, no skills moved**, so nothing functional is stale. The cached 1.7.0 statusline *is* the buggy
-  pre-alias copy (0 hits for `aliases`) but nothing reads it: `~/.claude/hooks/statusline-wrapper.ps1:44`
-  hardcodes the repo checkout path.
+- ~~`/plugin update wisp-slot`~~ — **DONE 2026-07-30.** Cache is now **1.7.1**, matching the checkout, and the
+  installed copy carries the alias fix (2 hits for `aliases`). It was cosmetic either way:
+  `~/.claude/hooks/statusline-wrapper.ps1:44` hardcodes the repo checkout path, so the block the user sees
+  never came from the cache.
 - **Install `packages/vscode/wisp-1.11.0.vsix`** — still not installed. Nothing touched the extension this
   pass, so no new vsix was cut.
 - **Dismiss the two secret-scanning alerts** as "won't fix" —
