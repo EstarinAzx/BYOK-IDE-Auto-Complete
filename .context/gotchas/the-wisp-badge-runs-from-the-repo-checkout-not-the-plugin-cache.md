@@ -1,7 +1,7 @@
 ---
 type: gotcha
 project: wisp
-updated: 2026-07-29
+updated: 2026-07-30
 tags: [context, gotcha, statusline, plugin, wisp-slot]
 ---
 
@@ -47,8 +47,29 @@ looks identical to a broken badge.
 the `slot` skill, hooks, commands — and the badge on any machine that does *not* have this custom wrapper.
 So keeping the plugin current still matters; it just is not the badge's input here.
 
+**Confirmed again 2026-07-30, in the mirror image.** The badge became a multi-row **block** (`wisp-slot`
+1.7.0) and the user saw it on their very next repaint, while the install record still read **1.6.0** and the
+cached copy still held the old badge (`Wisp badge for a composed statusline`, zero hits on the new markers).
+Same mechanism, opposite direction: last time the cache made a working badge look broken, this time it would
+have made a shipped redesign look un-shipped. The version record disagreeing with the checkout is the normal
+state here, not a symptom.
+
+**The wrapper is outside the repo, so a shape change needs an edit no commit contains.** Going badge → block
+required `statusline-wrapper.ps1` to stop appending a space and start capturing the output to prefix a
+newline only when non-empty:
+
+```powershell
+$WispBlock = ($StatuslineJson | & "C:\Program Files\nodejs\node.exe" $Wisp) -join "`n"
+if ($WispBlock) { [Console]::Write("`n" + $WispBlock) }
+```
+
+Without the emptiness test an unbridged session costs a blank statusline row. The script deliberately emits
+**no leading newline** of its own — the composing statusline owns layout — so any future change to how the
+block starts is a two-file change, one of which is untracked.
+
 ## Related
 
 - [[gotchas]]
+- [[an-empty-quota-ledger-is-usually-correct-not-broken]]
 - [[status-json-is-global-so-it-cannot-observe-another-session]]
 - [[active-work]]
