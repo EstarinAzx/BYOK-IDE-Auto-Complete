@@ -1,7 +1,7 @@
 ---
 type: pick-up
 project: wisp
-updated: 2026-07-30
+updated: 2026-08-05
 tags: [context, pick-up]
 ---
 
@@ -9,22 +9,22 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Latest (2026-07-30, fourth pass): `3974441` — `wisp-slot` 1.7.2, statusline quota displacement fixed.**
-User reported *"why isn't my codex quota showing up, it's showing anthropic's instead"* — the **second** report
-of that sentence, a different cause. Codex quota was never broken (drained probes returned
-`x-codex-primary-used-percent` / `-window-minutes: 10080`, and one bridge turn wrote a codex snapshot with its
-`7d` meter). The **reader** looked in one place: `status.json` is one global slot, so a concurrent
-`opus → anthropic` session owned the top level and this route's codex reading sat unread in the `providers`
-ledger. Fixed reader-side — meter rows now resolve by **`providerId`** in the top-level snapshot *or* the
-ledger, aged readings stamp their age, the route's Provider is excluded from the tail rows. `check.js` 10 → 20
-assertions, **4 control-verified failing** against the pre-fix file. Reasoning in
-[[2026-07-30-the-statusline-finds-its-quota-by-provider-in-either-of-two-places]].
+**Latest (2026-08-05): `2705bac` — `wisp-slot` 1.7.3, the statusline now resolves a PICKED alias.**
+User reported *"when I select a custom alias the row doesn't show what it routes to."* Bare `wisp` row over a
+foreign quota row — the bare row is the tell for a **resolution** failure, and it was: `~/.claude/settings.json`
+holds `"model": "claude-wisp-keemee"`, because Claude Code's `/model` list IS the Bridge's Anthropic door and
+that door prefixes every row `claude-wisp-<id>` (`bridgeAnthropic.ts:676`). The door strips its own prefix
+inside the request parser (`bridgeAnthropic.ts:250`) *before* `resolveRoute` — routing was never wrong. The
+statusline reads the name from Claude Code, upstream of that strip, and compared `claude-wisp-keemee` to
+`keemee` with `===`. Fixed reader-side with one `clean()` (`^claude-wisp-`, then a trailing `[…]` tier suffix).
+`check.js` 20 → **24 assertions, 3 control-verified failing**. Third drift in the same duplicated resolver —
+and the **second time the fixtures were the accomplice**, feeding a bare alias id the picker never produces
+([[2026-08-05-a-duplicated-resolver-is-fixtured-with-what-its-caller-sends-not-what-its-source-names]],
+[[a-picked-alias-reaches-the-statusline-prefixed-claude-wisp]]).
 
-**Prior pass: #200 closed recon-complete — the answer was "build nothing".** All four wires that never call
-`onQuota` (xai, antigravity, keyed ×2) were driven with real turns and captured; **none earned `parseable
-meter`**, so no child ticket was filed. xai's `x-ratelimit-*` are a trap (`864/864` across 3 drained turns, no
-`reset*` header at all). Capture in [[quota-recon]], reasoning in
-[[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]. No source changed.
+**Prior pass: `3974441` — statusline quota displacement fixed** (reader now finds the route's own Provider by
+`providerId` in the top-level snapshot *or* the `providers` ledger). Before that, #200 closed recon-complete
+with the answer "build nothing" — none of the four silent wires earned `parseable meter`.
 
 ## Queue: EMPTY
 
@@ -40,9 +40,6 @@ picking something off "Waiting on the user", are the honest next moves.
 
 ## Waiting on the user
 
-- **`/plugin update wisp-slot`** — cache 1.7.1, checkout **1.7.2**. Cosmetic:
-  `~/.claude/hooks/statusline-wrapper.ps1:44` hardcodes the repo checkout path, so the block on screen is
-  already the fixed one.
 - **Install `packages/vscode/wisp-1.11.0.vsix`** — still not installed. Nothing touched the extension.
 - **Dismiss the two secret-scanning alerts** as "won't fix" —
   [#1 Client ID](https://github.com/EstarinAzx/Wisp-Router/security/secret-scanning/1),
@@ -54,26 +51,39 @@ picking something off "Waiting on the user", are the honest next moves.
   `2026-07-30T20:55:48Z`. Leave the result as a note on closed #189.
 - **~19 stale local `ticket/*` branches** (`git branch --list 'ticket/*'`). Cleanup, not a blocker.
 
+_(`/plugin update wisp-slot` came off this list on 2026-08-05 — cache and checkout both 1.7.3.)_
+
 ## Landmines (durable — keep carrying)
 
 Statusline / status.json:
 
+- **The model id Claude Code hands you is NOT the Alias name.** A picked route arrives as
+  `claude-wisp-<name>`, optionally with Claude Code's own `[1m]` tier suffix. Any consumer reading the name
+  from Claude Code rather than from the door must normalize first
+  ([[a-picked-alias-reaches-the-statusline-prefixed-claude-wisp]]).
+- **When a route row is wrong, `grep model ~/.claude/settings.json` FIRST.** It shows the exact string the
+  reader is handed and is cheaper than the whole check suite. Two route-row bugs were each one grep from
+  solved and each investigated the long way.
+- **The statusline DUPLICATES `resolveRoute`** — out-of-process under Claude Code, cannot import `@wisp/core`,
+  so `wisp-statusline.js` re-implements the lookup in plain JS. It has now drifted **twice**, the second time
+  inside the fix for the first. Change `routing.ts:60-91` → check the copy, and run
+  `node plugins/slot/statusline/check.js` (24 assertions; exit code is the verdict).
+- **Its fixtures must use the shape the CALLER sends, not the name the source stores.** Both drifts survived
+  a green check because the fixtures agreed with the code instead of with reality.
+- **A statusline fix needs the pre-fix file as the control.** `git show HEAD:<path>` into a scratch dir
+  alongside the new `check.js`; assertions that pass both ways test nothing — label them as pins if you keep them.
+- **"Showing anthropic when I'm on codex" has TWO causes — the route row tells them apart.** Bare `wisp` →
+  resolution failed (the copy drifted). A *complete* route row beside a foreign quota row → global-slot
+  displacement.
 - **`status.json` is ONE global slot, so your own reading may not be where you look for it.** The top level is
   the last bridged turn on the *machine*; a concurrent session on another Provider owns it and pushes yours
   into `providers`. Any consumer must check **both** places, keyed on `providerId`
   ([[status-json-is-global-so-it-cannot-observe-another-session]]).
-- **"Showing anthropic when I'm on codex" has TWO causes — the route row tells them apart.** Bare `wisp` →
-  the resolveRoute copy drifted. A *complete* route row beside a foreign quota row → global-slot displacement.
 - **The two-place lookup is safe ONLY because `mergeStatus` evicts the incoming Provider from the ledger** —
   exactly one place per Provider, so the reader can never find two readings for one wire. Don't weaken that.
 - **Codex on a Plus plan has exactly ONE window.** `x-codex-secondary-window-minutes: 0`, correctly refused by
   `parseCodexQuota` (`status.ts:88-91`). A codex session shows a single `7d` row — **a `5h`/`7d` pair is
   Anthropic's**, which is the fast tell for displacement.
-- **The statusline DUPLICATES `resolveRoute`** — out-of-process under Claude Code, cannot import `@wisp/core`,
-  so `wisp-statusline.js` re-implements the lookup in plain JS. It has drifted once. Change `routing.ts:60-91`
-  → check the copy, and run `node plugins/slot/statusline/check.js` (20 assertions; exit code is the verdict).
-- **A statusline fix needs the pre-fix file as the control.** `git show HEAD~1:<path>` into a scratch dir
-  alongside the new `check.js`; assertions that pass both ways test nothing.
 - **`stream: false` never records a snapshot** — the non-streaming branch is Claude Code's `/model` probe and
   is deliberately excluded (`bridgeServer.ts:843` is on the streaming path). A non-streaming probe looks
   exactly like a Provider that never reports.
@@ -155,11 +165,13 @@ statusline script, but **does** hold the Antigravity credits poll
 - [[active-work]]
 - [[overview]]
 - [[quota-recon]]
+- [[a-picked-alias-reaches-the-statusline-prefixed-claude-wisp]]
+- [[2026-08-05-a-duplicated-resolver-is-fixtured-with-what-its-caller-sends-not-what-its-source-names]]
+- [[the-statusline-duplicates-resolveroute-and-drifts]]
 - [[2026-07-30-the-statusline-finds-its-quota-by-provider-in-either-of-two-places]]
 - [[2026-07-30-a-quota-window-belongs-to-the-account-a-context-reading-to-the-conversation]]
 - [[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]
 - [[status-json-is-global-so-it-cannot-observe-another-session]]
-- [[the-statusline-duplicates-resolveroute-and-drifts]]
 - [[an-empty-quota-ledger-is-usually-correct-not-broken]]
 - [[a-cancelled-response-body-cannot-test-whether-a-counter-decrements]]
 - [[loadcodeassist-answers-with-the-account-email-inside-it]]
