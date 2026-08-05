@@ -8,9 +8,10 @@ Depends on:
 Run: node plugins/slot/statusline/check.js   (exit 0 = pass, 1 = fail)
 
 Why this exists: wisp-statusline.js runs out-of-process under Claude Code, so vitest never sees it, and it
-necessarily RE-IMPLEMENTS resolveRoute (packages/core/src/routing.ts) in plain JS. That duplicate drifted
-once already — it knew families and not aliases, so every aliased route (`sol`, `grok`) rendered a bare
-`wisp` row with the previous Provider's quota as the only reading. These cases pin the resolution order, the
+necessarily RE-IMPLEMENTS resolveRoute (packages/core/src/routing.ts) in plain JS. That duplicate has drifted
+twice — first it knew families and not aliases; then it knew aliases but not the `claude-wisp-` prefix the
+picker actually sends, so a PICKED alias still rendered a bare `wisp` row with the previous Provider's quota
+as the only reading. Both times the fixtures were the accomplice. These cases pin the resolution order, the
 degrade ladder, and which Provider's reading is allowed to lead the block; they are not a test suite and
 need no framework.
 */
@@ -129,7 +130,26 @@ ok('sibling model shares the account window', /7d {2}[●○]{10} +3%/.test(out)
 ok('sibling model does not share context', !out.includes('ctx '), out);
 ok('sibling reading is stamped aged', /7d {2}[●○]{10} +3%.*just now/.test(out), out);
 
+// 8. The shape the PICKER actually sends. Every case above hands the block a BARE alias id — which is only
+//    ever true of a hand-set ANTHROPIC_MODEL, and is why this hole outlived the last drift fix. Claude Code's
+//    /model list is the Bridge's Anthropic door, so a chosen alias arrives prefixed `claude-wisp-<name>`
+//    (bridgeAnthropic.ts:676) and may carry Claude Code's own `[1m]` tier suffix. The door strips the prefix
+//    before resolveRoute sees it; the reader must strip the same or the exact-alias rung can never fire.
+out = render({ id: 'claude-wisp-grok', display_name: 'grok — grok-4.5' }, codexTurn);
+ok('picked alias resolves', out.includes('grok → grok-4.5') && out.includes('xai'), out);
+
+out = render({ id: 'claude-wisp-sol[1m]', display_name: 'sol — gpt-5.6-sol' }, codexTurn);
+ok('picked alias survives the tier suffix', out.includes('sol → gpt-5.6-sol') && out.includes('codex'), out);
+ok('picked alias leads with its own live meters', /5h {2}.*22%/.test(out), out);
+
+// A regression pin, not a control case: the family fuzzy is a substring test, so it passed the suffix before
+// the strip existed too. It is here so a future normalizer cannot quietly cost families what it buys aliases.
+out = render({ id: 'claude-opus-5[1m]', display_name: 'Opus 5' }, {
+  updatedAt: now, providerId: 'anthropic', model: 'claude-opus-5', meters: [{ label: '5h', percent: 5 }],
+});
+ok('tier suffix keeps the family fuzzy', out.includes('opus → claude-opus-5'), out);
+
 fs.rmSync(home, { recursive: true, force: true });
 
 if (failures) { console.error(`\n${failures} failing check(s)`); process.exit(1); }
-console.log('wisp-statusline: 20/20 checks passed');
+console.log('wisp-statusline: 24/24 checks passed');

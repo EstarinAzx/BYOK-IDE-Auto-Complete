@@ -118,7 +118,15 @@ const now = Date.now();
 // family fuzzy. Matching families only was the hole — an aliased route (`sol`, `grok`, `gemini`) resolved to
 // no Target at all, so the row lost its model/provider and the live verdict below could never pass, leaving
 // the previous Provider's reading as the only thing on screen.
-const names = [stdin.model?.id, stdin.model?.display_name].filter(Boolean).map((n) => String(n).toLowerCase());
+//
+// The name must be normalized FIRST. Claude Code's `/model` picker lists the Bridge's Anthropic-door rows,
+// whose ids carry the `claude-wisp-` discovery prefix (bridgeAnthropic.ts:676) and may carry Claude Code's
+// own `[1m]` tier suffix — so a PICKED alias arrives as `claude-wisp-keemee`, never as `keemee`. The door
+// strips the same prefix before resolveRoute ever sees it (bridgeAnthropic.ts:250); this reader did not, so
+// the exact-alias rung could only ever hit a hand-set ANTHROPIC_MODEL, and every alias chosen the normal way
+// fell through to a bare `wisp` row. Stripping is safe for the family fuzzy too: it is a substring test.
+const clean = (n) => String(n).toLowerCase().replace(/^claude-wisp-/, '').replace(/\[[^\]]*\]$/, '');
+const names = [stdin.model?.id, stdin.model?.display_name].filter(Boolean).map(clean);
 const alias = (cfg.routing?.aliases || []).find((a) => names.includes(String(a.name).toLowerCase()));
 const family = alias ? undefined : ['haiku', 'sonnet', 'opus', 'fable'].find((f) => names.join(' ').includes(f));
 const route = alias?.name || family;
