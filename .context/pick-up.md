@@ -9,10 +9,16 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Latest (2026-08-14, relay leg 3): #204 usage-endpoint recon LANDED — verdict build, filed as #207.**
-No code, no branch, nothing committed: the ticket's deliverable is an answered question and its own
-acceptance criteria forbid committing. Evidence + comparison table posted on #201, breadcrumb on #204,
-issue closed, `ready-for-agent` cleared. **The queue is now dry and the loop stopped.**
+**Latest (2026-08-14): 2.0.43 is SHIPPED and nothing is owed.**
+
+Two things happened in one session. First, relay leg 3 landed **#204** (usage-endpoint recon) — verdict
+**build**, filed as **#207**; no code, no branch, nothing committed, because the ticket's deliverable is an
+answered question and its own criteria forbid committing. Evidence on #201, #204 closed and label cleared,
+queue drained, chain stopped. Then, on the user's go, the **npm `wisp-router` 2.0.43 cut**: tag `v2.0.43`,
+run `31769786239` green on all five jobs, published as `latest`, and verified by executing the bin from a
+scratch install with **2.0.42 as a failing control**.
+
+**There is no queued work and no owed release.** The next move is a decision, not a task.
 
 ## Queue: empty
 
@@ -22,12 +28,22 @@ issue closed, `ready-for-agent` cleared. **The queue is now dry and the loop sto
 Open but deliberately **not** agent-ready: **#207** (active quota probe — blocked on three scoping calls
 and on 2.0.43 shipping), **#69**, **#163**.
 
-## The next move is the user's: cut npm `wisp-router` 2.0.43
+## 2.0.43 — cut, published, verified
 
-Nothing else blocks it. `packages/tui/CHANGELOG.md` carries `## [2.0.43] — unreleased` with Surfaces already
-derived; `package.json` is deliberately unbumped. Release landmines are in the list below — the tag must
-equal `package.json` **exactly**, and a fix release is not verified until the previous version fails the
-same check.
+`wisp-router@2.0.43` is npm `latest`; GitHub release `v2.0.43` carries all four platform binaries. Verified
+past the registry read: scratch install, then **executed** the bin — `wisp log` answered with the
+no-log-yet line under a sandboxed `WISP_HOME` and exited 0, while the same check on **2.0.42 fails**
+(command unrecognized, falls through to the TUI splash).
+
+Two things worth knowing before the next cut:
+
+- **The Surfaces section was stale at cut time and had to be re-derived.** It was written when #202 was the
+  only ticket in the window and still claimed wisp-slot shipped 1.7.1–1.7.3; #203 had since taken it to
+  1.7.4. Derive Surfaces **at the cut**, from `git log <last-tag>..main -- <face-path>`, never reuse what
+  the ticket wrote.
+- **The platform npm packages 404 and that is normal.** `wisp-router-win32-x64` is absent for 2.0.42 too —
+  npm's spam filter, which is why `release.yml` treats them as best-effort and hard-fails only on the thin
+  shell. The shim falls back to the GitHub release binaries.
 
 ## ⚠ Read before cutting a ticket branch
 
@@ -40,8 +56,6 @@ guard and got 0/0. One command before the work; after the merge the cheap fix is
 
 ## Waiting on the user
 
-- **Cut npm `wisp-router` 2.0.43** — bump `packages/tui/package.json`, tag `v2.0.43` (**tag must equal
-  package.json exactly**; `release.yml` verifies and fails loud). This is now the only open work item.
 - **#207's three scoping calls** before it can be labelled `ready-for-agent`: poll **cadence**;
   **precedence** when a poll and a turn header disagree (they agreed exactly in the recon, so "freshest
   wins" is probably enough — but it is a decision); **opt-in or always-on**, since it is an extra outbound

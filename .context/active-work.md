@@ -7,12 +7,16 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-08-14 by Opus 5 (relay leg 3, ticket-loop)_
-_At commit: `caeeec8` on main. Released: `wisp-router@2.0.42`, `wisp-slot` 1.7.4. **npm 2.0.43 cut still OWED — and it is now the only thing left.**_
+_Last updated: 2026-08-14 by Opus 5 (relay leg 3, ticket-loop → release cut)_
+_At commit: `dd0acb8` on main, tag `v2.0.43`. Released: **`wisp-router@2.0.43`** (npm `latest`), `wisp-slot` 1.7.4, vsix 1.11.0. **Nothing is owed.**_
 
 ## Current focus
 
-**2.0.43's ticket queue is DRY. #202, #203 and #204 all landed; the cut is the user's move.**
+**2.0.43 is SHIPPED. Queue dry, release cut, verified against a control. There is no open work item.**
+
+The npm cut ran after the queue drained: `packages/tui/package.json` bumped to 2.0.43, changelog entry
+dated, Surfaces **re-derived at the cut** (the entry had been written when #202 was the only ticket in the
+window and still claimed wisp-slot 1.7.1–1.7.3), tag `v2.0.43` pushed, `release.yml` green on all five jobs.
 
 **#204 — usage-endpoint recon spike — DONE** (verdict comment on #201, breadcrumb on #204, issue closed,
 `ready-for-agent` cleared). Verdict: **build**, filed as **#207** and deliberately *not* `ready-for-agent`.
@@ -49,23 +53,34 @@ Decisions inside it worth carrying:
 Open but not agent-ready: **#207** (active quota probe — blocked on three scoping calls and on 2.0.43
 shipping), **#69**, **#163**.
 
-## Release owed
+## Release: cut and verified
 
-**npm `wisp-router` 2.0.43 — cut is OWED, and nothing else is blocking it.** Unchanged by #204, which
-shipped no code. `packages/tui/CHANGELOG.md` still carries `## [2.0.43] — unreleased` with its Surfaces
-already derived; `package.json` deliberately not bumped — the bump and the `v2.0.43` tag stay a deliberate
-human act, and the tag must equal `package.json` exactly or `release.yml` fails loud.
+**npm `wisp-router` 2.0.43 is published and is `latest`.** Run `31769786239`, all five jobs green (four
+native compiles + smoke tests, then publish). GitHub release `v2.0.43` carries all four platform binaries.
 
-`wisp-slot` 1.7.4 is **live for the user already** on this machine — the badge runs from the repo checkout
-([[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]).
+**Verified past the registry read, with a control.** A scratch `npm i wisp-router@2.0.43` then *executing*
+the bin: `wisp log` printed `No Bridge log yet at <WISP_HOME>/bridge.log — run 'wisp serve' to start one`
+and exited 0, respecting a sandboxed `WISP_HOME`; the splash reports `v2.0.43`. The same check on **2.0.42
+fails** — `wisp log` is unrecognized there and falls through to the interactive TUI splash — which is what
+makes the green result mean something ([[verifying-a-fix-release-needs-the-previous-version-as-a-control]]).
+
+**The platform packages 404, and that is the documented steady state, not a regression.**
+`wisp-router-win32-x64` does not exist on the registry for 2.0.42 either — npm's spam filter has removed
+them before, which is why `release.yml` marks them best-effort and hard-fails only on the thin shell. The
+shim's fallback downloads from the GitHub release, and the install proved that path works.
+
+`wisp-slot` 1.7.4 and vsix 1.11.0 are unchanged by this cut — different faces, different doors. The
+statusline badge already runs 1.7.4 from the repo checkout
+([[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]); the vsix is **still not installed**.
 
 ## State
 
-- **In flight:** nothing. Leg complete, queue drained.
+- **In flight:** nothing. Queue drained and the release is out.
 - **Done this leg:** #204 recon driven end to end (both endpoints probed, comparison table, build verdict on
   #201), #207 filed, #204 breadcrumbed + closed + label cleared, probe scripts deleted, two gotchas and one
-  decision recorded.
-- **Blocked:** nothing. The release cut is a human step, not a block.
+  decision recorded — then, on the user's go, the **2.0.43 npm cut**: version bump, changelog dated,
+  Surfaces re-derived, tag pushed, pipeline green, release verified against a 2.0.42 control.
+- **Blocked:** nothing.
 
 ## Verification
 
@@ -76,14 +91,23 @@ human act, and the tag must equal `package.json` exactly or `release.yml` fails 
 - Pre-work `git rev-list --left-right --count origin/main...main` → `0 0`
 - Comment scanned for identifier-shaped values before posting (`wrkspc_`, `req_01`, email patterns) → clean.
   No account-identifying value reached the tracker or the repo.
-- No code gate claimed — **no code changed.** Nothing to typecheck, nothing to test.
+- No code gate claimed for #204 — **no code changed** by the recon itself.
+
+Release gate, run on main before the tag (there is no PR CI, so the local gate *is* the gate):
+
+- `bun run test` (core vitest) — **1016/1016 across 21 files**
+- `bun run --cwd packages/core typecheck` — clean
+- `bun run --cwd packages/tui compile` — clean
+- `bun test packages/tui/tests/` — **28/28** (the bun-runner half, which the workspace gate does not cover)
+- `node plugins/slot/statusline/check.js` — **30/30**
+- `release.yml` run `31769786239` — 5/5 jobs green, including its own tag-vs-`package.json` verify
+- Post-publish: scratch install + **bin executed**, with 2.0.42 as a failing control (see above)
 
 ## Skills for next session
 
-- `/preset pick-up` — baton at [[pick-up]] is current as of this leg and says `queue empty`.
-- The next real move is the **2.0.43 release cut**, which is a human step with its own landmine list in
-  [[pick-up]] (tag must equal `package.json`; verify past the registry read; a fix release needs the previous
-  version as a control).
+- `/preset pick-up` — baton at [[pick-up]] is current and says queue empty, nothing owed.
+- There is **no queued work**. The next move is a decision, not a task: either scope #207's three open calls
+  so it can be labelled `ready-for-agent`, or pick up #69 / #163.
 
 ## Open questions
 
