@@ -1,124 +1,88 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-07-30
+updated: 2026-08-14
 tags: [context, active-work]
 ---
 
 # Active Work
 
-_Last updated: 2026-07-30 17:05 by Opus 5 (1M) (auto)_
-_At commit: `3974441` on main. Released: `wisp-router@2.0.42`, `wisp-slot` 1.7.2._
+_Last updated: 2026-08-14 by Fable 5 (auto)_
+_At commit: `2705bac` on main (no code commits this pass — planning only). Released: `wisp-router@2.0.42`, `wisp-slot` 1.7.3._
 
 ## Current focus
 
-**Nothing in flight. The tracker queue is empty.** This pass was a user-reported statusline bug, diagnosed
-and fixed off-tracker.
+**2.0.43 planned and ticketed.** This pass was the init funnel for the user's three 2.0.43 ideas: recon
+(two grok-4.6 subagents over a fresh Traycer clone + inline verification against our own code), then spec
+**#201**, then three independent tickets — all labelled `ready-for-agent`, none blocking another:
 
-**"Why isn't my codex quota showing up? It's showing anthropic's instead."** Second time that sentence has
-been reported, different cause. Screenshot showed a complete route row — `wisp │ sonnet → gpt-5.6-sol │
-codex` — and beneath it `anthropic 5h 15% · 7d 37% just now` as the only quota reading.
+1. **#202 — `wisp log`**: serve appends timestamped Bridge log lines to `~/.wisp/bridge.log` (one-deep
+   rotation on serve start; the home watcher's existing non-`.json` filter already ignores it), and a new
+   renderer-free dispatch branch prints (`wisp log`) or follows (`wisp log -f`) it. TUI face only, no core
+   seam. Surfaces: tui → npm 2.0.43 cut owed when it lands.
+2. **#203 — statusline expired-meter semantics**: a meter with `resetAt <= now` renders dimmed "refilled"
+   (no bar, no alarm percent) instead of presenting a rolled window's old percentage as a live alarm.
+   Verified gap: `wisp-statusline.js` prunes by reading age only, never compares `resetAt` to now.
+   Traycer-derived rule. Plugin-only → wisp-slot bump.
+3. **#204 — usage-endpoint recon spike**: do the Anthropic OAuth usage endpoint (and any Codex equivalent)
+   answer our stored tokens? Throwaway probes under gitignored `out/`, redact on values, 2–3 reads max
+   (known multi-minute 429 penalty on the Anthropic one). Verdict lands as a comment on #201; build ticket
+   only if the answer is build.
 
-Two findings, in order:
+**Cursor provider: settled no-build** — [[2026-08-14-a-cursor-provider-has-no-wire-to-route-through]].
+Traycer's "cursor provider" is a harness (user API key driving `@cursor/sdk`), not a model wire; nothing to
+route through.
 
-1. **Codex quota was never broken.** Two drained turns against `chatgpt.com/backend-api/codex` returned
-   `x-codex-primary-used-percent: 1` / `x-codex-primary-window-minutes: 10080`, and one bridge turn on
-   `claude-sonnet-5` wrote `status.json` with `providerId: codex`, a `7d` meter, and anthropic correctly
-   folded into `providers`. The whole write path works end to end.
-2. **The reader looked in one place.** `status.json` is **one global slot**, so the top-level snapshot is the
-   last turn on the *machine*, not this session. A concurrent `opus → anthropic` session owned it
-   continuously; the codex reading sat in the `providers` ledger, unread, because the block only trusted the
-   top level for a live reading. So it rendered the other session's windows where this session's quota
-   belongs. In the reported frame codex had not turned at all, so no reading existed anywhere — the fixed
-   block correctly shows the route row alone.
+## Traycer recon (what the comparison actually yielded)
 
-**Also settled in passing:** codex on a Plus plan has **exactly one window** —
-`x-codex-secondary-window-minutes: 0`, which `parseCodexQuota` correctly refuses. A codex session renders a
-single `7d` row and never a pair, so **a `5h`/`7d` pair in the block is Anthropic's**. That is now the
-fastest tell for this bug.
+Clone at `D:\scratch\traycer` (shallow, re-clonable, outside the repo — joins `D:\scratch\CLIProxyAPI` as a
+reference checkout). Its host binary is **closed-source**; the open repo is protocol schemas + clients.
+
+- **Term collision, resolved:** their "advisory" = provider-CLI version notices. They never emulate the
+  Anthropic wire, so there is **no Advisor implementation to compare** against our door's `advisor_20260301`
+  emulation. The user's "did they build a better advisor" question is answered: they built none.
+- **Their rate-limit edge over our passive header parse:** an active usage-endpoint probe (Anthropic
+  `/api/oauth/usage` via the Claude CLI, 15-min cadence, post-429 cooldown, last-good envelope) plus
+  expired-window semantics (`resetsAt <= now` → not a current reading; that's #203) plus split warn
+  thresholds (80% for ≤24h windows, 95% for longer). The probe idea is #204's question; the passive
+  side-channel stays the source of truth for 2.0.43.
+- **Their codex `rateLimitReachedType`** (authoritative limit-hit flag) and Claude model-scoped windows
+  (7d-opus, 7d-sonnet, extraUsage credits) come from usage payloads, not headers — evidence for what #204's
+  probe might unlock, nothing to build from headers alone.
 
 ## State
 
-- **In flight:** nothing.
-- **Done this pass** (`3974441`, main, wisp-slot **1.7.2**):
-  - `plugins/slot/statusline/wisp-statusline.js` — reader-only fix. The meter rows are now the route's own
-    Provider's windows, looked up by **`providerId`** in the top-level snapshot *or*
-    `status.providers[<id>]`; aged readings stamp their age on the group's first row; the route's Provider is
-    excluded from the tail rows. `ctx` keeps the stricter **model** match; both sources prune on read at 24h.
-  - `plugins/slot/statusline/check.js` — 10 → **20 assertions**, three new cases: cross-session displacement,
-    a Provider that has reported nothing, and a sibling model on the same Provider.
-  - `.context/decisions/2026-07-30-the-statusline-finds-its-quota-by-provider-in-either-of-two-places.md`
-  - Amended three gotchas: [[status-json-is-global-so-it-cannot-observe-another-session]] (it displaces your
-    own reading, not just other sessions'), [[the-statusline-duplicates-resolveroute-and-drifts]] (the symptom
-    has two causes; the route row distinguishes them), [[an-empty-quota-ledger-is-usually-correct-not-broken]]
-    (codex Plus = one `7d` window).
-  - Both recon probes were throwaway `bun` files under gitignored `out/`, deleted.
-- **Blocked:** nothing. Every open item is human-optional (below).
+- **In flight:** nothing. Queue has three unblocked `ready-for-agent` tickets (#202, #203, #204).
+- **Done this pass:** spec #201; tickets #202–#204; decision record
+  `2026-08-14-a-cursor-provider-has-no-wire-to-route-through` + index line; Traycer clone + two-subagent
+  recon; `.context` refresh. No package, plugin, or workflow file touched — nothing shipped, no release owed.
+- **Blocked:** nothing.
 
 ## Verification
 
-- `node plugins/slot/statusline/check.js` → **20/20**, exit 0.
-- **Control:** `git show HEAD~1:plugins/slot/statusline/wisp-statusline.js` + the new `check.js` → **4 failing**
-  (`displaced route leads with its own Provider`, `displaced reading is stamped aged`, `sibling model shares
-  the account window`, `sibling reading is stamped aged`). Without the control the new assertions prove nothing
-  ([[verifying-a-fix-release-needs-the-previous-version-as-a-control]]).
-- **Live render** against the real `~/.wisp/`, both routes: sonnet leads with
-  `7d ●○○○○○○○○○ 1% ↻ Wed 4:59pm  4m ago` and anthropic drops to the dimmed tail; opus keeps its own two bars
-  with `codex 7d 1% 4m ago` in the tail.
-- **No package gate run** — nothing under `packages/` was touched, so `bun run test` / `typecheck` / `compile`
-  had nothing to say about this diff. `check.js` is the whole gate for a statusline-only change.
+- No code changed → no gates run. The spec/ticket bodies carry their own gates (tui:verify + workspace
+  suite for #202; `check.js` + pre-fix control for #203; redaction discipline for #204).
+- Queue state verified by query this pass (`gh issue list --label ready-for-agent`): exactly #202, #203, #204.
 
 ## Pick up here
 
-**Queue is empty** — `gh issue list --label ready-for-agent --state open` returns nothing. Verify by query,
-never from this file.
-
-Two open issues, neither agent-ready:
-
-1. **#69** — copilot-wisp launcher, ungroomed backlog. `grill-me` / `/preset init` is the right shape.
-2. **#163** — waiting, not working (watch the 217k–245k band for Anthropic `stop_reason=refusal`).
-
-So the next session either grooms #69 into tickets, picks up something from the human-optional list, or the
-user brings new work. **Do not invent a ticket to keep a loop fed.**
+Work the frontier — all three tickets are independent; **#202** is the release-defining feature and the
+natural first pick. `/preset scope 202` (or a `ticket-loop` firing) starts it. #163 and #69 remain open,
+neither agent-ready, unchanged.
 
 ## Skills for next session
 
-- `/preset pick-up` — the baton at [[pick-up]] is current as of `3974441`.
-- `packages/tui:verify` — scoped skill (`packages/tui/.claude/skills/verify`). Sandboxed `WISP_HOME` + real
-  Bun entry points; use it for any `packages/tui` or core-that-tui-bundles change, and before any npm cut.
+- `/preset pick-up` — baton at [[pick-up]] is current as of this pass.
+- `packages/tui:verify` — mandatory for #202 (tui face change + pre-npm-cut checks).
 
 ## Open questions
 
-- **No release is owed.** `git log v2.0.42..main` per face: `packages/tui`, `packages/core` and
-  `packages/vscode` are all still **empty** — this pass touched `plugins/` only, shipping as wisp-slot **1.7.2**
-  via `marketplace.json` on main. No tag, no npm cut
-  ([[2026-07-30-a-surfaces-section-is-checked-against-the-code-not-copied-from-the-ticket]]).
-- **`/plugin update wisp-slot`** — cache is at 1.7.1, checkout is now 1.7.2. **Cosmetic**: the wrapper
-  hardcodes the checkout path, so the block the user sees is already the fixed one
-  ([[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]).
-- **`packages/vscode/wisp-1.11.0.vsix` still not installed.** Nothing touched the extension this pass either.
-- Carried over, unchanged: dismiss the two secret-scanning alerts as won't-fix; rotate `bridgeSecret` in
-  `~/.wisp/auth.json` (low urgency); **#170** needs a Kimi Code subscription; **#189**'s last criterion (a
-  Claude-model turn *completing* on Antigravity after the `2026-07-30T20:55:48Z` reset — note it on closed
-  #189); ~19 stale local `ticket/*` branches.
-
-## Recent context
-
-- **A complete route row plus a foreign quota row means displacement, not resolution.** The two causes of the
-  same complaint are told apart by the route row alone: bare `wisp` → the resolveRoute copy drifted; a named
-  route → the global slot. Costs one glance, saved a whole wrong investigation this pass.
-- **The two-place lookup is safe only because `mergeStatus` evicts the incoming Provider from the ledger** —
-  so a Provider is in exactly one of the two places and the reader can never find two readings for one wire.
-  That eviction rule was written for an unrelated reason; weakening it now breaks the reader.
-- **The write path was proved by driving it, not by reading it.** A direct probe to the Codex backend showed
-  the headers exist; a second probe through the running bridge door (`POST $ANTHROPIC_BASE_URL/v1/messages`,
-  `stream: true`, model `claude-sonnet-5`) showed `status.json` flip to codex with the meter and the ledger
-  entry. Both took under a minute and removed all guesswork about which half was broken.
-- **`stream: false` never records a snapshot** — the non-streaming branch is Claude Code's `/model` validation
-  probe, deliberately excluded (`bridgeServer.ts:843` sits on the streaming path only). A probe that does not
-  stream will look like a Provider that never reports.
-- **`packages/core` has no `compile` script.** The gate there is `bun run typecheck` (`tsc --noEmit`); only
-  `packages/tui` has `compile` (`tsc -p ./`). Carried forward — untested this pass, no package changed.
+- **#204's verdict is genuinely open** — nobody has driven the usage endpoint with our token yet. Do not
+  assume it answers; the ticket exists to find out.
+- Carried over, unchanged: install `packages/vscode/wisp-1.11.0.vsix`; dismiss the two secret-scanning
+  alerts as won't-fix; rotate `bridgeSecret` (low urgency); #170 needs a Kimi Code subscription; note
+  #189's last criterion on the closed issue when observed; ~19 stale local `ticket/*` branches.
+- `.context/Untitled.canvas` sits untracked in the repo — user's own file, left alone, not committed.
 
 ## Related
 
@@ -127,12 +91,9 @@ user brings new work. **Do not invent a ticket to keep a loop fed.**
 - [[decisions]]
 - [[gotchas]]
 - [[quota-recon]]
-- [[2026-07-30-the-statusline-finds-its-quota-by-provider-in-either-of-two-places]]
-- [[2026-07-30-a-quota-window-belongs-to-the-account-a-context-reading-to-the-conversation]]
+- [[2026-08-14-a-cursor-provider-has-no-wire-to-route-through]]
+- [[2026-08-05-a-duplicated-resolver-is-fixtured-with-what-its-caller-sends-not-what-its-source-names]]
+- [[the-statusline-duplicates-resolveroute-and-drifts]]
 - [[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]
 - [[2026-07-29-quota-is-a-side-channel-not-a-bridge-stream-event]]
 - [[status-json-is-global-so-it-cannot-observe-another-session]]
-- [[the-statusline-duplicates-resolveroute-and-drifts]]
-- [[an-empty-quota-ledger-is-usually-correct-not-broken]]
-- [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]
-- [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]

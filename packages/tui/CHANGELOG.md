@@ -6,6 +6,64 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.43] — unreleased
+
+**You can read what the Bridge said.** `wisp serve` prints its log to the terminal it runs in, and that
+terminal was the only copy: close it, or start the Bridge from somewhere you are not looking, and the
+routing decisions, cooldowns and cache diagnoses were gone. The lines now also land in a file, and a new
+command reads it from anywhere.
+
+### Added
+
+- **`~/.wisp/bridge.log`, written by `wisp serve`.** Every Bridge log line is appended with an ISO
+  timestamp in front of it; the line itself rides through verbatim. Terminal output is unchanged — the
+  file is an addition beside it, not a redirect. The serve banner is deliberately **not** mirrored: it
+  carries the Bridge access secret, which does not belong in a file. On each serve start the previous
+  run's log moves one generation aside to `bridge.log.1`, so a restart never interleaves two runs and the
+  run before this one stays readable. One generation, no size or time policy to tune.
+
+- **`wisp log` — read that file from any terminal.** It prints a header naming the file and its last-write
+  time, then the log. The header is the point: a log whose last write was three hours ago is a dead
+  Bridge, and saying so first stops the contents inviting the wrong conclusion. With no log yet it prints
+  one line pointing at `wisp serve` and exits 0.
+
+- **`wisp log -f` follows.** Prints what is there, then streams each appended line until Ctrl+C, reading
+  only the new bytes rather than re-reading the file on every tick. If the log rotates underneath a
+  follower, it picks up the new one from the top instead of going silent.
+
+  ```
+  $ wisp log
+  C:\Users\you\.wisp\bridge.log  (last write: 2026-08-14T01:57:05.044Z)
+  [2026-08-14T01:56:18.299Z] [bridge] listening on 127.0.0.1:41184
+  [2026-08-14T01:57:05.044Z] [bridge] route active 'opus' -> opencode-go
+  ```
+
+  Like `routing`, `snapshot` and `providers`, it is renderer-free — the dispatch branch imports node's
+  filesystem and `@wisp/core` and never touches the opentui renderer, so it returns immediately with no
+  cursor or frame output.
+
+### Notes
+
+The log file is regenerable telemetry, in the same class as `status.json`: it is never protected from
+overwrite the way `config.json` and `auth.json` are (#182 guards stores holding what a user cannot
+regenerate), and the home-store watcher already ignores it through its existing non-`.json` name filter —
+no watcher change was needed, and none was made.
+
+### Surfaces
+
+Derived from `git log v2.0.42..HEAD` per face, not from the ticket.
+
+- **npm `wisp-router` 2.0.43 — the only face this changes, and the cut is OWED, not cut here.**
+  `packages/tui` had no commits since `v2.0.42`; this is the first. The writer and the reader are both in
+  the TUI package, so the npm publish is what delivers them. The version bump and the `v2.0.43` tag remain
+  a deliberate act — npm cannot republish a version.
+- **vsix — untouched, no bump owed.** `packages/core` has **no** commits since `v2.0.42`, and `wisp log`
+  is a TUI-face command the extension does not host. The extension bundles its own `@wisp/core`, so there
+  is nothing here for it to gain. It stays at 1.11.0 (still not installed).
+- **`wisp-slot` — unrelated and already shipped.** The three statusline commits since `v2.0.42`
+  (`f565e94`, `3974441`, `2705bac`) went out through the plugin marketplace as 1.7.1–1.7.3, independent of
+  this npm entry.
+
 ## [2.0.42] — 2026-07-30
 
 **The statusline becomes a panel, and stops forgetting.** #171 shipped the readings as a one-line badge —
