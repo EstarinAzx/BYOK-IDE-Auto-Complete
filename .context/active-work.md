@@ -7,81 +7,91 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-08-14 by Fable 5 (relay leg 2, ticket-loop)_
-_At commit: `ca29ebc` on main. Released: `wisp-router@2.0.42`, `wisp-slot` 1.7.4. **npm 2.0.43 cut still OWED.**_
+_Last updated: 2026-08-14 by Opus 5 (relay leg 3, ticket-loop)_
+_At commit: `caeeec8` on main. Released: `wisp-router@2.0.42`, `wisp-slot` 1.7.4. **npm 2.0.43 cut still OWED — and it is now the only thing left.**_
 
 ## Current focus
 
-**2.0.43 is being built. #202 and #203 landed; #204 remains.**
+**2.0.43's ticket queue is DRY. #202, #203 and #204 all landed; the cut is the user's move.**
 
-**#203 — statusline expired-meter semantics — DONE** (PR #206, squashed as `ca29ebc`, issue closed and
-`ready-for-agent` cleared). Any meter with numeric `resetAt <= now` (epoch seconds, as status.json carries
-it) renders as a dimmed, barless row keeping its label and the reset glyph with a `refilled` marker —
-never silently dropped, never alarmed on a percent whose window has rolled. One `expired()` predicate in
-`plugins/slot/statusline/wisp-statusline.js`, applied at both render sites (active-route meter rows and
-remembered-Provider rows). Route resolution and the 24h ledger prune untouched. wisp-slot bumped to
-**1.7.4** in both manifest files.
+**#204 — usage-endpoint recon spike — DONE** (verdict comment on #201, breadcrumb on #204, issue closed,
+`ready-for-agent` cleared). Verdict: **build**, filed as **#207** and deliberately *not* `ready-for-agent`.
+
+No code shipped and no branch was cut — the ticket's deliverable is an answered question, and its own
+acceptance criteria require that nothing be committed. Working tree is unchanged apart from `.context/`.
+
+What the spike established:
+
+- Both account usage endpoints answer **Wisp's own stored OAuth credentials**, no extra scope or consent:
+  Anthropic `GET https://api.anthropic.com/api/oauth/usage` (`Bearer` + `anthropic-beta: oauth-2025-04-20`)
+  and Codex `GET https://chatgpt.com/backend-api/wham/usage` (`Bearer` + `chatgpt-account-id`). Both `200`.
+  `/backend-api/api/codex/usage` is a **404** — recorded so nobody tries it again.
+- They report the **same ledger as the turn headers**, exactly: Anthropic 5h `42%` / 7d `71%` with resets
+  matching `status.json` to the second, Codex 7d `100%` at `reset_at 1787198654`. That agreement is what
+  clears the advertised-ceiling trap, and it cost zero read budget
+  ([[a-new-quota-source-is-cheapest-to-validate-against-one-already-trusted]]).
+- The build reason is **reachability with zero turns spent**, not richer fields. Headers only arrive on a
+  response, so a freshly-opened session has no meters until the user sends something — which is the hole
+  #203's expired-window rendering sits in.
+- Read budget honoured: Anthropic 2 spaced reads, Codex 1 (+1 404). No 429 seen.
 
 Decisions inside it worth carrying:
 
-- **Identical treatment means identical rule, not identical layout** — active expired rows keep the reset
-  *time* ("refilled 2:08pm" = when it rolled); remembered rows show bare `↻ refilled` because they never
-  showed reset times. Noted on the ticket.
-- The row stays visible indefinitely once expired; hiding it after a grace period would be new policy and
-  is explicitly not built.
+- **Cross-source agreement beats a short time series** when the source under test is rate-limited and reports
+  integer percents. Full page: [[a-new-quota-source-is-cheapest-to-validate-against-one-already-trusted]].
+- **Deferred past 2.0.43 on purpose** — #201 declares the passive header lane this release's source of truth,
+  and cadence / precedence / opt-in are human scoping calls. That is why #207 carries no `ready-for-agent`.
 
-## Queue: #204
+## Queue: empty
 
-- **#204 — usage-endpoint recon spike** (throwaway probes under gitignored `out/`, redact on values, ≤3
-  reads — the Anthropic usage endpoint carries a multi-minute 429 penalty; verdict as a comment on #201,
-  build ticket only on a build verdict).
+`gh issue list --label ready-for-agent --state open` → `[]`. **Verify by query, not by this note.**
 
-Unblocked. #69 and #163 unchanged, neither agent-ready.
+Open but not agent-ready: **#207** (active quota probe — blocked on three scoping calls and on 2.0.43
+shipping), **#69**, **#163**.
 
 ## Release owed
 
-**npm `wisp-router` 2.0.43 — cut is OWED, not cut.** Unchanged by #203: the statusline is the `wisp-slot`
-plugin face, which ships through the marketplace on merge, not through npm. `packages/tui/CHANGELOG.md`
-still carries `## [2.0.43] — unreleased` (its Surfaces already derived); `package.json` deliberately not
-bumped — the bump and the `v2.0.43` tag stay a deliberate human act.
+**npm `wisp-router` 2.0.43 — cut is OWED, and nothing else is blocking it.** Unchanged by #204, which
+shipped no code. `packages/tui/CHANGELOG.md` still carries `## [2.0.43] — unreleased` with its Surfaces
+already derived; `package.json` deliberately not bumped — the bump and the `v2.0.43` tag stay a deliberate
+human act, and the tag must equal `package.json` exactly or `release.yml` fails loud.
 
 `wisp-slot` 1.7.4 is **live for the user already** on this machine — the badge runs from the repo checkout
-([[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]); `/plugin update wisp-slot` only
-refreshes the cached skill/hook copies.
+([[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]).
 
 ## State
 
-- **In flight:** nothing. Leg complete.
-- **Done this leg:** #203 built (TDD: 4 new checks watched fail first), gated, merged, closed, label
-  cleared, breadcrumbed; wisp-slot 1.7.4 in plugin.json + marketplace.json.
-- **Blocked:** nothing.
+- **In flight:** nothing. Leg complete, queue drained.
+- **Done this leg:** #204 recon driven end to end (both endpoints probed, comparison table, build verdict on
+  #201), #207 filed, #204 breadcrumbed + closed + label cleared, probe scripts deleted, two gotchas and one
+  decision recorded.
+- **Blocked:** nothing. The release cut is a human step, not a block.
 
 ## Verification
 
-All on merged main (`ca29ebc`):
-
-- `node plugins/slot/statusline/check.js` — **30/30** (24 existing + 6 new expiry cases; fixtures
-  caller-shaped: epoch-second `resetAt`, picker-prefixed `claude-wisp-sol[1m]` on route cases)
-- **Control run per the ticket:** pre-fix script (`git show HEAD:` into scratch) failed all 4 behavior
-  assertions; the 2 passing both ways are labelled in-file as regression pins
-- Live ANSI eyeball under sandboxed `WISP_HOME` (bash-seeded — PowerShell seeding hits the BOM trap,
-  [[a-bom-in-wisp-config-silently-empties-the-whole-config]]): expired `5h` FAINT `↻ refilled 2:08pm`,
-  unexpired `7d` bar + amber 61% unchanged, remembered row mixes `5h ↻ refilled · 7d 36%  7m ago`
-- No package gate claimed — plugin-only change, per the ticket; the squash touched exactly the 4 intended
-  files (pre-branch `git rev-list` guard held, unlike #202's sweep)
+- `gh issue list --label ready-for-agent --state open` → `[]` (queue dry — the loop's stop signal)
+- `gh issue view 204` → `CLOSED`, labels `[enhancement]` (`ready-for-agent` cleared by hand, as always)
+- `git status --short` → only the user's untracked `.context/Untitled.canvas`; `out/` empty, both probe
+  scripts deleted per the ticket's own acceptance criterion
+- Pre-work `git rev-list --left-right --count origin/main...main` → `0 0`
+- Comment scanned for identifier-shaped values before posting (`wrkspc_`, `req_01`, email patterns) → clean.
+  No account-identifying value reached the tracker or the repo.
+- No code gate claimed — **no code changed.** Nothing to typecheck, nothing to test.
 
 ## Skills for next session
 
-- `/preset pick-up` — baton at [[pick-up]] is current as of this leg.
-- #204 is a recon spike: the quota-recon landmines in [[pick-up]] (drain the body, redact on value, prove
-  by driving) are the working rules.
+- `/preset pick-up` — baton at [[pick-up]] is current as of this leg and says `queue empty`.
+- The next real move is the **2.0.43 release cut**, which is a human step with its own landmine list in
+  [[pick-up]] (tag must equal `package.json`; verify past the registry read; a fix release needs the previous
+  version as a control).
 
 ## Open questions
 
-- **#204's verdict is genuinely open** — nobody has driven the usage endpoint with our token yet.
-- Carried over, unchanged: install `packages/vscode/wisp-1.11.0.vsix`; dismiss the two secret-scanning
-  alerts as won't-fix; rotate `bridgeSecret` (low urgency); #170 needs a Kimi Code subscription; note
-  #189's last criterion on the closed issue when observed; ~20 stale local `ticket/*` branches.
+- **#207's three open calls** — poll cadence, precedence when a poll and a turn header disagree (they agreed
+  exactly here, so "freshest wins" is probably enough, but it is a decision), and whether the probe is opt-in.
+- Carried over, unchanged: install `packages/vscode/wisp-1.11.0.vsix`; dismiss the two secret-scanning alerts
+  as won't-fix; rotate `bridgeSecret` (low urgency); #170 needs a Kimi Code subscription; note #189's last
+  criterion on the closed issue when observed; ~20 stale local `ticket/*` branches.
 - `.context/Untitled.canvas` sits untracked in the repo — user's own file, left alone, not committed.
 
 ## Related
@@ -91,9 +101,11 @@ All on merged main (`ca29ebc`):
 - [[decisions]]
 - [[gotchas]]
 - [[quota-recon]]
-- [[the-statusline-duplicates-resolveroute-and-drifts]]
-- [[status-json-is-global-so-it-cannot-observe-another-session]]
+- [[2026-08-14-the-usage-endpoint-is-the-same-ledger-reached-without-a-turn]]
+- [[a-new-quota-source-is-cheapest-to-validate-against-one-already-trusted]]
+- [[the-usage-payload-names-most-of-its-buckets-in-unstable-codenames]]
+- [[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]
+- [[a-cancelled-response-body-cannot-test-whether-a-counter-decrements]]
+- [[loadcodeassist-answers-with-the-account-email-inside-it]]
 - [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]
 - [[a-branch-cut-from-an-unpushed-main-sweeps-it-into-the-squash]]
-- [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
-- [[2026-07-30-a-surfaces-section-is-checked-against-the-code-not-copied-from-the-ticket]]

@@ -9,38 +9,43 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Latest (2026-08-14, relay leg 2): #203 statusline expired-meter LANDED.** PR #206, squashed as `ca29ebc`
-on main, issue closed, `ready-for-agent` cleared, wisp-slot **1.7.4** in both manifests. Gate green:
-`check.js` **30/30** (24 + 6 new expiry cases), control run failed all 4 behavior assertions pre-fix, live
-ANSI eyeball verified. Plugin-only — **npm `wisp-router` 2.0.43 cut still OWED, unchanged by #203**
-(changelog entry sits `unreleased`; `package.json` deliberately not bumped).
+**Latest (2026-08-14, relay leg 3): #204 usage-endpoint recon LANDED — verdict build, filed as #207.**
+No code, no branch, nothing committed: the ticket's deliverable is an answered question and its own
+acceptance criteria forbid committing. Evidence + comparison table posted on #201, breadcrumb on #204,
+issue closed, `ready-for-agent` cleared. **The queue is now dry and the loop stopped.**
 
-## Queue: #204
+## Queue: empty
 
-`gh issue list --label ready-for-agent --state open` → one ticket. **Verify by query, not by this note**
+`gh issue list --label ready-for-agent --state open` → `[]`. **Verify by query, not by this note**
 ([[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]]).
 
-- **#204 — usage-endpoint recon spike.** Throwaway probes under gitignored `out/`, redact on **values**,
-  ≤3 reads — the Anthropic usage endpoint carries a multi-minute 429 penalty. Verdict lands as a comment
-  on #201; a build ticket is filed only on a build verdict. The quota-recon landmines below are the
-  working rules for this ticket.
+Open but deliberately **not** agent-ready: **#207** (active quota probe — blocked on three scoping calls
+and on 2.0.43 shipping), **#69**, **#163**.
 
-After #204 the queue is dry: #69 and #163 are open but neither is agent-ready. Queue empty → the loop's
-stop signal, and the 2.0.43 cut becomes the user's move.
+## The next move is the user's: cut npm `wisp-router` 2.0.43
+
+Nothing else blocks it. `packages/tui/CHANGELOG.md` carries `## [2.0.43] — unreleased` with Surfaces already
+derived; `package.json` is deliberately unbumped. Release landmines are in the list below — the tag must
+equal `package.json` **exactly**, and a fix release is not verified until the previous version fails the
+same check.
 
 ## ⚠ Read before cutting a ticket branch
 
 **`git rev-list --left-right --count origin/main...main` — the right-hand number must be 0.**
 
 Local `main` drifts ahead of origin on this repo *by convention*, and a branch cut from an unpushed main
-sweeps those commits into its own squash-merge — it happened to `3465c7c` (#202). Leg 2 ran the guard,
-got 0/0, and `ca29ebc` squashed to exactly its own 4 files. One command before the work; after the merge
-the cheap fix is gone. Full trap: [[a-branch-cut-from-an-unpushed-main-sweeps-it-into-the-squash]].
+sweeps those commits into its own squash-merge — it happened to `3465c7c` (#202). Legs 2 and 3 both ran the
+guard and got 0/0. One command before the work; after the merge the cheap fix is gone. Full trap:
+[[a-branch-cut-from-an-unpushed-main-sweeps-it-into-the-squash]].
 
 ## Waiting on the user
 
-- **Cut npm `wisp-router` 2.0.43** when 2.0.43's work is done — bump `packages/tui/package.json`, tag
-  `v2.0.43` (**tag must equal package.json exactly**; `release.yml` verifies and fails loud).
+- **Cut npm `wisp-router` 2.0.43** — bump `packages/tui/package.json`, tag `v2.0.43` (**tag must equal
+  package.json exactly**; `release.yml` verifies and fails loud). This is now the only open work item.
+- **#207's three scoping calls** before it can be labelled `ready-for-agent`: poll **cadence**;
+  **precedence** when a poll and a turn header disagree (they agreed exactly in the recon, so "freshest
+  wins" is probably enough — but it is a decision); **opt-in or always-on**, since it is an extra outbound
+  call on the user's credential.
 - **Install `packages/vscode/wisp-1.11.0.vsix`** — still not installed.
 - **Dismiss the two secret-scanning alerts** as "won't fix" —
   [#1 Client ID](https://github.com/EstarinAzx/Wisp-Router/security/secret-scanning/1),
@@ -68,27 +73,24 @@ Statusline / status.json:
   twice. Change `routing.ts:60-91` → check the copy, and run `node plugins/slot/statusline/check.js`
   (30 assertions since #203; exit code is the verdict).
 - **Its fixtures must use the shape the CALLER sends, not the name the source stores** — both drifts
-  survived a green check because the fixtures agreed with the code instead of with reality. #203's expiry
-  cases follow it (epoch-second `resetAt`, picker-prefixed ids); hold any new case to the same.
+  survived a green check because the fixtures agreed with the code instead of with reality.
 - **A statusline fix needs the pre-fix file as the control.** `git show HEAD:<path>` into a scratch dir;
-  assertions that pass both ways are pins, label them so. (#203 did exactly this: 4 failed pre-fix, 2 pins
-  labelled in-file.)
+  assertions that pass both ways are pins, label them so.
 - **Expired meters (`resetAt <= now`, epoch seconds) render `↻ refilled`, dimmed, no bar/percent** — one
-  `expired()` predicate, applied at BOTH render sites (active rows and remembered rows). Widening either
-  site alone breaks the "identical treatment" contract of #203. Reading age (24h prune) stays orthogonal
-  to window validity.
+  `expired()` predicate, applied at BOTH render sites. Reading age (24h prune) stays orthogonal to window
+  validity.
 - **"Showing anthropic when I'm on codex" has TWO causes — the route row tells them apart.** Bare `wisp` →
   resolution failed. A complete route row beside a foreign quota row → global-slot displacement.
 - **A bare `wisp` row in a hand-built sandbox is usually the BOM**, not the resolver — PowerShell 5.1
   `Out-File`/`Set-Content -Encoding utf8` writes a BOM, `JSON.parse` throws, config reads `{}`. Seed
-  sandboxes from bash/node ([[a-bom-in-wisp-config-silently-empties-the-whole-config]]). Re-bit leg 2's
-  eyeball harness.
+  sandboxes from bash/node ([[a-bom-in-wisp-config-silently-empties-the-whole-config]]).
 - **`status.json` is ONE global slot** — a concurrent session on another Provider owns the top level and
   pushes yours into `providers`. Consumers check both places, keyed on `providerId`
   ([[status-json-is-global-so-it-cannot-observe-another-session]]). Safe only because `mergeStatus` evicts
   the incoming Provider from the ledger — don't weaken that.
 - **Codex on a Plus plan has exactly ONE window** (`x-codex-secondary-window-minutes: 0`, refused by
   `parseCodexQuota`, `status.ts:88-91`). A `5h`/`7d` pair is Anthropic's — the fast displacement tell.
+  #204's endpoint probe independently re-confirmed this (`secondary_window: null`).
 - **`stream: false` never records a snapshot** — the non-streaming branch is Claude Code's `/model` probe,
   deliberately excluded (`bridgeServer.ts:843` is on the streaming path).
 - **The block the user sees runs from the repo checkout, not the plugin cache**
@@ -101,23 +103,33 @@ Bridge log (#202):
 - **The serve banner is NOT mirrored into `bridge.log`** — it prints the Bridge access secret. Only the
   Bridge's own log callback is captured. Anything that widens what serve writes to the file must keep that
   line.
-- **`bridge.log` is regenerable telemetry**, same class as `status.json`: never overwrite-protected
-  (#182 guards stores whose contents a user cannot regenerate), and already invisible to the home-store
-  watcher through its existing non-`.json` name filter (`homeStore.ts:125`).
+- **`bridge.log` is regenerable telemetry**, same class as `status.json`: never overwrite-protected, and
+  already invisible to the home-store watcher through its non-`.json` name filter (`homeStore.ts:125`).
 
-Quota / recon (the #204 working rules):
+Quota / recon (updated by #204):
 
 - **Only two wires report quota via headers, and that is SETTLED, not a gap**
-  ([[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]). #204 asks a NEW question — an
-  *active* usage-endpoint lane — and does not reopen the header decision.
+  ([[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]).
+- **The active lane is now ANSWERED, not open.** Both usage endpoints answer Wisp's stored OAuth
+  credentials: Anthropic `GET api.anthropic.com/api/oauth/usage` (`Bearer` + `anthropic-beta:
+  oauth-2025-04-20`), Codex `GET chatgpt.com/backend-api/wham/usage` (`Bearer` + `chatgpt-account-id`).
+  **`/backend-api/api/codex/usage` is a 404 — do not retry it.** Verdict build, deferred to #207
+  ([[2026-08-14-the-usage-endpoint-is-the-same-ledger-reached-without-a-turn]]).
+- **Validate a new quota source against one you already trust, not by watching a counter** — the endpoint is
+  rate-limited and reports integer percents, so a short time series proves nothing; `status.json`'s
+  header-derived meters matched it exactly and settled it for free
+  ([[a-new-quota-source-is-cheapest-to-validate-against-one-already-trusted]]).
+- **Parse `limits[]` on shape — the payload's named buckets are unstable codenames** (`tangelo`,
+  `nimbus_quill`, `iguana_necktie`…), and units differ from the header path (integer percent + ISO-8601 vs
+  0..1 fraction + epoch seconds) ([[the-usage-payload-names-most-of-its-buckets-in-unstable-codenames]]).
 - **Recon that reads a response head must DRAIN the body**
   ([[a-cancelled-response-body-cannot-test-whether-a-counter-decrements]]).
-- **Prove a wire by driving it, not by reading it** — throwaway `bun` probes under gitignored `out/`;
-  delete after; never commit.
-- **Usage payloads can carry account identifiers under unpredictable keys — redact on the VALUE**
-  ([[loadcodeassist-answers-with-the-account-email-inside-it]]). Applies directly to #204.
-- **The Anthropic usage endpoint carries a multi-minute 429 penalty** — budget ≤3 reads total; a spent
-  budget with no verdict is a "no-build yet" comment on #201, not a license for read #4.
+- **Prove a wire by driving it** — throwaway probes under gitignored `out/`; delete after; never commit.
+- **Usage payloads carry account identifiers under unpredictable keys — redact on the VALUE**
+  ([[loadcodeassist-answers-with-the-account-email-inside-it]]). Codex's `/wham/usage` returns `email`,
+  `user_id`, `account_id`; Anthropic returns an org uuid and a **workspace id in response headers**.
+- **The Anthropic usage endpoint carries a multi-minute 429 penalty** — budget ≤3 reads; it can never be
+  called from the statusline render path.
 
 Release:
 
@@ -153,7 +165,7 @@ General:
 - **`packages/core` has NO `compile` script** — gate is `bun run typecheck`; only `packages/tui` has
   `compile`. Test gate is **`bun run test`** (vitest) — bare `bun test` runs Bun's runner, ~53 bogus
   failures. Note the split: `packages/core/tests/` is vitest and runs in the workspace gate;
-  `packages/tui/tests/` is the **bun runner** and must be run explicitly (`bun test packages/tui/tests/…`).
+  `packages/tui/tests/` is the **bun runner** and must be run explicitly.
 - Prefer the scoped **`packages/tui:verify`** skill for tui/core work.
 - A store that does not parse is never overwritten (#182, ADR-0004); `status.json` and `bridge.log` are the
   documented exceptions (regenerable telemetry, never protected).
@@ -162,16 +174,20 @@ General:
 - `.context/` commits go to main, never a ticket branch — **and see the unpushed-main trap above.**
 - No PR CI — only `release.yml` on tag `v*`; the local gate *is* the gate.
 
-Reference clones (both outside the repo, both re-clonable): `D:\scratch\CLIProxyAPI` (shallow, `c9417c8`;
-Antigravity credits poll at `internal/runtime/executor/antigravity_executor_credits.go:453`) and
-`D:\scratch\traycer` (shallow, 2026-08-14; harness-orchestrator reference — protocol schemas + clients only,
-host closed; rate-limit protocol at `protocol/src/host/rate-limit/`).
+Reference clones (both outside the repo, both re-clonable): `D:\scratch\CLIProxyAPI` (shallow, `c9417c8`)
+and `D:\scratch\traycer` (shallow, 2026-08-14). **#204 checked both for usage endpoints and neither has
+one** — traycer's open `protocol` package is fixtures against `example.com` with the host closed. The real
+endpoints came from the vendors' own shipped clients (the Claude CLI bundle and `codex.exe`), which is the
+place to look next time.
 
 ## Related
 
 - [[active-work]]
 - [[overview]]
 - [[quota-recon]]
+- [[2026-08-14-the-usage-endpoint-is-the-same-ledger-reached-without-a-turn]]
+- [[a-new-quota-source-is-cheapest-to-validate-against-one-already-trusted]]
+- [[the-usage-payload-names-most-of-its-buckets-in-unstable-codenames]]
 - [[a-branch-cut-from-an-unpushed-main-sweeps-it-into-the-squash]]
 - [[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]]
 - [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
