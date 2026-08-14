@@ -27,7 +27,7 @@ import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvid
 import {
   Provider, PROVIDERS, CUSTOM_ID, resolveModel, resolveBaseUrl, resolveKeyId, planLegacyMigration, planZenToGoMigration,
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, DEFAULT_EFFORT,
-  isAnthropicProvider, isAnthropicSignedIn, anthropicAccountLabel, isXaiProvider, isXaiSignedIn, isKimiProvider, KimiAuth, isAntigravityProvider, isAntigravitySignedIn, AntigravityAuth, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
+  isAnthropicProvider, isAnthropicSignedIn, anthropicAccountLabel, isXaiProvider, isXaiSignedIn, isKimiProvider, KimiAuth, isAntigravityProvider, isAntigravitySignedIn, AntigravityAuth, fetchAntigravityModels, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
   type CodexCreds, type EffortLevel, type AnthropicCreds, type XaiCreds,
 } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
@@ -259,6 +259,24 @@ const fetchModelIds = async (): Promise<string[]> => {
   return page.data.map((m) => m.id).sort();
 };
 
+// Antigravity's dropdown prefers the upstream's own model list (fresh creds via the shared auth.json
+// slice), so a model released after the static snapshot appears without an extension update. Raced
+// against the same 4s ceiling as the models.dev fetches so a slow upstream can never stall panel open;
+// signed out, timeout, empty, or error all fall back to the static table — never a throw.
+const antigravityModelIds = async (p: Provider): Promise<string[]> => {
+  try {
+    const creds = await antigravityAuth.current();
+    if (creds?.accessToken) {
+      const live = await Promise.race([
+        fetchAntigravityModels(creds, resolveBaseUrl(p, home.readConfig().customBaseUrl ?? '')),
+        new Promise<string[]>((resolve) => setTimeout(() => resolve([]), 4000)),
+      ]);
+      if (live.length) return live;
+    }
+  } catch { /* static fallback below */ }
+  return oauthModelOptions(p, undefined) ?? [];
+};
+
 // Model ids for ANY catalog Provider — the Routing-map rows' dropdowns (#53). OAuth kinds read the
 // models.dev curated list; keyed kinds probe GET /models with that Provider's own key. Every failure
 // (unknown id, no key, Custom without URL, offline) is an empty list, never a throw — the row falls
@@ -267,6 +285,7 @@ const providerModelIds = async (id: string): Promise<string[]> => {
   const p = PROVIDERS.find((r) => r.id === id);
   if (!p) return [];
   try {
+    if (isAntigravityProvider(p)) return await antigravityModelIds(p);
     if (isCodexProvider(p) || isAnthropicProvider(p)) {
       // Same timeout race as getState so a cold models.dev can't stall the row; undefined → curated list.
       const catalog = await Promise.race([
@@ -397,8 +416,9 @@ const getState = async (): Promise<PanelState> => {
     signedIn,
     // #150: the "signed in as …" upgrade — only Anthropic's bootstrap captures an account identity.
     account: isAnthropicProvider(p) ? anthropicAccountLabel(home.readAuth().anthropic) : undefined,
-    // The OAuth Providers have no /models route — their dropdown comes from models.dev (curated fallback).
-    modelOptions: oauthModelOptions(p, catalog),
+    // The OAuth Providers have no OpenAI-style /models route — their dropdown comes from models.dev
+    // (curated fallback). Antigravity is the exception: it has its own discovery call, preferred live.
+    modelOptions: isAntigravityProvider(p) ? await antigravityModelIds(p) : oauthModelOptions(p, catalog),
     // The reasoning-effort knob's current value (drives the panel's Effort select). Shared by the two
     // effort-aware OAuth Providers — Codex and Anthropic (#31); every other Provider leaves it undefined.
     effort: isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p) ? activeEffort() : undefined,

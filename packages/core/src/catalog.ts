@@ -101,8 +101,9 @@ export const PROVIDERS: Provider[] = [
   // Antigravity = subscription Gemini/Claude backend reached by GOOGLE OAuth (no API key), on a third wire:
   // a Gemini generateContent payload nested in a Cloud Code envelope. kind:'antigravity-oauth'. baseUrl is
   // the DAILY host — verified answering (#186), with prod as the reference's fallback that was never needed.
-  // No catalogKey (models.dev carries no Antigravity provider); its lineup comes from the live
-  // fetchAvailableModels route, so the model picker is the correction path. ⚠ defaultModel is
+  // No catalogKey (models.dev carries no Antigravity provider); signed-in pickers read the live
+  // fetchAvailableModels route (fetchAntigravityModels), with the static ANTIGRAVITY_MODELS table as the
+  // signed-out/offline fallback — the model picker is the correction path. ⚠ defaultModel is
   // gemini-3.1-pro-low, NOT the `recommended: true` gemini-3.1-pro-high — that row is listed and 400s on
   // every request shape tried (#186). The catalog is advisory: being listed does not make a row servable.
   { id: 'antigravity', label: 'Antigravity', baseUrl: 'https://daily-cloudcode-pa.googleapis.com', defaultModel: 'gemini-3.1-pro-low', apiKeyEnv: '', kind: 'antigravity-oauth' },
@@ -504,7 +505,8 @@ export const planZenToGoMigration = (
 // One rule for "which curated list backs an OAuth Provider" — shared by the Active-Provider panel state
 // and the per-row Routing-map lists. Keyed kinds answer undefined: they have a live /models route instead.
 // Antigravity takes no catalog argument: models.dev carries no Antigravity provider, so ANTIGRAVITY_MODELS
-// is the whole lineup rather than an offline fallback (#189).
+// answers here — the faces prefer the live fetchAntigravityModels list when signed in and use this as the
+// signed-out/offline fallback (#189).
 export const oauthModelOptions = (p: Provider, catalog?: ModelsDevCatalog): string[] | undefined =>
   isCodexProvider(p) ? codexModelsFrom(catalog)
     : isAnthropicProvider(p) ? anthropicModelsFrom(catalog)

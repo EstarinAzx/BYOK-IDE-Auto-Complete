@@ -28,9 +28,9 @@
 
 import {
   AntigravityCreds, AntigravityTurn, buildAntigravityRequestBody, antigravityRequestId,
-  antigravityFallbackSessionId, antigravityHostChain, antigravityTurnUrl, antigravityRequestHeaders,
-  antigravityApiError, antigravityShouldTryNextHost, antigravityStreamEvents,
-  type ToolSpec,
+  antigravityFallbackSessionId, antigravityHostChain, antigravityTurnUrl, antigravityModelsUrl,
+  antigravityRequestHeaders, antigravityApiError, antigravityShouldTryNextHost, antigravityStreamEvents,
+  parseAntigravityModels, type ToolSpec,
 } from './catalog';
 // TYPE only, exactly as antigravity.ts imports it: erased at runtime, so bridge -> catalog stays the sole
 // runtime edge and the module graph never cycles (the xai.ts pattern).
@@ -99,6 +99,40 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
   }
   // Unreachable: antigravityHostChain never answers empty. The throw is the type-level restatement.
   throw new Error('Antigravity API error 503: no Antigravity host available');
+};
+
+// ----------------------------- Model discovery ----------------------------- //
+
+/*
+ * The upstream's own model list — what the pickers prefer over the static ANTIGRAVITY_MODELS table when
+ * signed in, so a model released after the snapshot appears without a Wisp release. Same host chain and
+ * mirrored headers as a turn; the walk policy is the reference fetch tool's, not the turn's — ANY failure
+ * moves to the next host (a discovery read has no request id to keep stable and no 429 verdict to
+ * classify), and the last host's failure surfaces in the API-error contract shape.
+ */
+export const fetchAntigravityModels = async (creds: AntigravityCreds, baseUrl?: string): Promise<string[]> => {
+  const token = creds.accessToken;
+  if (!token) throw new Error('Not signed in to Antigravity.');
+  const body = JSON.stringify(creds.projectId ? { project: creds.projectId } : {});
+  const headers = antigravityRequestHeaders(token);
+  const hosts = antigravityHostChain(baseUrl);
+
+  let lastError: Error = new Error('Antigravity API error 503: no Antigravity host available');
+  for (const host of hosts) {
+    let res: Response;
+    try {
+      res = await fetch(antigravityModelsUrl(host), { method: 'POST', headers, body, signal: AbortSignal.timeout(10_000) });
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      continue;
+    }
+    if (!res.ok) {
+      lastError = antigravityApiError(res.status, await res.text().catch(() => ''));
+      continue;
+    }
+    return parseAntigravityModels(await res.json().catch(() => undefined));
+  }
+  throw lastError;
 };
 
 // ----------------------------- Streaming ----------------------------- //

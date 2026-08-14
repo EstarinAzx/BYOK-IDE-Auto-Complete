@@ -12,9 +12,10 @@
  */
 
 import {
-  resolveBaseUrl, oauthModelOptions, getModelsDevCatalog, type Provider,
+  resolveBaseUrl, oauthModelOptions, getModelsDevCatalog, isAntigravityProvider, fetchAntigravityModels,
+  type Provider,
 } from '@wisp/core';
-import { home, bearerFor } from './store';
+import { home, bearerFor, antigravityAuth } from './store';
 
 // ----------------------------- Fetch (throwing) ----------------------------- //
 
@@ -23,6 +24,18 @@ import { home, bearerFor } from './store';
 // empty answer). Failures THROW with the backend's own words — `wisp models` prints them
 // verbatim; the TUI face below swallows into the pickers' free-text fallback.
 export const fetchModelList = async (p: Provider): Promise<string[] | undefined> => {
+  // Antigravity: prefer the upstream's own list when signed in, so a model released after the static
+  // snapshot appears without a Wisp release. A live failure falls back to the curated table instead of
+  // throwing — the static list is a real answer, and the picker stays useful offline.
+  if (isAntigravityProvider(p)) {
+    const creds = await antigravityAuth.current().catch(() => undefined);
+    if (creds?.accessToken) {
+      try {
+        const live = await fetchAntigravityModels(creds, resolveBaseUrl(p, home.readConfig().customBaseUrl ?? ''));
+        if (live.length) return live;
+      } catch { /* static fallback below */ }
+    }
+  }
   const catalog = await getModelsDevCatalog().catch(() => undefined);
   const curated = oauthModelOptions(p, catalog);
   if (curated) return curated;

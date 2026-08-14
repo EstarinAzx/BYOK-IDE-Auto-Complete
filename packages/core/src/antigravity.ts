@@ -944,14 +944,16 @@ export const antigravityStreamEvents = async function* (upstream: AsyncIterable<
 // ----------------------------- The model lineup (#189) ----------------------------- //
 
 /*
- * The thirteen models this backend serves, each with the per-model output cap applyAntigravityFamilyForks
- * clamps against. Curated like ANTHROPIC_MODELS / XAI_MODELS / CODEX_MODELS — models.dev carries no
- * Antigravity provider, so there is no dynamic catalog to prefer over this table.
+ * The static model table — the FALLBACK the pickers show when the live list is unreachable (signed out,
+ * offline, upstream error). Signed-in pickers prefer fetchAntigravityModels (the upstream's own
+ * /v1internal:fetchAvailableModels answer), so a model released after this snapshot still appears; this
+ * table also stays the source of the per-model output cap applyAntigravityFamilyForks clamps against —
+ * the live payload's caps are not plumbed (a live-fetched unknown id simply goes unclamped).
  *
- * ⚠ ADVISORY, not a guarantee. #186 asked the upstream's own list and got 24 rows, several of which 400 on
- * every request shape tried (gemini-3.1-pro-high among them, despite being flagged `recommended`). Listed
- * here means "offered in the picker", never "known servable"; the correction path is choosing another
- * model, not reshaping the request.
+ * ⚠ ADVISORY, not a guarantee — and so is the LIVE list. #186 asked the upstream's own list and got 24
+ * rows, several of which 400 on every request shape tried (gemini-3.1-pro-high among them, despite being
+ * flagged `recommended`). Listed here means "offered in the picker", never "known servable"; the
+ * correction path is choosing another model, not reshaping the request.
  */
 export type AntigravityModelSpec = { id: string; maxCompletionTokens?: number; image?: boolean };
 
@@ -974,6 +976,22 @@ export const ANTIGRAVITY_MODEL_SPECS: AntigravityModelSpec[] = [
 
 // The ids alone — the shape oauthModelOptions and the pickers consume.
 export const ANTIGRAVITY_MODELS: string[] = ANTIGRAVITY_MODEL_SPECS.map((spec) => spec.id);
+
+/*
+ * The live lineup: id keys of the `models` MAP (not an array) that fetchAvailableModels answers, sorted.
+ * The payload also lists editor-internal rows that are not servable chat models; they are dropped on
+ * SHAPE — `tab_*` (tab-completion models) and `chat_<digits>` (numbered experiments) — never by pinned
+ * id, because the roster shifts under us (the usage-payload codename rule). Anything else stays, image
+ * rows included: isAntigravityImageModel refuses those at selection, same as the static table.
+ */
+export const parseAntigravityModels = (payload: unknown): string[] => {
+  const models = (payload as { models?: unknown } | undefined)?.models;
+  if (!models || typeof models !== 'object' || Array.isArray(models)) return [];
+  return Object.keys(models)
+    .map((id) => id.trim())
+    .filter((id) => id && !id.startsWith('tab_') && !/^chat_\d+$/.test(id))
+    .sort();
+};
 
 // The model's output ceiling, fed to applyAntigravityFamilyForks so a request that carries a larger
 // maxOutputTokens is clamped rather than 400'd. undefined = no published cap for this row.
@@ -1016,6 +1034,11 @@ export const antigravityHostChain = (baseUrl?: string): string[] => {
 
 // The turn endpoint. Streaming adds the SSE query flag — without it the "stream" path answers one JSON
 // document and the mapper sees a single chunk.
+// The model-discovery endpoint — same hosts, same headers as a turn, POST `{project}` (or `{}` before
+// the bootstrap; unlike a turn, discovery answers without one).
+export const antigravityModelsUrl = (host: string): string =>
+  `${host.replace(/\/+$/, '')}/v1internal:fetchAvailableModels`;
+
 export const antigravityTurnUrl = (host: string, stream: boolean): string =>
   `${host.replace(/\/+$/, '')}/v1internal:${stream ? 'streamGenerateContent?alt=sse' : 'generateContent'}`;
 
