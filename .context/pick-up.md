@@ -9,38 +9,33 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Latest (2026-08-14, relay leg 1): #202 `wisp log` LANDED.** PR #205, squashed as `3465c7c` on main,
-issue closed, `ready-for-agent` cleared. All gates green on merged main (workspace 1016/1016, 13/13 new
-bun tests, three compiles, statusline check 24/24) plus live sandboxed verification through the real Bun
-entry points. **npm `wisp-router` 2.0.43 cut is now OWED** — changelog entry written as
-`## [2.0.43] — unreleased` with derived Surfaces; `package.json` deliberately NOT bumped, because the bump
-and the tag are a deliberate act (npm cannot republish).
+**Latest (2026-08-14, relay leg 2): #203 statusline expired-meter LANDED.** PR #206, squashed as `ca29ebc`
+on main, issue closed, `ready-for-agent` cleared, wisp-slot **1.7.4** in both manifests. Gate green:
+`check.js` **30/30** (24 + 6 new expiry cases), control run failed all 4 behavior assertions pre-fix, live
+ANSI eyeball verified. Plugin-only — **npm `wisp-router` 2.0.43 cut still OWED, unchanged by #203**
+(changelog entry sits `unreleased`; `package.json` deliberately not bumped).
 
-## Queue: #203, #204
+## Queue: #204
 
-`gh issue list --label ready-for-agent --state open` → two tickets. **Verify by query, not by this note**
+`gh issue list --label ready-for-agent --state open` → one ticket. **Verify by query, not by this note**
 ([[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]]).
 
-- **#203 — statusline expired-meter semantics** (plugin-only; `resetAt <= now` → dimmed "refilled" row, no
-  bar, no alarm percent; `check.js` + a **pre-fix control** is the whole gate; `wisp-slot` version lives in
-  **two** files). Natural next pick — lowest open number, and the smallest surface.
-- **#204 — usage-endpoint recon spike** (throwaway probes under gitignored `out/`, redact on values, ≤3
-  reads — the Anthropic usage endpoint carries a multi-minute 429 penalty; verdict as a comment on #201,
-  build ticket only on a build verdict).
+- **#204 — usage-endpoint recon spike.** Throwaway probes under gitignored `out/`, redact on **values**,
+  ≤3 reads — the Anthropic usage endpoint carries a multi-minute 429 penalty. Verdict lands as a comment
+  on #201; a build ticket is filed only on a build verdict. The quota-recon landmines below are the
+  working rules for this ticket.
 
-Both independent, neither blocked. #69 and #163 unchanged, neither agent-ready.
+After #204 the queue is dry: #69 and #163 are open but neither is agent-ready. Queue empty → the loop's
+stop signal, and the 2.0.43 cut becomes the user's move.
 
 ## ⚠ Read before cutting a ticket branch
 
 **`git rev-list --left-right --count origin/main...main` — the right-hand number must be 0.**
 
-Local `main` drifts ahead of origin on this repo *by convention* (`.context/` commits land on main and the
-ticket-loop's step 8 says don't push), so a `git log` that looks synced routinely isn't. A branch cut from
-an unpushed main sweeps those commits into its own squash-merge — which is exactly what happened to
-`3465c7c` (4 unrelated commits, 18 files, all under the #202 subject). Nothing was lost, but history
-granularity was. One command before the work; after the merge the cheap fix is gone. Full trap and the
-post-merge "the tree looks reverted but isn't" recovery:
-[[a-branch-cut-from-an-unpushed-main-sweeps-it-into-the-squash]].
+Local `main` drifts ahead of origin on this repo *by convention*, and a branch cut from an unpushed main
+sweeps those commits into its own squash-merge — it happened to `3465c7c` (#202). Leg 2 ran the guard,
+got 0/0, and `ca29ebc` squashed to exactly its own 4 files. One command before the work; after the merge
+the cheap fix is gone. Full trap: [[a-branch-cut-from-an-unpushed-main-sweeps-it-into-the-squash]].
 
 ## Waiting on the user
 
@@ -55,6 +50,9 @@ post-merge "the tree looks reverted but isn't" recovery:
 - **#189's last criterion** — note a completing Antigravity Claude-model turn on closed #189 when observed.
 - **~20 stale local `ticket/*` branches** (`git branch --list 'ticket/*'`). Cleanup, not a blocker.
 - **`.context/Untitled.canvas`** — untracked user file, left uncommitted; keep or remove is the user's call.
+- Optional: `/plugin update wisp-slot` to refresh the cached skill/hook copies to 1.7.4 — the statusline
+  badge itself already runs 1.7.4 from the checkout
+  ([[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]).
 
 ## Landmines (durable — keep carrying)
 
@@ -68,14 +66,23 @@ Statusline / status.json:
   two route-row bugs were each one grep from solved.
 - **The statusline DUPLICATES `resolveRoute`** — out-of-process, cannot import `@wisp/core`. It has drifted
   twice. Change `routing.ts:60-91` → check the copy, and run `node plugins/slot/statusline/check.js`
-  (24 assertions; exit code is the verdict).
+  (30 assertions since #203; exit code is the verdict).
 - **Its fixtures must use the shape the CALLER sends, not the name the source stores** — both drifts
-  survived a green check because the fixtures agreed with the code instead of with reality. #203's new
-  expiry cases owe the same discipline (epoch-second `resetAt`, as status.json actually carries it).
+  survived a green check because the fixtures agreed with the code instead of with reality. #203's expiry
+  cases follow it (epoch-second `resetAt`, picker-prefixed ids); hold any new case to the same.
 - **A statusline fix needs the pre-fix file as the control.** `git show HEAD:<path>` into a scratch dir;
-  assertions that pass both ways are pins, label them so.
+  assertions that pass both ways are pins, label them so. (#203 did exactly this: 4 failed pre-fix, 2 pins
+  labelled in-file.)
+- **Expired meters (`resetAt <= now`, epoch seconds) render `↻ refilled`, dimmed, no bar/percent** — one
+  `expired()` predicate, applied at BOTH render sites (active rows and remembered rows). Widening either
+  site alone breaks the "identical treatment" contract of #203. Reading age (24h prune) stays orthogonal
+  to window validity.
 - **"Showing anthropic when I'm on codex" has TWO causes — the route row tells them apart.** Bare `wisp` →
   resolution failed. A complete route row beside a foreign quota row → global-slot displacement.
+- **A bare `wisp` row in a hand-built sandbox is usually the BOM**, not the resolver — PowerShell 5.1
+  `Out-File`/`Set-Content -Encoding utf8` writes a BOM, `JSON.parse` throws, config reads `{}`. Seed
+  sandboxes from bash/node ([[a-bom-in-wisp-config-silently-empties-the-whole-config]]). Re-bit leg 2's
+  eyeball harness.
 - **`status.json` is ONE global slot** — a concurrent session on another Provider owns the top level and
   pushes yours into `providers`. Consumers check both places, keyed on `providerId`
   ([[status-json-is-global-so-it-cannot-observe-another-session]]). Safe only because `mergeStatus` evicts
@@ -89,17 +96,16 @@ Statusline / status.json:
   (`~/.claude/hooks/statusline-wrapper.ps1`) and its edits are in no commit.
 - **An empty `providers` map is usually correct** — the ledger never holds the *active* Provider.
 
-Bridge log (#202, new):
+Bridge log (#202):
 
 - **The serve banner is NOT mirrored into `bridge.log`** — it prints the Bridge access secret. Only the
   Bridge's own log callback is captured. Anything that widens what serve writes to the file must keep that
   line.
 - **`bridge.log` is regenerable telemetry**, same class as `status.json`: never overwrite-protected
   (#182 guards stores whose contents a user cannot regenerate), and already invisible to the home-store
-  watcher through its existing non-`.json` name filter (`homeStore.ts:125`) — no watcher change exists or
-  is needed.
+  watcher through its existing non-`.json` name filter (`homeStore.ts:125`).
 
-Quota / recon:
+Quota / recon (the #204 working rules):
 
 - **Only two wires report quota via headers, and that is SETTLED, not a gap**
   ([[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]). #204 asks a NEW question — an
@@ -110,6 +116,8 @@ Quota / recon:
   delete after; never commit.
 - **Usage payloads can carry account identifiers under unpredictable keys — redact on the VALUE**
   ([[loadcodeassist-answers-with-the-account-email-inside-it]]). Applies directly to #204.
+- **The Anthropic usage endpoint carries a multi-minute 429 penalty** — budget ≤3 reads total; a spent
+  budget with no verdict is a "no-build yet" comment on #201, not a license for read #4.
 
 Release:
 
@@ -150,7 +158,7 @@ General:
 - A store that does not parse is never overwritten (#182, ADR-0004); `status.json` and `bridge.log` are the
   documented exceptions (regenerable telemetry, never protected).
 - The `wisp-slot` version lives in TWO files (`plugins/slot/.claude-plugin/plugin.json` +
-  `.claude-plugin/marketplace.json`) — #203 bumps both.
+  `.claude-plugin/marketplace.json`) — now 1.7.4 in both.
 - `.context/` commits go to main, never a ticket branch — **and see the unpushed-main trap above.**
 - No PR CI — only `release.yml` on tag `v*`; the local gate *is* the gate.
 
@@ -166,6 +174,7 @@ host closed; rate-limit protocol at `protocol/src/host/rate-limit/`).
 - [[quota-recon]]
 - [[a-branch-cut-from-an-unpushed-main-sweeps-it-into-the-squash]]
 - [[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]]
+- [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
 - [[2026-08-14-a-cursor-provider-has-no-wire-to-route-through]]
 - [[2026-08-05-a-duplicated-resolver-is-fixtured-with-what-its-caller-sends-not-what-its-source-names]]
 - [[a-picked-alias-reaches-the-statusline-prefixed-claude-wisp]]
