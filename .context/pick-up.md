@@ -9,17 +9,22 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Latest (2026-08-14): 2.0.44 is SHIPPED and nothing is owed.**
+**Latest (2026-08-14): 2.0.45 is SHIPPED and verified. Only the vsix build is owed.**
 
-One session, one direct user ask: a newly released Antigravity model (`gemini-3.7-flash-tiered`) was
-invisible because the model lineup was a hardcoded snapshot. The pickers now prefer the upstream's own
-`POST /v1internal:fetchAvailableModels` answer, static table demoted to signed-out/offline fallback
-([[2026-08-14-antigravity-model-list-is-live-static-is-fallback]]). Shipped straight on main
-(`88e8a39` feat + `a712745` release — no ticket, user-authorized cut), tag `v2.0.44`, run `31781936359`
-green on all five jobs, npm `latest`, verified from scratch installs of BOTH versions with 2.0.43 as the
-failing control (live 21 rows vs static 13). **vsix 1.12.0 built and bundle-checked — NOT installed.**
+Started as a question about `[bridge] prompt-cache diagnosis STALE` lines (answer: not misses — the Bridge
+correctly overriding a server verdict its own bill contradicts; no action). That led to "do codex/xai/
+antigravity use Claude Code's effort levels?" → `/trace` (persisted to [[flows]]) → three of four arms did,
+Antigravity did not → the feature.
 
-**There is no queued work and no owed release.** The next move is a decision, not a task.
+**Claude Code's `/effort` now reaches Antigravity's `-tiered` rows**
+([[2026-08-14-antigravity-effort-reaches-only-the-tiered-rows]]) as
+`generationConfig.thinkingConfig.thinkingLevel`, folded to that wire's three stops. Every other Antigravity
+row is byte-identical to 2.0.44 — their ids already pin the tier, and Wisp's flat 21-row picker means
+choosing the row chose the tier. Shipped straight on main (`d96b73a` feat + `bd21076` release — no ticket,
+user-authorized cut), tag `v2.0.45`, run `31787916143` green on all five jobs, npm `latest`, verified from
+scratch installs of BOTH versions with 2.0.44 as the failing control.
+
+**No queued work. One owed item: build + install vsix 1.13.0** (version-bumped, not built).
 
 ## Queue: empty
 
@@ -29,23 +34,31 @@ this note** ([[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]
 Open but deliberately **not** agent-ready: **#207** (active quota probe — blocked on three scoping
 calls), **#69**, **#163**.
 
-## 2.0.44 — cut, published, verified
+## 2.0.45 — cut, published, verified
 
-`wisp-router@2.0.44` is npm `latest`; GitHub release `v2.0.44` carries all four platform binaries.
-Verified past the registry read with a discriminating pair: scratch 2.0.44's `wisp models antigravity`
-against the real signed-in home prints the live list (21 rows, `gemini-3.7-flash-tiered` present);
-scratch 2.0.43 prints the static 13 without it. Signed-out sandbox on 2.0.44 prints the curated 13 —
-fallback proven.
+`wisp-router@2.0.45` is npm `latest`; GitHub release `v2.0.45` carries all four platform binaries.
+Verified past the registry read: both versions scratch-installed, both bins executed (banners self-report
+their version), then the shipped `.exe` grepped — `thinkingLevel` 4 / `includeThoughts` 1 / `-tiered` 1 in
+2.0.45, **all 0** in 2.0.44, with `fetchAvailableModels` at 1 in BOTH as the shared control.
+
+**Honest gap:** no live turn driven through the *installed* binary at low vs high — that needs an
+Antigravity route in the real `~/.wisp/config.json`, and the session was itself running through that
+Bridge. Wire behavior was proven separately at source level from the same commit.
 
 Worth knowing before the next cut:
 
-- **Surfaces derived at the cut** from `git log v2.0.43..main -- <face-path>`: one commit, three
-  package faces, plugin untouched. Keep deriving at the cut, never from ticket prose.
-- **The vsix bundle check needs a discriminating marker.** Plain `fetchAvailableModels` greps 1 in the
-  OLD 1.11.0 bundle too (a stale comment string); the `v1internal:fetchAvailableModels` URL literal is
-  what separates 1.12.0 from 1.11.0.
+- **Surfaces derived at the cut** from `git log v2.0.44..main -- <face-path>`: one commit, touching
+  `packages/core` ALONE. **That is not "bump nothing"** — core is a bundled dependency, not a published
+  face, so both shipping faces carry it
+  ([[a-bundled-dependency-is-not-a-face-but-every-face-carries-it]]). Two questions, not one: which paths
+  changed, then which faces carry those paths.
+- **A marker check needs a marker present in BOTH artifacts.** All-absent-in-old is ambiguous — a wrong
+  path or an unreadable binary prints the same zeroes
+  ([[a-marker-grep-proves-nothing-without-a-marker-present-in-both]]). For vsix 1.13.0 the discriminating
+  marker is `thinkingLevel` (absent from 1.12.0); pair it with a control string in both.
 - **The platform npm packages 404 and that is normal** — npm's spam filter; `release.yml` treats them
-  as best-effort, the shim falls back to the GitHub release binaries.
+  as best-effort, the shim falls back to the GitHub release binaries. (They resolved cleanly for 2.0.45,
+  so the fallback did not engage — do not read that as the 404s being fixed.)
 
 ## ⚠ Read before cutting a ticket branch
 
@@ -59,8 +72,10 @@ This session ran the guard (0/0) and pushed everything, so origin is current. Fu
 
 - **#207's three scoping calls** before it can be labelled `ready-for-agent`: poll **cadence**;
   **precedence** when a poll and a turn header disagree; **opt-in or always-on**.
-- **Install `packages/vscode/wisp-1.12.0.vsix`** — supersedes the never-installed 1.11.0; carries the
-  live Antigravity dropdowns (the extension bundles its own `@wisp/core`, npm can't deliver this).
+- **Build then install vsix 1.13.0** — `packages/vscode/package.json` + CHANGELOG are already at 1.13.0;
+  the `.vsix` itself is NOT built. Supersedes the never-installed 1.12.0 and 1.11.0. Carries both the live
+  Antigravity dropdowns and 2.0.45's tier (the extension bundles its own `@wisp/core` and hosts a Bridge of
+  its own, so npm can't deliver either).
 - **Dismiss the two secret-scanning alerts** as "won't fix" —
   [#1 Client ID](https://github.com/EstarinAzx/Wisp-Router/security/secret-scanning/1),
   [#2 Client Secret](https://github.com/EstarinAzx/Wisp-Router/security/secret-scanning/2).
@@ -148,6 +163,13 @@ Antigravity (full detail in memory notes):
   wire, never `systemSplit.stable`. 429 verdict rides ON the Error. Throw shape is a CONTRACT. SSE
   framing is CRLF. Turns → daily host, `loadCodeAssist` → production. Never mint opaque provider-side
   tool ids.
+- **Effort reaches ONLY the `-tiered` rows, since 2.0.45**
+  ([[2026-08-14-antigravity-effort-reaches-only-the-tiered-rows]]). Every other id pins its depth in the
+  name (`gemini-3.6-flash-low|-medium|-high` are three models; the vendor's own Effort slider greys out on
+  `gpt-oss-120b-medium` and both Claude rows). A **suffix shape test**, never a pinned list. `xhigh`/`max`
+  fold to `high` — the fold is what makes an unattested level unreachable, not a convenience. Do NOT map
+  effort onto id suffixes and do NOT add the Claude `thinkingBudget` path (we'd be inventing the integers;
+  those rows already think by name). `applyAntigravityThinkingLevel` runs LAST in the body build on purpose.
 - **The model list is LIVE since 2.0.44** ([[2026-08-14-antigravity-model-list-is-live-static-is-fallback]]):
   `fetchAntigravityModels` (turn host chain, mirrored headers, any-failure host walk), static
   `ANTIGRAVITY_MODEL_SPECS` = fallback + caps only. Internal rows dropped on shape (`tab_*`,
@@ -189,6 +211,10 @@ shipped clients remain the place to look for endpoint shapes.
 - [[active-work]]
 - [[overview]]
 - [[decisions]]
+- [[flows]]
+- [[2026-08-14-antigravity-effort-reaches-only-the-tiered-rows]]
+- [[a-bundled-dependency-is-not-a-face-but-every-face-carries-it]]
+- [[a-marker-grep-proves-nothing-without-a-marker-present-in-both]]
 - [[2026-08-14-antigravity-model-list-is-live-static-is-fallback]]
 - [[2026-08-14-the-usage-endpoint-is-the-same-ledger-reached-without-a-turn]]
 - [[a-new-quota-source-is-cheapest-to-validate-against-one-already-trusted]]
