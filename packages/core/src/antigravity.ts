@@ -25,7 +25,7 @@
 import { createHash } from 'crypto';
 import type { Provider } from './catalog';
 import type { BridgeStreamEvent } from './bridge';
-import type { ToolSpec, BridgeUsage } from './shared';
+import type { ToolSpec, BridgeUsage, AntigravityThinkingLevel } from './shared';
 import type { AnthropicTruncationReason } from './anthropic';
 import type { CodexErrorClass } from './codex';
 
@@ -195,6 +195,47 @@ export const applyAntigravityFamilyForks = (envelope: Json, modelName: string, m
   } else if (generationConfig) {
     delete generationConfig.maxOutputTokens;
   }
+  return out;
+};
+
+// ----------------------------- Reasoning tier (the '-tiered' rows only) ----------------------------- //
+
+/*
+ * Which rows take a reasoning tier as a REQUEST FIELD rather than as part of their name.
+ *
+ * Almost every row on this wire PINS its depth in the id: gemini-3.6-flash-low / -medium / -high are three
+ * models, not one model with a dial, and gpt-oss-120b-medium plus both Claude rows carry theirs the same
+ * way. Antigravity's own client greys its Effort slider out on exactly those rows (checked 2026-08-14) and
+ * collapses the suffixed siblings into one picker line + slider. The '-tiered' rows are the exception with
+ * no siblings to collapse — gemini-3.7-flash-tiered ships in that form alone — so their depth has nowhere
+ * to live but the request.
+ *
+ * A SHAPE test, not a pinned id list, for the same reason the internal-row drop is one: the live model list
+ * grows between releases (that is what 2.0.44 was for), and a new -tiered row must work without a cut.
+ *
+ * Wisp's picker lists all 21 ids flat, so on a suffixed row the user ALREADY chose the tier by choosing the
+ * row — overriding that from the effort knob would silently send -high to someone who picked -low.
+ */
+export const antigravityAcceptsThinkingLevel = (model: string): boolean =>
+  model.toLowerCase().endsWith('-tiered');
+
+/*
+ * Set the reasoning tier on a '-tiered' row; every other row is returned untouched, byte-identical.
+ *
+ * includeThoughts:true because the reduce path already routes thought parts to the thinking channel
+ * (see antigravityStreamEvents) — thinking tokens are BILLED OUTPUT on this wire, so asking for them and
+ * then discarding them would be paying for nothing.
+ *
+ * Runs LAST in buildAntigravityRequestBody, after every existing stage, so it cannot shift what any of them
+ * sees: the forks read generationConfig, the schema cleaners walk generationConfig containers, and on the
+ * Bridge path none of them found one before this. Appending after they run keeps their behaviour identical.
+ */
+export const applyAntigravityThinkingLevel = (envelope: Json, modelName: string, level?: AntigravityThinkingLevel): Json => {
+  if (!level || !antigravityAcceptsThinkingLevel(modelName)) return envelope;
+  const out: Json = clone(envelope);
+  if (!isObj(out.request)) out.request = {};
+  if (!isObj(out.request.generationConfig)) out.request.generationConfig = {};
+  out.request.generationConfig.thinkingConfig = { thinkingLevel: level, includeThoughts: true };
   return out;
 };
 
@@ -1187,6 +1228,7 @@ export const buildAntigravityRequestBody = (args: {
   requestId: string;
   sessionId?: string;
   fallbackSessionId?: string;
+  thinkingLevel?: AntigravityThinkingLevel;
 }): Json => {
   const payload = buildAntigravityPayload({ messages: args.messages, tools: args.tools });
   // The stable id must WIN over the fallback — it is upstream cache behaviour, not a nonce, so resolving
@@ -1201,5 +1243,7 @@ export const buildAntigravityRequestBody = (args: {
     envelope = sanitizeAntigravityRequestSchemas(envelope, usesAntigravitySchema(args.model));
   }
   envelope = normalizeAntigravityFunctionResponses(envelope);
-  return sanitizeAntigravityThoughtSignatures(envelope);
+  // Last, deliberately: see applyAntigravityThinkingLevel — appending after every other stage is what keeps
+  // their behaviour byte-identical on the rows this does not touch.
+  return applyAntigravityThinkingLevel(sanitizeAntigravityThoughtSignatures(envelope), args.model, args.thinkingLevel);
 };

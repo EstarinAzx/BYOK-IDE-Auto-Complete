@@ -13,6 +13,7 @@ import {
   ANTIGRAVITY_INSTANT_RETRY_MS, ANTIGRAVITY_SHORT_QUOTA_COOLDOWN_MS,
   buildAntigravityEnvelope, antigravityStableSessionId, antigravityRequestId, antigravityImageRequestId,
   isAntigravityClaudeModel, usesAntigravitySchema, applyAntigravityFamilyForks,
+  antigravityAcceptsThinkingLevel, applyAntigravityThinkingLevel, standardEffortToAntigravity,
   cleanJsonSchemaForGemini, cleanJsonSchemaForAntigravity,
   antigravityNeedsSchemaSanitization, sanitizeAntigravityRequestSchemas,
   buildAntigravityTools,
@@ -136,6 +137,75 @@ describe('antigravityStableSessionId', () => {
   });
 });
 
+// ----------------------------- The reasoning tier ('-tiered' rows only) ----------------------------- //
+
+describe('antigravityAcceptsThinkingLevel', () => {
+  // The '-tiered' rows defer their depth to the request; every other id pins it in the name. Verified on
+  // the live wire 2026-08-14: -tiered honours thinkingLevel (low 264 output tokens, high 758 + thinking),
+  // and every row below answers 200 whether or not one is sent.
+  it('accepts the tiered rows', () => {
+    expect(antigravityAcceptsThinkingLevel('gemini-3.7-flash-tiered')).toBe(true);
+    expect(antigravityAcceptsThinkingLevel('gemini-3.6-flash-tiered')).toBe(true);
+  });
+
+  it('refuses every row whose id already pins a tier', () => {
+    for (const model of ['gemini-3.6-flash-low', 'gemini-3.6-flash-medium', 'gemini-3.6-flash-high',
+      'gemini-3.1-pro-low', 'gemini-3.1-pro-high', 'gemini-3.5-flash-extra-low',
+      'gpt-oss-120b-medium', 'claude-opus-4-6-thinking', 'claude-sonnet-4-6']) {
+      expect(antigravityAcceptsThinkingLevel(model)).toBe(false);
+    }
+  });
+
+  // A SHAPE test, not a pinned list — the live model list grows between releases, and an unreleased
+  // -tiered row must work without a cut.
+  it('matches on shape, so an unknown tiered row still qualifies', () => {
+    expect(antigravityAcceptsThinkingLevel('gemini-9.9-nova-tiered')).toBe(true);
+  });
+});
+
+describe('applyAntigravityThinkingLevel', () => {
+  const env = () => ({ model: 'm', request: { contents: [] } });
+
+  it('sets the level and asks for thoughts on a tiered row', () => {
+    const out: any = applyAntigravityThinkingLevel(env(), 'gemini-3.7-flash-tiered', 'high');
+    expect(out.request.generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'high', includeThoughts: true });
+  });
+
+  // The user already chose the tier by choosing the row — overriding it would silently send -high to
+  // someone who picked -low.
+  it('leaves a pinned row untouched', () => {
+    const before = env();
+    expect(applyAntigravityThinkingLevel(before, 'gemini-3.6-flash-low', 'high')).toEqual(before);
+    expect(applyAntigravityThinkingLevel(before, 'claude-sonnet-4-6', 'high')).toEqual(before);
+  });
+
+  it('is a no-op without a level, so the pre-effort body is unchanged', () => {
+    const before = env();
+    expect(applyAntigravityThinkingLevel(before, 'gemini-3.7-flash-tiered', undefined)).toEqual(before);
+  });
+
+  it('does not mutate its input', () => {
+    const before: any = env();
+    applyAntigravityThinkingLevel(before, 'gemini-3.7-flash-tiered', 'low');
+    expect(before.request.generationConfig).toBeUndefined();
+  });
+});
+
+describe('standardEffortToAntigravity', () => {
+  // This wire's own client offers exactly three stops, so the fold is what makes an unattested level
+  // unreachable rather than something we hope the upstream tolerates.
+  it('passes the three stops through', () => {
+    expect(standardEffortToAntigravity('low')).toBe('low');
+    expect(standardEffortToAntigravity('medium')).toBe('medium');
+    expect(standardEffortToAntigravity('high')).toBe('high');
+  });
+
+  it('folds the two rungs above onto high', () => {
+    expect(standardEffortToAntigravity('xhigh')).toBe('high');
+    expect(standardEffortToAntigravity('max')).toBe('high');
+  });
+});
+
 // ----------------------------- The model-family fork table ----------------------------- //
 
 describe('applyAntigravityFamilyForks', () => {
@@ -162,6 +232,12 @@ describe('applyAntigravityFamilyForks', () => {
   it('leaves a cap already under the model ceiling untouched', () => {
     const out: any = applyAntigravityFamilyForks(env(1_000), 'claude-sonnet-4.5', 64_000);
     expect(out.request.generationConfig.maxOutputTokens).toBe(1_000);
+  });
+
+  it('leaves the thinkingConfig of a tiered row alone', () => {
+    const withThinking = { model: 'm', request: { generationConfig: { thinkingConfig: { thinkingLevel: 'high' } } } };
+    const out: any = applyAntigravityFamilyForks(withThinking, 'gemini-3.7-flash-tiered');
+    expect(out.request.generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'high' });
   });
 
   it('selects the schema cleaner per family', () => {

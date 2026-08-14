@@ -92,6 +92,22 @@ tags: [flows]
 6. `wisp-statusline.js:126` — `live` = status fresh (<30m) **and** `status.model === target.model`; only then do the ctx field + bar rows render.
 7. `wisp-statusline.js:167-188` — everything else demotes: aged-out active snapshot + every `providers` entry, dimmed and age-stamped, max 2 rows.
 
+## Effort — Claude Code `/effort` → each Provider's wire
+- **Question:** do the codex, xai, and antigravity Providers use Claude Code's effort levels?  **Lens:** understand
+- **Summary:** Claude Code's `/effort` arrives as `output_config.effort`, is validated to Wisp's low→max ladder, and overrides the panel knob for every arm — Codex and Grok fold `max`→`xhigh` and gate the reasoning block per model; Antigravity folds to its own three stops and reaches only the `-tiered` rows, since every other id on that wire pins its depth in the name.
+- **Entry:** packages/core/src/bridgeAnthropic.ts:242 (`normalizeEffort(body.output_config?.effort)`)
+- **Key files:** packages/core/src/bridgeAnthropic.ts, packages/core/src/bridgeServer.ts, packages/core/src/shared.ts, packages/core/src/codex.ts, packages/core/src/xai.ts, packages/core/src/catalog.ts
+- **Updated:** 2026-08-14
+
+### Hops
+1. `bridgeAnthropic.ts:72,98,242` — `output_config.effort` is the ONE beta field the door reads; `normalizeEffort` accepts only `low|medium|high|xhigh|max`, anything else → `undefined` (falls back to the panel).
+2. `bridgeServer.ts:635` — `const effort = parsed.effort ?? deps.effort()`. Claude Code's value wins over the panel; `bridgeServer.ts:736` logs which one did (`(claude code)` vs `(panel)`).
+3. **Codex arm** `bridgeServer.ts:643` → `standardEffortToCodex(effort)` (`shared.ts:63`, folds `max`→`xhigh`) → `codexClient.ts:66` → `codexReasoning` (`codex.ts:177`) emits `{effort, summary:'auto'}` only for `^(gpt-5|o3|o4)`; `*spark*` and gpt-4.x get no reasoning block.
+4. **Anthropic arm** `bridgeServer.ts:664` — effort passes through unfolded (`max` is Anthropic-only); the wire clamps per model (`anthropic.ts:214` `modelSupportsAnthropicEffort`, Claude 5 family + Opus/Sonnet 4.5-4.8; Haiku 400s so it is omitted).
+5. **xAI arm** `bridgeServer.ts:673` → `xaiClient.ts:50` → `xaiReasoning` (`xai.ts:167`) — same `standardEffortToCodex` fold, gated to `grok-[4-9]`; grok-build/composer reject reasoning and get none. `rewriteXaiResponsesPayload` (`xai.ts:184`) additionally folds a raw-forwarded `minimal`→`low`.
+6. **Antigravity arm** `bridgeServer.ts:698` — `standardEffortToAntigravity(effort)` (`shared.ts`, folds `xhigh`/`max`→`high`, because this wire's own client offers exactly three stops) → `antigravityClient.ts` → `buildAntigravityRequestBody` → `applyAntigravityThinkingLevel` runs LAST and emits `request.generationConfig.thinkingConfig = {thinkingLevel, includeThoughts:true}` — but **only for `-tiered` rows** (`antigravityAcceptsThinkingLevel`, a suffix shape test). Every other id pins its depth in the name (`gemini-3.6-flash-low|-medium|-high` are three models), and Wisp lists all 21 flat, so there the user already chose the tier by choosing the row.
+7. **Panel ladder** `catalog.ts:522` `effortOptionsFor` — Anthropic offers `low..max`, Grok and everything else `low..xhigh`; Antigravity is never asked (only Codex/Anthropic/Grok call it), so the Antigravity tier rides the Bridge path alone, never a panel control.
+
 ## Related
 
 - [[overview]]

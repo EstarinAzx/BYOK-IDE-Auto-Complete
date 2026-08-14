@@ -30,7 +30,7 @@ import {
   AntigravityCreds, AntigravityTurn, buildAntigravityRequestBody, antigravityRequestId,
   antigravityFallbackSessionId, antigravityHostChain, antigravityTurnUrl, antigravityModelsUrl,
   antigravityRequestHeaders, antigravityApiError, antigravityShouldTryNextHost, antigravityStreamEvents,
-  parseAntigravityModels, type ToolSpec,
+  parseAntigravityModels, type ToolSpec, type AntigravityThinkingLevel,
 } from './catalog';
 // TYPE only, exactly as antigravity.ts imports it: erased at runtime, so bridge -> catalog stays the sole
 // runtime edge and the module graph never cycles (the xai.ts pattern).
@@ -43,6 +43,10 @@ type AntigravityRequestArgs = {
   model: string;
   messages: AntigravityTurn[];
   tools?: ToolSpec[];
+  // Already folded to this wire's three stops by the caller (standardEffortToCodex's neighbour), the same
+  // way the Codex arm hands codexStream a CodexEffort rather than the raw knob. Absent = send no
+  // thinkingConfig at all, which is every row whose id already pins its tier.
+  thinkingLevel?: AntigravityThinkingLevel;
   signal?: AbortSignal;
 };
 
@@ -78,6 +82,7 @@ const antigravityFetch = async (args: AntigravityRequestArgs, stream: boolean): 
     projectId: args.creds.projectId,
     requestId: antigravityRequestId(crypto.randomUUID()),
     fallbackSessionId: antigravityFallbackSessionId(randomHex()),
+    thinkingLevel: args.thinkingLevel,
   }));
   const headers = antigravityRequestHeaders(token);
   const hosts = antigravityHostChain(args.baseUrl);

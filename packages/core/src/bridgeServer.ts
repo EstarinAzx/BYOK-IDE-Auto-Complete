@@ -27,7 +27,7 @@ import * as crypto from 'crypto';
 import type OpenAI from 'openai';
 import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
-  toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, isCodexProvider, isAnthropicProvider, isXaiProvider,
+  toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, standardEffortToAntigravity, isCodexProvider, isAnthropicProvider, isXaiProvider,
   isAntigravityProvider, isAntigravityImageModel, antigravityImageRefusal,
   antigravityFailureOf, ANTIGRAVITY_QUOTA_EXHAUSTED_CODE,
   anthropicCacheOutcome, anthropicDiagnosisStale, createAnthropicDiagnosisChain, createAnthropicCacheGrowthTracker,
@@ -688,11 +688,14 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // a cache breakpoint, and this wire has no breakpoint to place; taking `stable` alone would silently
       // drop the volatile tail (the mid-session <system-reminder> append) from every request.
       const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-      // No effort, and no tool strictness knob: Gemini bakes the reasoning level into the model id
-      // (gemini-3.1-pro-low vs -high), and buildAntigravityTools already cleans Claude Code's rich schemas
-      // for this wire — the door's `false` strict flag has no equivalent to pass. The stream already speaks
+      // Effort reaches only the '-tiered' rows — every other id on this wire pins its own reasoning depth
+      // (gemini-3.1-pro-low vs -high are two models, not one with a dial), so applyAntigravityThinkingLevel
+      // drops the level for them rather than overriding a tier the user picked by picking the row. The fold
+      // to this wire's three stops happens here, mirroring the Codex arm's standardEffortToCodex above.
+      // No tool strictness knob: buildAntigravityTools already cleans Claude Code's rich schemas for this
+      // wire, so the door's `false` strict flag has no equivalent to pass. The stream already speaks
       // BridgeStreamEvent, so unlike the three arms above it needs no mapOAuthStream hop.
-      return { ok: true, events: antigravityStream({ creds, baseUrl, model: modelId, messages, tools: parsed.tools, signal: controller.signal }), model: modelId };
+      return { ok: true, events: antigravityStream({ creds, baseUrl, model: modelId, messages, tools: parsed.tools, thinkingLevel: standardEffortToAntigravity(effort), signal: controller.signal }), model: modelId };
     }
     const client = await deps.clientFor(provider);
     if (!client) return { ok: false, status: 400, message: `provider '${provider.id}' has no API key configured` };

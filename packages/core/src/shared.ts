@@ -62,6 +62,14 @@ export type EffortLevel = CodexEffort | 'max';
 // left on 'max' after a Provider switch would 400 the Responses call.
 export const standardEffortToCodex = (effort: EffortLevel): CodexEffort => (effort === 'max' ? 'xhigh' : effort);
 
+// Antigravity's tier vocabulary. Its own client offers exactly three stops — low / medium / high — so the
+// two rungs above them fold onto 'high' rather than putting an unattested value on the wire. The fold is
+// what makes an unknown level UNREACHABLE by construction, which is the only reason this is safe to ship
+// without having probed every rung: we never send one we haven't seen the first-party client send.
+export type AntigravityThinkingLevel = 'low' | 'medium' | 'high';
+export const standardEffortToAntigravity = (effort: EffortLevel): AntigravityThinkingLevel =>
+  effort === 'xhigh' || effort === 'max' ? 'high' : effort;
+
 // Default reasoning depth — 'medium' preserves the pre-Effort behavior for callers that don't thread one.
 export const DEFAULT_EFFORT: CodexEffort = 'medium';
 
