@@ -173,6 +173,12 @@ rows.push(head.join(paint(DIM, ' │ ')));
 
 // --------------------------------- Meter rows --------------------------------- //
 
+// A window whose reset time is at-or-before now has already rolled (#203): its percent describes a spent
+// window that no longer exists, so presenting it as a live alarm is a confident wrong number. The row is
+// never silently dropped — the wire reported — it renders dimmed and barless with a refilled marker.
+// Render-time only: reading age (the 24h prune above) and window validity are orthogonal.
+const expired = (meter) => typeof meter.resetAt === 'number' && meter.resetAt * 1000 <= now;
+
 const activeMeters = activeQuota?.meters || [];
 const labelWidth = Math.max(3, ...activeMeters.map((m) => String(m.label).length));
 // The reading's age, stamped ONCE on the group's first row when it did not come from this session's own
@@ -183,15 +189,23 @@ let ageStamp = activeQuota && !activeQuota.live ? ageLabel(now - activeQuota.upd
 for (const meter of activeMeters) {
   if (typeof meter.percent !== 'number') continue;
   const reset = typeof meter.resetAt === 'number' ? resetLabel(meter.resetAt) : undefined;
-  rows.push([
-    '  ',
-    paint(LABEL, String(meter.label).padStart(labelWidth)),
-    '  ',
-    bar(meter.percent),
-    paint(scale(meter.percent), `${meter.percent}%`.padStart(5)),
-    reset ? `  ${paint(DIM, '↻')} ${paint(LABEL, reset)}` : '',
-    ageStamp ? `  ${paint(FAINT, ageStamp)}` : '',
-  ].join(''));
+  rows.push(expired(meter)
+    ? [
+        '  ',
+        paint(LABEL, String(meter.label).padStart(labelWidth)),
+        '  ',
+        paint(FAINT, `↻ refilled${reset ? ` ${reset}` : ''}`),
+        ageStamp ? `  ${paint(FAINT, ageStamp)}` : '',
+      ].join('')
+    : [
+        '  ',
+        paint(LABEL, String(meter.label).padStart(labelWidth)),
+        '  ',
+        bar(meter.percent),
+        paint(scale(meter.percent), `${meter.percent}%`.padStart(5)),
+        reset ? `  ${paint(DIM, '↻')} ${paint(LABEL, reset)}` : '',
+        ageStamp ? `  ${paint(FAINT, ageStamp)}` : '',
+      ].join(''));
   ageStamp = undefined;
 }
 
@@ -221,7 +235,9 @@ const shown = remembered
 for (const entry of shown) {
   const readings = entry.meters
     .filter((m) => typeof m.percent === 'number')
-    .map((m) => `${paint(LABEL, m.label)} ${paint(scale(m.percent), `${m.percent}%`)}`)
+    .map((m) => expired(m)
+      ? `${paint(LABEL, m.label)} ${paint(FAINT, '↻ refilled')}`
+      : `${paint(LABEL, m.label)} ${paint(scale(m.percent), `${m.percent}%`)}`)
     .join(paint(FAINT, ' · '));
   if (!readings) continue;
   rows.push(`  ${paint(LABEL, entry.id)}  ${readings}  ${paint(FAINT, ageLabel(now - entry.updatedAt))}`);

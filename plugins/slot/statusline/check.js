@@ -149,7 +149,41 @@ out = render({ id: 'claude-opus-5[1m]', display_name: 'Opus 5' }, {
 });
 ok('tier suffix keeps the family fuzzy', out.includes('opus → claude-opus-5'), out);
 
+// 9. An expired window is not a current reading (#203): a meter whose resetAt is at-or-before now has
+//    already rolled, so the old percent must not alarm. The row stays — this wire reported — but dimmed,
+//    barless, marked refilled, keeping its label and the reset glyph. Fixtures are caller-shaped: resetAt
+//    in epoch SECONDS as status.json carries it, model id picker-prefixed as Claude Code sends it.
+out = render({ id: 'claude-wisp-sol[1m]', display_name: 'sol — gpt-5.6-sol' }, {
+  updatedAt: now, providerId: 'codex', model: 'gpt-5.6-sol', contextPercent: 12,
+  meters: [
+    { label: '5h', percent: 87, resetAt: Math.floor(now / 1000) - 120 },
+    { label: '7d', percent: 61, resetAt: Math.floor(now / 1000) + 3600 },
+  ],
+});
+ok('expired meter marks refilled', /5h {2}↻ refilled/.test(out), out);
+ok('expired meter drops bar and alarm percent', !/5h {2}[●○]/.test(out) && !out.includes('87%'), out);
+// Regression pin, not a control case: an UNexpired meter rendered this way before the expiry rule existed,
+// so this passes pre-fix too. It is here so the expiry test cannot quietly widen past `resetAt <= now`.
+ok('unexpired sibling renders as before', /7d {2}[●○]{10} +61%/.test(out), out);
+
+// 10. Remembered-Provider rows get the identical treatment: an expired ledger meter shows refilled, not a
+//     percent that stopped being true when its window rolled.
+out = render({ id: 'claude-wisp-sol[1m]', display_name: 'sol — gpt-5.6-sol' }, {
+  updatedAt: now, providerId: 'codex', model: 'gpt-5.6-sol',
+  meters: [{ label: '5h', percent: 22, resetAt: Math.floor(now / 1000) + 3600 }],
+  providers: {
+    anthropic: {
+      updatedAt: now - 7 * 60_000, model: 'claude-opus-5',
+      meters: [{ label: '5h', percent: 91, resetAt: Math.floor(now / 1000) - 300 }, { label: '7d', percent: 36 }],
+    },
+  },
+});
+ok('remembered expired meter marks refilled', /anthropic {2}5h ↻ refilled/.test(out), out);
+ok('remembered expired meter drops the percent', !out.includes('91%'), out);
+// Regression pin (passes pre-fix): a meter with NO resetAt is never expired — the rule needs a number.
+ok('remembered meter without resetAt keeps its percent', /7d 36%/.test(out), out);
+
 fs.rmSync(home, { recursive: true, force: true });
 
 if (failures) { console.error(`\n${failures} failing check(s)`); process.exit(1); }
-console.log('wisp-statusline: 24/24 checks passed');
+console.log('wisp-statusline: 30/30 checks passed');
