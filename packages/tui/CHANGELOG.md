@@ -6,7 +6,7 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
-## [2.0.43] — unreleased
+## [2.0.43] — 2026-08-14
 
 **You can read what the Bridge said.** `wisp serve` prints its log to the terminal it runs in, and that
 terminal was the only copy: close it, or start the Bridge from somewhere you are not looking, and the
@@ -51,18 +51,22 @@ no watcher change was needed, and none was made.
 
 ### Surfaces
 
-Derived from `git log v2.0.42..HEAD` per face, not from the ticket.
+Derived from `git log v2.0.42..main -- <face-path>` per face, not from the ticket. Re-derived at the cut,
+after #203 and #204 also landed in this window.
 
-- **npm `wisp-router` 2.0.43 — the only face this changes, and the cut is OWED, not cut here.**
-  `packages/tui` had no commits since `v2.0.42`; this is the first. The writer and the reader are both in
-  the TUI package, so the npm publish is what delivers them. The version bump and the `v2.0.43` tag remain
-  a deliberate act — npm cannot republish a version.
-- **vsix — untouched, no bump owed.** `packages/core` has **no** commits since `v2.0.42`, and `wisp log`
-  is a TUI-face command the extension does not host. The extension bundles its own `@wisp/core`, so there
-  is nothing here for it to gain. It stays at 1.11.0 (still not installed).
-- **`wisp-slot` — unrelated and already shipped.** The three statusline commits since `v2.0.42`
-  (`f565e94`, `3974441`, `2705bac`) went out through the plugin marketplace as 1.7.1–1.7.3, independent of
-  this npm entry.
+- **npm `wisp-router` 2.0.43 — the only face this cut changes.** `packages/tui` has exactly one commit
+  since `v2.0.42`: `3465c7c` (#202). The writer and the reader are both in the TUI package, so the npm
+  publish is what delivers them.
+- **vsix — untouched, no bump owed.** `packages/core` and `packages/vscode` both have **zero** commits
+  since `v2.0.42`. `wisp log` is a TUI-face command the extension does not host, and the extension bundles
+  its own `@wisp/core`, which did not move. It stays at 1.11.0 (still not installed).
+- **`wisp-slot` — already shipped, through a different door.** `plugins/slot` has four commits since
+  `v2.0.42` (`f565e94`, `3974441`, `3465c7c`, `ca29ebc`), delivered through the plugin marketplace as
+  1.7.1 → **1.7.4** and independent of this npm entry. `3465c7c` appears in that list only because the
+  #202 squash swept earlier statusline commits into it (a branch cut from an unpushed `main`) — the
+  statusline work it carries shipped as 1.7.3, not as part of this release.
+- **No face for #204.** The usage-endpoint recon spike shipped no code by design; its verdict was build,
+  deferred as #207. Nothing to publish.
 
 ## [2.0.42] — 2026-07-30
 
