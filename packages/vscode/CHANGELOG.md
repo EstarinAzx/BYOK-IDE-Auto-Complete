@@ -4,6 +4,17 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] — 2026-08-14
+
+**The Antigravity dropdowns go live.** 1.11.0 shipped the Provider with a thirteen-model snapshot
+frozen into the bundled `@wisp/core`; a model Antigravity released after that snapshot never reached
+the panel. Signed in, the model picker and the Routing-map rows now ask the upstream's own
+model-discovery route (`POST /v1internal:fetchAvailableModels`, same hosts and headers as a turn) and
+show what it answers. The fetch is raced against the same 4-second ceiling as the models.dev lookups,
+so a slow upstream can never stall panel open; signed out, timed out, or on any error the dropdowns
+fall back to the static table — never empty, never a throw. npm `wisp-router` 2.0.44 is the terminal
+half of the same change.
+
 ## [1.11.0] — 2026-07-30
 
 **Antigravity reaches the extension face.** npm `wisp-router` 2.0.41 carried the new Provider to the

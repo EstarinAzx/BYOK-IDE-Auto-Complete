@@ -6,6 +6,44 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.44] — 2026-08-14
+
+**The Antigravity model list is live.** The picker and `wisp models antigravity` used to show a
+thirteen-row snapshot frozen into the code, so a model Antigravity released after that snapshot simply
+never appeared. Signed in, both now ask the upstream's own model-discovery route and show what it
+answers — a new upstream model appears without waiting for a Wisp release.
+
+### Changed
+
+- **`wisp models antigravity` and the model picker prefer the upstream's own list.** Signed in, the
+  Provider's models come from `POST /v1internal:fetchAvailableModels` — the same hosts and mirrored
+  headers as a turn, walked daily → production on any failure. The first live drive answered 21 rows
+  where the static table holds 13, `gemini-3.7-flash-tiered` among them. Editor-internal rows are
+  dropped on shape (`tab_*` tab-completion models, `chat_<digits>` numbered experiments), never by
+  pinned id — the roster shifts under us, and a pinned skip list would rot the way the static table did.
+- **The static table is now the fallback, not the lineup.** Signed out, offline, or on any upstream
+  error, the curated thirteen keep answering — the picker never goes empty and `wisp models` never
+  trades a usable list for an error. The table also still carries the per-model output caps; a
+  live-listed id outside it goes unclamped rather than refused.
+
+### Notes
+
+The live list is advisory, exactly as the static one was: the upstream lists rows that 400 on every
+request shape tried (`gemini-3.1-pro-high` since #186), and they stay listed. The correction path
+remains choosing another model, not reshaping the request.
+
+### Surfaces
+
+Derived from `git log v2.0.43..main -- <face-path>` per face, at the cut. One commit in the window,
+touching three faces.
+
+- **npm `wisp-router` 2.0.44** — carries the core client (`fetchAntigravityModels`) and the TUI seam
+  (`fetchModelList`), so `wisp models` and the terminal picker go live with this publish.
+- **vsix 1.12.0 — bump owed and cut alongside.** The extension bundles its own `@wisp/core` copy and
+  its panel dropdowns read the same live list (`getState` model options + the Routing-map rows), so the
+  npm publish alone cannot deliver this to the editor face.
+- **wisp-slot plugin — untouched**, zero commits in the window.
+
 ## [2.0.43] — 2026-08-14
 
 **You can read what the Bridge said.** `wisp serve` prints its log to the terminal it runs in, and that
