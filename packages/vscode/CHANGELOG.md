@@ -4,6 +4,17 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] — 2026-08-14
+
+**The extension's Bridge honours `/effort` on Antigravity's tiered models.** The Antigravity arm of the
+Bridge door took no effort value at all, so a Claude Code turn ran at whatever depth the model id
+implied regardless of the effort level it asked for. On a `-tiered` row the level now rides as
+`generationConfig.thinkingConfig.thinkingLevel`; on every other row nothing changes, because those ids
+already pin their depth in the name and the flat picker means choosing the row chose the tier.
+`xhigh` and `max` fold onto this wire's top stop, `high`. npm `wisp-router` 2.0.45 is the terminal half
+of the same change; this is the half npm can never deliver, because the extension **bundles its own
+copy of `@wisp/core`**.
+
 ## [1.12.0] — 2026-08-14
 
 **The Antigravity dropdowns go live.** 1.11.0 shipped the Provider with a thirteen-model snapshot

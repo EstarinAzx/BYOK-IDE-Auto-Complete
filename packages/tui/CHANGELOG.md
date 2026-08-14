@@ -6,6 +6,51 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.45] — 2026-08-14
+
+**Claude Code's `/effort` now reaches Antigravity's tiered models.** Every other Provider already
+honoured it; the Antigravity arm took no effort value at all, so a turn ran at whatever depth the
+model id implied no matter where the slider sat.
+
+### Changed
+
+- **A `-tiered` Antigravity model takes its reasoning depth from `/effort`.** Claude Code's effort
+  level (and, when it sends none, the panel knob) now rides as
+  `generationConfig.thinkingConfig.thinkingLevel` with thoughts requested. Driven live before
+  shipping: on `gemini-3.7-flash-tiered` the same prompt spends 264 output tokens at `low` and 758
+  with visible reasoning at `high`, against 407 before this change.
+- **Every other Antigravity model is deliberately untouched.** `gemini-3.6-flash-low`, `-medium` and
+  `-high` are three separate models rather than one with a dial, and `gpt-oss-120b-medium` plus both
+  Claude rows carry their depth in the name the same way — Antigravity's own client greys its Effort
+  control out on exactly those. Wisp lists all twenty-one ids flat, so choosing the row already chose
+  the tier; spending `/effort` on it again would silently send `-high` to someone who picked `-low`.
+  Those requests are byte-identical to 2.0.44's.
+- **Wisp's top two effort rungs fold onto `high`.** This wire offers three stops, so `xhigh` and `max`
+  land on `high` rather than putting an unattested value on the wire — the same shape as the existing
+  `max`→`xhigh` fold for Codex.
+
+### Notes
+
+Which rows qualify is a **suffix shape test**, not a pinned list, for the same reason the
+editor-internal row drop is one: the live model list grows between releases (that is what 2.0.44 was
+for), so a `-tiered` row released tomorrow works without a Wisp cut.
+
+Verified against the wire rather than the suite alone — a green suite has missed a dead Antigravity
+Provider before. No request shape 400s: the tiered rows at all three stops, and
+`gemini-3.6-flash-low`, `claude-sonnet-4-6` and `gpt-oss-120b-medium` all answer 200 unchanged.
+
+### Surfaces
+
+Derived from `git log v2.0.44..main -- <face-path>` per face, at the cut. One commit in the window,
+touching `packages/core` alone — but core is a bundled dependency, not a published face, so both
+shipping faces carry it.
+
+- **npm `wisp-router` 2.0.45** — the TUI depends on `@wisp/core` as `workspace:*`, so the Bridge door
+  that serves Claude Code gains the tier with this publish.
+- **vsix 1.13.0 — bump owed and cut alongside.** The extension bundles its own `@wisp/core` copy and
+  hosts a Bridge of its own, so the npm publish alone cannot deliver this to the editor face.
+- **wisp-slot plugin — untouched**, zero commits in the window.
+
 ## [2.0.44] — 2026-08-14
 
 **The Antigravity model list is live.** The picker and `wisp models antigravity` used to show a
