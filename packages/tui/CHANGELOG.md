@@ -6,6 +6,66 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.46] — 2026-09-02
+
+**A Claude model newer than the version Wisp claims to be no longer fails.** `claude-fable-5-1`
+released 2026-09-01, appeared in the picker the same day, and answered every turn with a 502 wrapping
+a 400. The model was never the problem: the subscription backend enforces the advertised `claude-cli`
+version as a **per-model floor**, `-5-1` demands 2.1.251, and Wisp had been claiming 2.1.219 since
+2026-07-25.
+
+### Fixed
+
+- **Wisp advertises `claude-cli 2.1.258`, the shipping CLI.** The pin feeds both the `User-Agent` and
+  the request body's `cc_version` attribution block, which the backend ties together, so both move as
+  one constant. Selecting a model above the old floor returned
+  `400 claude_code_version_too_old` naming the minimum it wanted; it now answers 200.
+- **The one-tap "Bind Claude subscription models" no longer downgrades `fable`.** Its mapping is a
+  hardcoded TUI-local table that the live picker cannot correct, and its `fable` entry still named
+  `claude-fable-5`. Anyone who had routed `fable` to `claude-fable-5-1` by hand and then pressed the
+  button had that route silently replaced with the older model. It now binds `claude-fable-5-1`.
+
+### Notes
+
+Driven on the live wire before shipping, with a control that had to pass:
+
+    claude-fable-5-1 @ 2.1.219   400  claude_code_version_too_old (wants 2.1.251)
+    claude-fable-5-1 @ 2.1.258   200  answered
+    claude-opus-5    @ 2.1.219   200  control
+
+The third row is what makes the first two mean anything — it proves the probe harness itself was
+sound, so the 400 is the wire's verdict and not a broken request. It is also the evidence that the
+bump cannot break an already-accepted request: `claude-opus-5` was passing at the old version and the
+`cc_version` hash is unvalidated (#148).
+
+The `anthropic-beta` token list rode both cells **unchanged** and is still the 2.1.216 capture. That
+was the open risk — a new model gated behind a new beta as well as a version floor would have turned
+this into a different 400 — and the probe closed it: the floor is the advertised version alone.
+
+Nothing was wrong with model discovery. `anthropicModelsFrom` pulls the dropdown live from models.dev
+with deliberately no family whitelist, so the new family surfaced by itself; only the client
+fingerprint failed to grow up with it. The two pins that went stale — `CLAUDE_CODE_VERSION` and the
+bind table — now carry comments naming each other, because a Claude release makes both stale on the
+same day.
+
+Known and deliberately not fixed: `ANTHROPIC_MODELS`, the **offline fallback** list, still knows only
+`claude-fable-5`. It is unreachable while models.dev answers, which is exactly why the new row showed
+up in the picker at all.
+
+### Surfaces
+
+Derived from `git log v2.0.45..main -- <face-path>` per face, at the cut. One commit in the window,
+touching `packages/core` **and** `packages/tui`. `packages/vscode` has no commit in the window, but
+core is a bundled dependency rather than a published face, so the extension carries the pin regardless
+— the two faces ship different subsets of this fix.
+
+- **npm `wisp-router` 2.0.46** — carries **both** fixes. The TUI depends on `@wisp/core` as
+  `workspace:*`, so the Bridge door that serves Claude Code gets the version pin, and the one-tap bind
+  table lives in `packages/tui` itself.
+- **vsix 1.13.1 — cut alongside.** Carries the **version pin only**. The extension bundles its own
+  `@wisp/core` copy and hosts a Bridge of its own, so npm can never deliver the pin to it; the bind
+  button is TUI-local and has no counterpart in the extension.
+
 ## [2.0.45] — 2026-08-14
 
 **Claude Code's `/effort` now reaches Antigravity's tiered models.** Every other Provider already

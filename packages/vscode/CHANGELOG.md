@@ -4,6 +4,29 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.1] — 2026-09-02
+
+A single fix, carried here because the extension **bundles its own copy of the engine** — no
+`wisp-router` release can deliver it to a picker or native-chat user. Cut alongside npm
+`wisp-router` 2.0.46, which carries the same change to the terminal face.
+
+### Fixed
+
+- **A Claude model newer than the version Wisp claims to be no longer fails.** The subscription
+  backend enforces the advertised `claude-cli` version as a **per-model floor**. `claude-fable-5-1`
+  released 2026-09-01 and demands 2.1.251; the extension had been claiming 2.1.219 since 2026-07-25,
+  so picking the new model answered `400 claude_code_version_too_old` behind a 502. Wisp now
+  advertises 2.1.258, the shipping CLI. Verified on the live wire at both versions with
+  `claude-opus-5` at the old version as a must-pass control, and with the `anthropic-beta` token list
+  unchanged — the floor is the advertised version alone, no beta was implicated.
+
+Model discovery was never at fault: the dropdown is pulled live with no family whitelist, so the new
+model appeared on release day. Only the client fingerprint failed to keep up.
+
+npm `wisp-router` 2.0.46 additionally fixes the terminal's one-tap "Bind Claude subscription models"
+button, which had gone on binding `fable` to the older `claude-fable-5`. That button is TUI-local and
+has no counterpart here, so this bundle carries the version pin alone.
+
 ## [1.13.0] — 2026-08-14
 
 **The extension's Bridge honours `/effort` on Antigravity's tiered models.** The Antigravity arm of the
