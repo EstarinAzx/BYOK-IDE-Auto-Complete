@@ -47,11 +47,15 @@ export const sectionOf = (row: RouteRow): 'families' | 'aliases' => row.kind ===
 
 // The one-tap "bind Claude subscription models" mapping: each Family route's natural Claude.ai
 // model. TUI-local data — promote to core if the side panel ever grows the same button.
+// STALE-BY-DESIGN: a hardcoded table the live picker cannot correct, so a new Claude release makes the
+// one-tap bind a silent DOWNGRADE (it overwrote fable with claude-fable-5 after claude-fable-5-1 shipped
+// 2026-09-01). Re-check alongside CLAUDE_CODE_VERSION whenever a family gains a release — those two pins
+// go stale on the same event.
 export const CLAUDE_FAMILY_MODELS: Record<FamilyKey, string> = {
   opus: 'claude-opus-5',
   sonnet: 'claude-sonnet-5',
   haiku: 'claude-haiku-4-5',
-  fable: 'claude-fable-5',
+  fable: 'claude-fable-5-1',
 };
 
 // ----------------------------------------- Screens ----------------------------------------- //
