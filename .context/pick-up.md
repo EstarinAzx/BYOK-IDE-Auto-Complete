@@ -1,7 +1,7 @@
 ---
 type: pick-up
 project: wisp
-updated: 2026-08-14
+updated: 2026-09-02
 tags: [context, pick-up]
 ---
 
@@ -9,85 +9,116 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Latest (2026-08-14): 2.0.45 is SHIPPED and verified. Only the vsix build is owed.**
+**Latest (2026-09-02): 2.0.46 + vsix 1.13.1 are SHIPPED, verified and installed. Nothing is owed in the
+repo.**
 
-Started as a question about `[bridge] prompt-cache diagnosis STALE` lines (answer: not misses — the Bridge
-correctly overriding a server verdict its own bill contradicts; no action). That led to "do codex/xai/
-antigravity use Claude Code's effort levels?" → `/trace` (persisted to [[flows]]) → three of four arms did,
-Antigravity did not → the feature.
+A user report — a newly released Claude model was selectable in Wisp but 502'd on every turn — traced
+to Wisp's **own** pinned client version, not the user's Claude Code. `claude-fable-5-1` (released
+2026-09-01) demands `claude-cli` **2.1.251**; Wisp had claimed **2.1.219** since 2026-07-25. Fixed both
+pins that a Claude release makes stale, cut and verified both faces
+([[2026-09-02-the-advertised-claude-cli-version-is-a-per-model-floor]]).
 
-**Claude Code's `/effort` now reaches Antigravity's `-tiered` rows**
-([[2026-08-14-antigravity-effort-reaches-only-the-tiered-rows]]) as
-`generationConfig.thinkingConfig.thinkingLevel`, folded to that wire's three stops. Every other Antigravity
-row is byte-identical to 2.0.44 — their ids already pin the tier, and Wisp's flat 21-row picker means
-choosing the row chose the tier. Shipped straight on main (`d96b73a` feat + `bd21076` release — no ticket,
-user-authorized cut), tag `v2.0.45`, run `31787916143` green on all five jobs, npm `latest`, verified from
-scratch installs of BOTH versions with 2.0.44 as the failing control.
+- `anthropicClient.ts:113` — `CLAUDE_CODE_VERSION` → **2.1.258**
+- `routingScreens.tsx:54` — the one-tap bind table's `fable` → **`claude-fable-5-1`** (it was silently
+  downgrading a working route)
 
-**No queued work. One owed item: build + install vsix 1.13.0** (version-bumped, not built).
+Shipped straight on main (`ad57f34` fix + `58e9d7f` release — no ticket, user-authorized cut), tag
+`v2.0.46`, run `33592983325` green on all five jobs, npm `latest`, vsix built and installed.
+
+## ⚠ First thing to check if the user says it is still broken
+
+**It is the stale process, not the fix.** Two `wisp` PIDs (**6328**, **27788**) were still serving the
+old image at the end of the session — npm pruned the old platform binary out from under them and they
+kept running from memory ([[an-upgraded-package-does-not-touch-the-process-already-running]]).
+Restarting is the **user's call**: a bridged Claude Code session is talking to that very process, so
+killing it cuts the connection the session runs on. The editor face is separate — a VS Code window
+reload picks up 1.13.1.
 
 ## Queue: empty
 
-`gh issue list --label ready-for-agent --state open` → `[]` at last check. **Verify by query, not by
-this note** ([[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]]).
+`gh issue list --label ready-for-agent --state open` → `[]` at the cut. **Verify by query, not by this
+note** ([[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]]).
 
 Open but deliberately **not** agent-ready: **#207** (active quota probe — blocked on three scoping
 calls), **#69**, **#163**.
 
-## 2.0.45 — cut, published, verified
+## 2.0.46 — cut, published, verified
 
-`wisp-router@2.0.45` is npm `latest`; GitHub release `v2.0.45` carries all four platform binaries.
-Verified past the registry read: both versions scratch-installed, both bins executed (banners self-report
-their version), then the shipped `.exe` grepped — `thinkingLevel` 4 / `includeThoughts` 1 / `-tiered` 1 in
-2.0.45, **all 0** in 2.0.44, with `fetchAvailableModels` at 1 in BOTH as the shared control.
+`wisp-router@2.0.46` is npm `latest`; GitHub release `v2.0.46` carries all four platform binaries; vsix
+1.13.1 built and installed. Verified past the registry read on **both** faces, each against its
+predecessor as a failing control:
 
-**Honest gap:** no live turn driven through the *installed* binary at low vs high — that needs an
-Antigravity route in the real `~/.wisp/config.json`, and the session was itself running through that
-Bridge. Wire behavior was proven separately at source level from the same commit.
+| marker | npm 2.0.46 / 2.0.45 | vsix 1.13.1 / 1.13.0 |
+|---|---|---|
+| `2.1.258` | 1 / 0 | 1 / 0 |
+| `2.1.219` | 0 / 1 | 0 / 1 |
+| `claude-fable-5-1` | 1 / 0 | — (TUI-only) |
+| `claude-cli/` | 1 / 1 | 1 / 1 |
+| `fetchAntigravityModels` / `thinkingLevel` | 2 / 2 | 5 / 5 |
+
+`2.1.219` going **0/1** while `2.1.258` goes **1/0** is a proven *swap*, which is stronger evidence
+than a one-way marker; the bottom rows are the shared controls.
+
+**Unlike 2.0.45, the wire itself was driven** — three cells, one variable: `claude-fable-5-1` 400 at
+2.1.219 (naming the 2.1.251 floor) and 200 at 2.1.258, with `claude-opus-5` at 2.1.219 as a must-pass
+control. The `anthropic-beta` list rode both cells unchanged, so no beta token was implicated.
 
 Worth knowing before the next cut:
 
-- **Surfaces derived at the cut** from `git log v2.0.44..main -- <face-path>`: one commit, touching
-  `packages/core` ALONE. **That is not "bump nothing"** — core is a bundled dependency, not a published
-  face, so both shipping faces carry it
-  ([[a-bundled-dependency-is-not-a-face-but-every-face-carries-it]]). Two questions, not one: which paths
-  changed, then which faces carry those paths.
-- **A marker check needs a marker present in BOTH artifacts.** All-absent-in-old is ambiguous — a wrong
-  path or an unreadable binary prints the same zeroes
-  ([[a-marker-grep-proves-nothing-without-a-marker-present-in-both]]). For vsix 1.13.0 the discriminating
-  marker is `thinkingLevel` (absent from 1.12.0); pair it with a control string in both.
-- **The platform npm packages 404 and that is normal** — npm's spam filter; `release.yml` treats them
-  as best-effort, the shim falls back to the GitHub release binaries. (They resolved cleanly for 2.0.45,
-  so the fallback did not engage — do not read that as the 404s being fixed.)
+- **Surfaces derived at the cut** from `git log v2.0.45..main -- <face-path>`: one commit touching
+  `packages/core` **and** `packages/tui`; `packages/vscode` had **zero** commits — but core is a
+  bundled dependency, so the extension carries the pin anyway
+  ([[a-bundled-dependency-is-not-a-face-but-every-face-carries-it]]). The two faces shipped **different
+  subsets**: npm got both fixes, the vsix got the version pin only.
+- **Patch on both faces**, following the **1.10.1 / 2.0.40** precedent for a bundled-core fix cut
+  across both — not the minor-bump pattern of the last three releases.
+- **The platform npm packages 404 and that is normal** — 2.0.46's did, and the shim fell back to the
+  GitHub release binary under `~/.wisp/bin/v2.0.46/`. 2.0.45's had resolved cleanly; do not read either
+  outcome as the 404s being fixed.
 
 ## ⚠ Read before cutting a ticket branch
 
 **`git rev-list --left-right --count origin/main...main` — the right-hand number must be 0.**
 
 A branch cut from an unpushed main sweeps those commits into its own squash-merge (`3465c7c`, #202).
-This session ran the guard (0/0) and pushed everything, so origin is current. Full trap:
+This session ran the guard and pushed everything, so origin is current. Full trap:
 [[a-branch-cut-from-an-unpushed-main-sweeps-it-into-the-squash]].
 
 ## Waiting on the user
 
+- **Restart the Bridge** (PIDs 6328 / 27788) so 2.0.46 goes live. See the warning above.
 - **#207's three scoping calls** before it can be labelled `ready-for-agent`: poll **cadence**;
   **precedence** when a poll and a turn header disagree; **opt-in or always-on**.
-- **Build then install vsix 1.13.0** — `packages/vscode/package.json` + CHANGELOG are already at 1.13.0;
-  the `.vsix` itself is NOT built. Supersedes the never-installed 1.12.0 and 1.11.0. Carries both the live
-  Antigravity dropdowns and 2.0.45's tier (the extension bundles its own `@wisp/core` and hosts a Bridge of
-  its own, so npm can't deliver either).
 - **Dismiss the two secret-scanning alerts** as "won't fix" —
   [#1 Client ID](https://github.com/EstarinAzx/Wisp-Router/security/secret-scanning/1),
   [#2 Client Secret](https://github.com/EstarinAzx/Wisp-Router/security/secret-scanning/2).
 - **Bridge access secret rotation** — delete `bridgeSecret` from `~/.wisp/auth.json`, start any host.
 - **#170** — needs a **Kimi Code subscription**.
-- **#189's last criterion** — note a completing Antigravity Claude-model turn on closed #189 when observed.
+- **#189's last criterion** — note a completing Antigravity Claude-model turn on closed #189 when
+  observed.
 - **~20 stale local `ticket/*` branches** (`git branch --list 'ticket/*'`). Cleanup, not a blocker.
-- **`.context/Untitled.canvas`** — untracked user file, left uncommitted; keep or remove is the user's call.
+- **`.context/Untitled.canvas`** — untracked user file, left uncommitted; keep or remove is the user's
+  call.
+- Optional one-liner: `ANTHROPIC_MODELS` (`anthropic.ts:122`, the **offline fallback** list) still knows
+  only `claude-fable-5`. Deliberately skipped — unreachable while models.dev answers.
 - Optional: `/plugin update wisp-slot` to refresh the cached skill/hook copies to 1.7.4
   ([[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]).
 
 ## Landmines (durable — keep carrying)
+
+Anthropic client pin (new, 2026-09-02):
+
+- **The version in a `claude_code_version_too_old` 400 is WISP'S, not the user's Claude Code.** The
+  error's own remedy ("run `claude update`") is advice for the wrong machine
+  ([[a-live-picker-in-front-of-a-pinned-client-fingerprint-drifts-apart]]).
+- **A Claude release makes TWO pins stale, in different packages** — `CLAUDE_CODE_VERSION` (loud, 400s) and
+  `CLAUDE_FAMILY_MODELS` (silent, downgrades a route). Check both; they now comment each other.
+- **Never read "it appears in the picker" as evidence a model works** — the dropdown is live, the
+  fingerprint is pinned, and they drift apart between releases by construction.
+- **`withFamilyRoute` validates the providerId ONLY, never the model** — a stale bind table can never
+  be refused on the way in.
+- **"Released + installed + verified" is not "the fix is live"**
+  ([[an-upgraded-package-does-not-touch-the-process-already-running]]).
 
 Statusline / status.json:
 
@@ -138,7 +169,8 @@ Quota / recon (#204):
   ([[the-usage-payload-names-most-of-its-buckets-in-unstable-codenames]]).
 - **Recon that reads a response head must DRAIN the body**
   ([[a-cancelled-response-body-cannot-test-whether-a-counter-decrements]]).
-- **Prove a wire by driving it** — throwaway probes under gitignored `out/`; delete after.
+- **Prove a wire by driving it** — throwaway probes under gitignored `out/`; delete after. (Did exactly
+  this for 2.0.46; it turned a blocking question into a two-minute answer.)
 - **Usage payloads carry account identifiers under unpredictable keys — redact on the VALUE**
   ([[loadcodeassist-answers-with-the-account-email-inside-it]]).
 - **The Anthropic usage endpoint carries a multi-minute 429 penalty** — budget ≤3 reads; never callable
@@ -152,6 +184,9 @@ Release:
   ([[verifying-a-fix-release-needs-the-previous-version-as-a-control]]).
 - **A vsix is evidence only when checked in the BUNDLE** — and with a marker absent from the OLD
   bundle; **verify npm past the registry read** (scratch install, execute the bins).
+- **Best evidence is a SWAP** — an old marker going 0-in-new alongside a new marker going 0-in-old beats
+  a one-way present/absent check, and still needs a shared control
+  ([[a-marker-grep-proves-nothing-without-a-marker-present-in-both]]).
 - **Every release entry carries `### Surfaces`, derived from `git log <last-tag>..main -- <face-path>`**
   ([[2026-07-30-a-surfaces-section-is-checked-against-the-code-not-copied-from-the-ticket]]).
 - **Labels are the only real gate**; a closed-by-PR issue keeps its `ready-for-agent` label — clear it
@@ -164,17 +199,12 @@ Antigravity (full detail in memory notes):
   framing is CRLF. Turns → daily host, `loadCodeAssist` → production. Never mint opaque provider-side
   tool ids.
 - **Effort reaches ONLY the `-tiered` rows, since 2.0.45**
-  ([[2026-08-14-antigravity-effort-reaches-only-the-tiered-rows]]). Every other id pins its depth in the
-  name (`gemini-3.6-flash-low|-medium|-high` are three models; the vendor's own Effort slider greys out on
-  `gpt-oss-120b-medium` and both Claude rows). A **suffix shape test**, never a pinned list. `xhigh`/`max`
-  fold to `high` — the fold is what makes an unattested level unreachable, not a convenience. Do NOT map
-  effort onto id suffixes and do NOT add the Claude `thinkingBudget` path (we'd be inventing the integers;
-  those rows already think by name). `applyAntigravityThinkingLevel` runs LAST in the body build on purpose.
+  ([[2026-08-14-antigravity-effort-reaches-only-the-tiered-rows]]). A **suffix shape test**, never a
+  pinned list. `xhigh`/`max` fold to `high`. Do NOT map effort onto id suffixes and do NOT add the
+  Claude `thinkingBudget` path. `applyAntigravityThinkingLevel` runs LAST on purpose.
 - **The model list is LIVE since 2.0.44** ([[2026-08-14-antigravity-model-list-is-live-static-is-fallback]]):
-  `fetchAntigravityModels` (turn host chain, mirrored headers, any-failure host walk), static
-  `ANTIGRAVITY_MODEL_SPECS` = fallback + caps only. Internal rows dropped on shape (`tab_*`,
-  `chat_<digits>`), never pinned ids. Live list keeps known-400 rows on purpose — picker is the
-  correction path. Live-listed unknown ids go UNCLAMPED (no maxOutputTokens cap).
+  `fetchAntigravityModels`, static `ANTIGRAVITY_MODEL_SPECS` = fallback + caps only. Internal rows
+  dropped on shape (`tab_*`, `chat_<digits>`), never pinned ids. Live-listed unknown ids go UNCLAMPED.
 - **A green suite did not catch a dead Provider** — drive a real turn
   ([[a-live-negative-on-this-wire-is-usually-the-fixture-or-the-model]]).
 
@@ -184,13 +214,15 @@ Credential hygiene ([[2026-07-29-a-public-repo-is-a-publishing-decision-not-a-co
   fixtures at `D:\scratch\antigravity-spike\out\` carry live credentials — never read, never copy.
 - Anything credential-shaped bound for this PUBLIC repo is a question for the maintainer. Upstream
   error bodies leak too — redact before quoting into a ticket.
+- A live-wire probe MAY read `~/.wisp/auth.json` for a bearer (read-only, gitignored `out/`, deleted
+  after) — say so in the evidence, and redact emails/uuids on the VALUE when printing responses.
 
 General:
 
-- **`packages/core` has NO `compile` script** — gate is `bun run typecheck`; only `packages/tui` and
-  `packages/vscode` have `compile`. Test gate is **`bun run test`** (vitest, now 1026) — bare
-  `bun test` runs Bun's runner, bogus failures. `packages/tui/tests/` is the **bun runner** (28), run
-  explicitly.
+- **`packages/core` has NO `compile` script** — gate is `bun run --cwd packages/core typecheck`; only
+  `packages/tui` and `packages/vscode` have `compile`. Test gate is **`bun run test`** (vitest, now
+  1036) — bare `bun test` runs Bun's runner, bogus failures. `packages/tui/tests/` is the **bun runner**
+  (28), run explicitly. There is no root `typecheck` script.
 - Prefer the scoped **`packages/tui:verify`** skill for tui/core CLI-surface work — but its sandbox
   rule bends when the check NEEDS real creds (live-wire drives): read-only commands against the real
   home are fine, say so in the evidence.
@@ -202,16 +234,19 @@ General:
 - No PR CI — only `release.yml` on tag `v*`; the local gate *is* the gate.
 
 Reference clones (both outside the repo, re-clonable): `D:\scratch\CLIProxyAPI` (shallow, `c9417c8`)
-and `D:\scratch\traycer` (shallow, 2026-08-14). The model-discovery wire came from CLIProxyAPI's
-`cmd/fetch_antigravity_models/main.go` + `sdk/cliproxy/antigravity_models.go` — the vendors' own
-shipped clients remain the place to look for endpoint shapes.
+and `D:\scratch\traycer` (shallow, 2026-08-14). The vendors' own shipped clients remain the place to
+look for endpoint shapes.
 
 ## Related
 
 - [[active-work]]
 - [[overview]]
 - [[decisions]]
+- [[gotchas]]
 - [[flows]]
+- [[2026-09-02-the-advertised-claude-cli-version-is-a-per-model-floor]]
+- [[a-live-picker-in-front-of-a-pinned-client-fingerprint-drifts-apart]]
+- [[an-upgraded-package-does-not-touch-the-process-already-running]]
 - [[2026-08-14-antigravity-effort-reaches-only-the-tiered-rows]]
 - [[a-bundled-dependency-is-not-a-face-but-every-face-carries-it]]
 - [[a-marker-grep-proves-nothing-without-a-marker-present-in-both]]
@@ -223,18 +258,13 @@ shipped clients remain the place to look for endpoint shapes.
 - [[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]]
 - [[a-bom-in-wisp-config-silently-empties-the-whole-config]]
 - [[a-picked-alias-reaches-the-statusline-prefixed-claude-wisp]]
-- [[the-statusline-duplicates-resolveroute-and-drifts]]
-- [[2026-07-30-the-statusline-finds-its-quota-by-provider-in-either-of-two-places]]
-- [[2026-07-30-a-quota-window-belongs-to-the-account-a-context-reading-to-the-conversation]]
-- [[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]
 - [[status-json-is-global-so-it-cannot-observe-another-session]]
-- [[an-empty-quota-ledger-is-usually-correct-not-broken]]
 - [[a-cancelled-response-body-cannot-test-whether-a-counter-decrements]]
 - [[loadcodeassist-answers-with-the-account-email-inside-it]]
 - [[the-wisp-badge-runs-from-the-repo-checkout-not-the-plugin-cache]]
 - [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]
 - [[2026-07-30-a-surfaces-section-is-checked-against-the-code-not-copied-from-the-ticket]]
-- [[2026-07-29-a-release-cut-names-its-surfaces-npm-is-one-of-three]]
+- [[2026-07-30-an-advertised-ceiling-that-never-decrements-is-not-a-meter]]
 - [[2026-07-29-a-public-repo-is-a-publishing-decision-not-a-commit]]
 - [[a-live-negative-on-this-wire-is-usually-the-fixture-or-the-model]]
 - [[the-anthropic-door-does-not-use-the-executor-records]]
