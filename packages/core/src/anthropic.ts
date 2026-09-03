@@ -256,6 +256,14 @@ export const anthropicThinkingEffort = (model: string, effort?: EffortLevel): { 
 // model really supports, and a label must never override it (the window is the beta's job, not the name's).
 export const stripModelTier = (model: string): string => model.replace(/\[1m\]$/, '');
 
+// Which models accept a positioned role:"system" turn inside `messages` (the mid-conversation-system beta).
+// Opus 5, Opus 4.8, and the Fable/Mythos 5 families accept it; Sonnet (any) and Haiku 400 with
+// `role 'system' is not supported on this model` (Haiku wire-confirmed 2026-09-03; Sonnet 5 per Anthropic's
+// support matrix). #363 needs this: the volatile tail relocates to a TRAILING system turn only where that
+// turn is legal — on the others it stays in the system array (the pre-#363 placement), no worse than before.
+export const modelSupportsMidConversationSystem = (model: string): boolean =>
+  /opus-5|opus-4-8|fable-5|mythos-5/.test(model.toLowerCase());
+
 // Translate a conversation into an Anthropic Messages request body. The LEADING system text moves to the
 // top-level `system` block array, led by the Claude Code attribution block (its fingerprint derived from
 // the first user turn's TEXT — so it MUST stay sourced from `content`); mid-conversation system stays
@@ -358,15 +366,32 @@ export const buildAnthropicMessagesBody = (args: {
       : { type: 'ephemeral' as const },
   };
   system[system.length - 1] = { ...system[system.length - 1], ...CACHE };
-  // #139: the volatile tail goes AFTER the marker — appended last, never marked, so a changed reminder
-  // re-bills only itself (plus the messages behind it), exactly like native Claude Code's block layout.
-  if (args.systemSuffix) system.push({ type: 'text' as const, text: args.systemSuffix });
 
   // A bare-string final turn can't carry a marker — expand it to a single text block (earlier plain turns
   // keep the #29 bare-string shape).
   const last = messages[messages.length - 1];
   if (last && typeof last.content === 'string' && last.content) {
     messages[messages.length - 1] = { role: last.role, content: [{ type: 'text', text: last.content }] };
+  }
+
+  // #363 (2.0.47): the volatile tail (mid-session <system-reminder> appends) rides as a TRAILING system
+  // turn behind every message breakpoint — NOT in the system array ahead of them. #139 placed it after the
+  // stable system marker, which protected the tools+system prefix but left it inside the render prefix of
+  // every MESSAGE-level marker (render order is tools → system → messages). So a changed reminder busted
+  // every message breakpoint and re-billed the whole conversation history each turn — reproduced on the wire
+  // 2026-09-03 (Haiku, old shape): read frozen on the stable prefix at 7610 while creation grew 3877 → 5793
+  // → 7680. As a trailing turn it is behind all markers, so a reminder change re-bills only itself, and it
+  // is never persisted into history (always freshly appended), so history turns stay byte-stable and read
+  // back. suffixMsg is unmarkable in the anchor walk below so the end-of-history breakpoint lands on the
+  // last real content block. Gated on modelSupportsMidConversationSystem: Sonnet/Haiku 400 on a role:system
+  // turn, so there the tail keeps the pre-#363 system-array placement (no worse than before, no new 400).
+  let suffixMsg = -1;
+  const tail = messages[messages.length - 1];
+  if (args.systemSuffix && tail?.role === 'user' && modelSupportsMidConversationSystem(args.model)) {
+    messages.push({ role: 'system' as const, content: [{ type: 'text' as const, text: args.systemSuffix }] });
+    suffixMsg = messages.length - 1;
+  } else if (args.systemSuffix) {
+    system.push({ type: 'text' as const, text: args.systemSuffix });
   }
 
   // ponytail: Anthropic's automatic cache lookback only reaches ~20 content blocks back from an explicit
@@ -389,6 +414,9 @@ export const buildAnthropicMessagesBody = (args: {
     return t === 'thinking' || t === 'redacted_thinking';
   };
   messages.forEach((m, mi) => {
+    // #363: the trailing volatile system turn is never a marker anchor — the end marker slides back to the
+    // last real content block, so the volatile tail stays outside every cached prefix.
+    if (mi === suffixMsg) { anchors.push(null); return; }
     if (Array.isArray(m.content)) m.content.forEach((b, bi) => anchors.push(unmarkable(b) ? null : { msg: mi, blk: bi }));
     else anchors.push(null);
   });

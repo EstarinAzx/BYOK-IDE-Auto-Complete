@@ -229,14 +229,27 @@ describe('mergeStatus', () => {
     });
   });
 
-  // The live reading is the top-level snapshot; a leftover entry for the same wire would render twice.
-  it('evicts the now-active Provider from the ledger', () => {
+  // The live reading is the top-level snapshot, so a same-wire ledger entry would render twice — but only
+  // when the incoming turn actually brought meters to supersede it.
+  it('evicts the now-active Provider from the ledger when it brought meters', () => {
+    const prev = snap({
+      providerId: 'anthropic',
+      providers: { codex: { updatedAt: 999_000, model: 'gpt-5.4', meters: [{ label: '7d', percent: 7 }] } },
+    });
+    const merged = mergeStatus(prev, snap({ updatedAt: 1_000_500, providerId: 'codex', model: 'gpt-5.4', meters: [{ label: '5h', percent: 4 }] }));
+    expect(merged.providers).toBeUndefined();
+  });
+
+  // #363-sibling (2.0.47): a meter-less active turn (the Anthropic wire omits the unified headers on some
+  // responses) must NOT destroy that Provider's last known reading — dropping it blanks the statusline's
+  // whole quota block. Keep the aged ledger entry as the fallback until a metered turn supersedes it.
+  it('keeps a Provider ledger entry when the active turn reported no meters', () => {
     const prev = snap({
       providerId: 'anthropic',
       providers: { codex: { updatedAt: 999_000, model: 'gpt-5.4', meters: [{ label: '7d', percent: 7 }] } },
     });
     const merged = mergeStatus(prev, snap({ updatedAt: 1_000_500, providerId: 'codex', model: 'gpt-5.4' }));
-    expect(merged.providers).toBeUndefined();
+    expect(merged.providers).toEqual({ codex: { updatedAt: 999_000, model: 'gpt-5.4', meters: [{ label: '7d', percent: 7 }] } });
   });
 
   // Nothing measured, nothing to remember — an empty entry would claim the wire reported a limit.

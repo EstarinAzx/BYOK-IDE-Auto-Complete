@@ -829,3 +829,67 @@ describe('Bridge — Antigravity on the Anthropic door (#191)', () => {
     expect(calls).toBe(1); // the bounded retry stops at the first delivered event
   });
 });
+
+// ---------------- #156/#162 (2.0.47): a STALE server verdict must not shadow the tail-rebill line ---------------- //
+
+/*
+ * Regression for the log blind spot: when the server sends a cache diagnosis the bill contradicts (STALE),
+ * the door logged only the advisory "not a real miss" line and skipped the whole heuristic — including the
+ * #162 "prior write not read back" line. So a genuine per-turn history re-bill (read frozen on the stable
+ * prefix, creation growing) hid behind a message saying nothing was wrong. The fix lets a STALE verdict fall
+ * through to the heuristic; only a NON-stale server MISS suppresses it.
+ */
+describe('Bridge — a STALE diagnosis still surfaces the #162 tail re-bill (2.0.47)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const ANTHROPIC: Provider = {
+    id: 'anthropic', label: 'Anthropic', baseUrl: 'https://api.anthropic.com',
+    defaultModel: 'claude-opus-5', apiKeyEnv: '', kind: 'anthropic-oauth',
+  };
+  const deps = (over: Partial<BridgeDeps> = {}): BridgeDeps => makeDeps({
+    providers: [ANTHROPIC],
+    xaiSignedIn: async () => false,
+    xaiCreds: async () => undefined,
+    anthropicSignedIn: async () => true,
+    anthropicCreds: async () => ({ accessToken: 'tok', deviceId: 'd'.repeat(64), accountUuid: 'a' }),
+    activeProviderId: () => 'anthropic',
+    ...over,
+  });
+
+  // One Anthropic Messages SSE run: message_start carries the initial usage + optional cache diagnosis, the
+  // text delta, then message_delta with the FINAL cumulative usage the door classifies on.
+  const sse = (opts: { read: number; creation: number; missed?: number }): Response => {
+    const start: Record<string, unknown> = { id: 'msg_x', usage: { input_tokens: 2 } };
+    if (opts.missed !== undefined) start.diagnostics = { cache_miss_reason: { type: 'messages_changed', cache_missed_input_tokens: opts.missed } };
+    const frames = [
+      `event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: start })}`,
+      'event: content_block_start\ndata: {"index":0,"content_block":{"type":"text"}}',
+      'event: content_block_delta\ndata: {"index":0,"delta":{"type":"text_delta","text":"ok"}}',
+      `event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { input_tokens: 2, cache_creation_input_tokens: opts.creation, cache_read_input_tokens: opts.read, output_tokens: 40 } })}`,
+      'event: message_stop\ndata: {"type":"message_stop"}',
+    ];
+    const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new TextEncoder().encode(frames.join('\n\n') + '\n\n')); c.close(); } });
+    return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+  };
+
+  // Two turns of ONE conversation (same first user turn + no tools → same growth key). Turn 1 banks the
+  // read+creation baseline; turn 2's read stalls below it (prior write NOT read back) AND the server sends a
+  // STALE verdict. The stalled line must still fire.
+  const T1 = [{ role: 'user', content: 'A' }, { role: 'assistant', content: 'B' }, { role: 'user', content: 'C' }];
+  const T2 = [...T1, { role: 'assistant', content: 'D' }, { role: 'user', content: 'E' }];
+
+  it('logs the #162 stalled re-bill even when the diagnosis verdict is STALE', async () => {
+    const lines: string[] = [];
+    // Turn 1: read=10000, creation=5000 (baseline: next expects read >= 15000), no diagnosis.
+    // Turn 2: read=12000 (< 15000 → stalled), creation=5000 (>= 4000 → partial), missed=200000 (>> 2×bill → STALE).
+    let call = 0;
+    vi.stubGlobal('fetch', async () => (call++ === 0 ? sse({ read: 10000, creation: 5000 }) : sse({ read: 12000, creation: 5000, missed: 200000 })));
+    await runServer(deps({ log: (m) => lines.push(m) }), async (port) => {
+      await post(port, '/v1/messages', { model: 'anthropic', max_tokens: 100, stream: true, messages: T1 });
+      await post(port, '/v1/messages', { model: 'anthropic', max_tokens: 100, stream: true, messages: T2 });
+    });
+    const t2 = lines.filter((l) => l.includes('turns=5'));
+    expect(t2.some((l) => l.includes('diagnosis STALE'))).toBe(true);          // advisory still printed
+    expect(t2.some((l) => l.includes('prior write not read back') && l.includes('#162'))).toBe(true); // no longer shadowed
+  });
+});

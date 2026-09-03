@@ -201,7 +201,12 @@ export const mergeStatus = (prev: WispStatus | undefined, next: WispStatus): Wis
     ledger[prev.providerId] = { updatedAt: prev.updatedAt, model: prev.model, meters: prev.meters };
   }
 
-  delete ledger[next.providerId];
+  // Only evict the incoming Provider from the ledger when it actually brought meters to supersede the
+  // remembered ones. A turn that reported NO meters (the Anthropic wire omits the unified headers on some
+  // responses) must not destroy that Provider's last known reading — dropping it blanks the statusline's
+  // whole quota block until the next metered turn. Absent meters → keep the ledger entry as the fallback;
+  // the reader prefers the (empty) top-level snapshot but falls back to the aged ledger meters.
+  if (next.meters?.length) delete ledger[next.providerId];
   for (const [id, entry] of Object.entries(ledger)) {
     if (next.updatedAt - entry.updatedAt > QUOTA_LEDGER_MAX_AGE_MS) delete ledger[id];
   }

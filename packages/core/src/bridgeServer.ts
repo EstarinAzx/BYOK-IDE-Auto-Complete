@@ -862,15 +862,20 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         // no inference. A null diagnosis does NOT silence the heuristic below: it also means "no compare
         // target" (first bridged turn, evicted chain entry), and the heuristic's known false-positive rate
         // is already low (~1/392 post-#145).
-        if (lastDiagnosis?.missReason) {
-          // A verdict the bill contradicts means the server compared against a stale target — known
-          // shapes: a concurrent send racing the chain, or a prefix-variant flip (#158). Which one is
-          // not observable here — advisory wording, not a MISS line the user should worry about.
-          if (lastUsage && anthropicDiagnosisStale(lastDiagnosis.missReason.cacheMissedInputTokens, lastUsage))
-            deps.log(`[bridge] prompt-cache diagnosis STALE ${provider.id} ${parsed.model}: reason=${lastDiagnosis.missReason.type} missed_input=${lastDiagnosis.missReason.cacheMissedInputTokens} but billed=${lastUsage.cache_creation_input_tokens + lastUsage.input_tokens} read=${lastUsage.cache_read_input_tokens} turns=${convoTurns} — bill contradicts the verdict: stale compare target (concurrent send or prefix-variant flip), not a real miss (#156)`);
-          else
-            deps.log(`[bridge] prompt-cache MISS (server) ${provider.id} ${parsed.model}: reason=${lastDiagnosis.missReason.type} missed_input=${lastDiagnosis.missReason.cacheMissedInputTokens} read=${lastUsage?.cache_read_input_tokens ?? 0} creation=${lastUsage?.cache_creation_input_tokens ?? 0} turns=${convoTurns} (#156)`);
+        // #156: the server verdict is authoritative ONLY when the bill agrees with it. A STALE verdict (the
+        // bill contradicts the claimed miss) is untrustworthy, so it must NOT suppress the heuristic below —
+        // that suppression was the #162 blind spot: a genuine tail re-bill hid behind a STALE line saying
+        // "not a real miss", so the "prior write not read back" line could never fire (fix, 2.0.47).
+        const staleVerdict = Boolean(lastDiagnosis?.missReason) && !!lastUsage
+          && anthropicDiagnosisStale(lastDiagnosis!.missReason!.cacheMissedInputTokens, lastUsage);
+        const authoritativeServerMiss = Boolean(lastDiagnosis?.missReason) && !staleVerdict;
+        if (staleVerdict)
+          deps.log(`[bridge] prompt-cache diagnosis STALE ${provider.id} ${parsed.model}: reason=${lastDiagnosis!.missReason!.type} missed_input=${lastDiagnosis!.missReason!.cacheMissedInputTokens} but billed=${lastUsage!.cache_creation_input_tokens + lastUsage!.input_tokens} read=${lastUsage!.cache_read_input_tokens} turns=${convoTurns} — bill contradicts the verdict: stale compare target (concurrent send or prefix-variant flip), not a real miss (#156)`);
+        if (authoritativeServerMiss) {
+          deps.log(`[bridge] prompt-cache MISS (server) ${provider.id} ${parsed.model}: reason=${lastDiagnosis!.missReason!.type} missed_input=${lastDiagnosis!.missReason!.cacheMissedInputTokens} read=${lastUsage?.cache_read_input_tokens ?? 0} creation=${lastUsage?.cache_creation_input_tokens ?? 0} turns=${convoTurns} (#156)`);
         } else if (lastUsage) {
+          // Runs for a STALE verdict (fell through — the server compare was untrustworthy) AND for a null
+          // diagnosis (no compare target). Only a non-stale server MISS above suppresses it.
           const outcome = anthropicCacheOutcome(lastUsage, convoTurns);
           if (outcome.kind === 'miss') deps.log(`[bridge] prompt-cache MISS ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${convoTurns} — prefix re-billed uncached, check cache breakpoints (#111)`);
           // #162: a partial whose read swallowed the previous turn's write is incremental growth — the

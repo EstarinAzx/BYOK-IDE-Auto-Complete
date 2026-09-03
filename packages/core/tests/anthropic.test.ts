@@ -321,29 +321,47 @@ describe('buildAnthropicMessagesBody', () => {
       expect(body.tools).toEqual(tools); // no cache_control on tools — the system breakpoint caches them
     });
 
-    // #139: the volatile system tail (mid-session <system-reminder> appends) rides AFTER the breakpoint —
-    // the marker stays on the stable block, so a reminder append no longer mutates the marked block and
-    // the whole tools+system prefix keeps reading from cache.
-    it('emits systemSuffix as an unmarked block after the marked stable block', () => {
+    // #363 (2.0.47): the volatile system tail (mid-session <system-reminder> appends) rides as a TRAILING
+    // system turn behind every message breakpoint — NOT in the system array. In the system array it sat
+    // inside the render prefix of every message-level marker (render order tools → system → messages), so a
+    // reminder change busted them all and re-billed the whole history each turn. As the last turn it is
+    // behind every marker: a reminder change re-bills only itself. The stable system prefix is unchanged.
+    it('rides systemSuffix as a trailing system turn behind the message breakpoints (supported model)', () => {
       const body = buildAnthropicMessagesBody({
-        model: 'm', maxTokens: 1, version: 'v', cacheTtl: '1h', systemSuffix: '<system-reminder>new skills</system-reminder>',
+        model: 'claude-fable-5-1', maxTokens: 1, version: 'v', cacheTtl: '1h', systemSuffix: '<system-reminder>new skills</system-reminder>',
         messages: [{ role: 'system', content: 'rules' }, { role: 'user', content: 'hi' }],
       }) as any;
-      expect(body.system.length).toBe(3);
+      // The stable prefix keeps exactly its two blocks (attribution + rules), one marker on the last.
+      expect(body.system.length).toBe(2);
       expect(body.system[1]).toEqual({ type: 'text', text: 'rules', cache_control: { type: 'ephemeral', ttl: '1h' } });
-      expect(body.system[2]).toEqual({ type: 'text', text: '<system-reminder>new skills</system-reminder>' });
-      expect(body.system.filter((b: any) => b.cache_control).length).toBe(1); // marker count unchanged
+      expect(body.system.filter((b: any) => b.cache_control).length).toBe(1);
+      // The volatile tail is the LAST message — a role:system turn carrying NO cache_control marker.
+      const lastMsg = body.messages[body.messages.length - 1];
+      expect(lastMsg).toEqual({ role: 'system', content: [{ type: 'text', text: '<system-reminder>new skills</system-reminder>' }] });
+      expect((lastMsg.content as any[]).some((b) => b.cache_control)).toBe(false);
     });
 
-    // No system turn at all: the suffix still lands after the marked attribution block.
-    it('marks the attribution when a suffix rides with no system turn', () => {
+    // No leading system turn: the suffix still relocates to a trailing system turn, and the attribution
+    // block alone carries the marker.
+    it('rides the suffix as a trailing system turn even with no leading system turn (supported model)', () => {
       const body = buildAnthropicMessagesBody({
-        model: 'm', maxTokens: 1, version: 'v', cacheTtl: '1h', systemSuffix: 'note',
+        model: 'claude-opus-5', maxTokens: 1, version: 'v', cacheTtl: '1h', systemSuffix: 'note',
         messages: [{ role: 'user', content: 'hi' }],
       }) as any;
-      expect(body.system.length).toBe(2);
+      expect(body.system.length).toBe(1);
       expect(body.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
-      expect(body.system[1]).toEqual({ type: 'text', text: 'note' });
+      expect(body.messages[body.messages.length - 1]).toEqual({ role: 'system', content: [{ type: 'text', text: 'note' }] });
+    });
+
+    // #363 gate: Sonnet/Haiku 400 on a role:system turn (Haiku wire-confirmed), so on an UNSUPPORTED model
+    // the volatile tail keeps the pre-#363 system-array placement — no trailing system turn, no new 400.
+    it('keeps the suffix in the system array on a model without mid-conversation-system (haiku)', () => {
+      const body = buildAnthropicMessagesBody({
+        model: 'claude-haiku-4-5', maxTokens: 1, version: 'v', cacheTtl: '1h', systemSuffix: 'note',
+        messages: [{ role: 'user', content: 'hi' }],
+      }) as any;
+      expect(body.system[body.system.length - 1]).toEqual({ type: 'text', text: 'note' });
+      expect(body.messages.every((m: any) => m.role !== 'system')).toBe(true);
     });
 
     // #145: a mid-conversation system message (after the leading run) stays POSITIONED in messages as a
@@ -1438,9 +1456,10 @@ describe('anthropicStream (streaming IO)', () => {
     expect(sentBody.system[0].text).toContain('cc_version=2.1.258.');
   });
 
-  // #139: the Bridge threads the volatile system tail through to the body builder — the wire body must
-  // carry it as the last (unmarked) system block.
-  it('threads systemSuffix through to the request body', async () => {
+  // #363 (2.0.47): the Bridge threads the volatile system tail through to the body builder — the wire body
+  // must carry it as the last (unmarked) MESSAGE, a trailing role:system turn, and the marked system
+  // block stays the attribution (nothing volatile in the cached prefix).
+  it('threads systemSuffix through to the request body as a trailing system turn', async () => {
     let sentBody: any;
     vi.stubGlobal('fetch', async (_url: string, init: any) => {
       sentBody = JSON.parse(init.body);
@@ -1451,9 +1470,10 @@ describe('anthropicStream (streaming IO)', () => {
       ]);
     });
     await collect(anthropicStream({ ...args, systemSuffix: '<system-reminder>note</system-reminder>' }));
-    const last = sentBody.system[sentBody.system.length - 1];
-    expect(last).toEqual({ type: 'text', text: '<system-reminder>note</system-reminder>' });
-    expect(sentBody.system[sentBody.system.length - 2].cache_control).toBeDefined();
+    const lastMsg = sentBody.messages[sentBody.messages.length - 1];
+    expect(lastMsg).toEqual({ role: 'system', content: [{ type: 'text', text: '<system-reminder>note</system-reminder>' }] });
+    expect(sentBody.system[sentBody.system.length - 1].cache_control).toBeDefined();
+    expect(sentBody.system.some((b: any) => String(b.text).includes('system-reminder'))).toBe(false);
   });
 
   // #150: the wire body carries the real client's metadata.user_id blob — session_id MUST repeat the
