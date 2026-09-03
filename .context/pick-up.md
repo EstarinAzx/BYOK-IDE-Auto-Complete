@@ -9,30 +9,60 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Latest (2026-09-02): 2.0.46 + vsix 1.13.1 are SHIPPED, verified and installed. Nothing is owed in the
+**Latest (2026-09-03): 2.0.47 + vsix 1.13.2 are SHIPPED, verified and installed. Nothing is owed in the
 repo.**
 
-A user report — a newly released Claude model was selectable in Wisp but 502'd on every turn — traced
-to Wisp's **own** pinned client version, not the user's Claude Code. `claude-fable-5-1` (released
-2026-09-01) demands `claude-cli` **2.1.251**; Wisp had claimed **2.1.219** since 2026-07-25. Fixed both
-pins that a Claude release makes stale, cut and verified both faces
-([[2026-09-02-the-advertised-claude-cli-version-is-a-per-model-floor]]).
+A user report of quota burn on `claude-fable-5-1` (weekly hit ~46% on light use). Triaged: the burn was
+mostly **Fable's price + `xhigh` effort + a 90k→347k context**, none of which are bugs. But a real
+cache-placement bug was making long sessions worse, and the log that would have shown it was blind. Three
+Wisp fixes shipped in 2.0.47, each verified before the cut:
 
-- `anthropicClient.ts:113` — `CLAUDE_CODE_VERSION` → **2.1.258**
-- `routingScreens.tsx:54` — the one-tap bind table's `fable` → **`claude-fable-5-1`** (it was silently
-  downgrading a working route)
+- **#363 (the money bug).** The volatile `<system-reminder>` tail rode in the top-level `system` array,
+  inside the cached prefix of every message breakpoint (render order tools→system→messages). A changed
+  reminder re-billed the whole conversation history each turn — O(n²). Now rides as a **trailing
+  role:system turn** behind every breakpoint, gated to models that accept one (Opus 5/4.8, Fable/Mythos
+  5). **Sonnet & Haiku 400 on a positioned role:system turn** (Haiku wire-confirmed) — there it keeps the
+  old system-array placement. `anthropic.ts` + new `modelSupportsMidConversationSystem`
+  ([[2026-09-03-the-volatile-tail-must-sit-behind-every-message-breakpoint]]).
+- **#156/#162 (log blind spot).** A STALE diagnosis suppressed the whole heuristic incl. the #162
+  "prior write not read back" line, so a real re-bill logged "not a real miss". STALE now falls through;
+  only a non-stale server MISS suppresses it. `bridgeServer.ts`, log-only.
+- **#204 (statusline).** An unmetered turn evicted the active Provider from the quota ledger, blanking
+  the block. Eviction now gated on the turn carrying meters. `status.ts`.
 
-Shipped straight on main (`ad57f34` fix + `58e9d7f` release — no ticket, user-authorized cut), tag
-`v2.0.46`, run `33592983325` green on all five jobs, npm `latest`, vsix built and installed.
+Shipped straight on main (`dfab2f1` fix + `831e61e` release — user-authorized cut), tag `v2.0.47`, run
+`33726251888` **green on all five jobs**, npm `latest`, vsix built and installed.
 
-## ⚠ First thing to check if the user says it is still broken
+### Wire proof (Haiku, before the cut)
 
-**It is the stale process, not the fix.** Two `wisp` PIDs (**6328**, **27788**) were still serving the
-old image at the end of the session — npm pruned the old platform binary out from under them and they
-kept running from memory ([[an-upgraded-package-does-not-touch-the-process-already-running]]).
-Restarting is the **user's call**: a bridged Claude Code session is talking to that very process, so
-killing it cuts the connection the session runs on. The editor face is separate — a VS Code window
-reload picks up 1.13.1.
+    volatile in system (pre-#363):   read 7610 FROZEN   creation 3877 → 5793 → 7680
+    volatile behind the breakpoints: read 9568 → 13367  creation ~1900 FLAT
+
+Old shape freezes read at the stable prefix while the history re-bills; the fix lets read grow with the
+history and holds creation to the new turn. The `-behind-markers` proxy used the last-user-turn (Haiku
+can't take a role:system turn); the shipped trailing-system placement is strictly better (byte-stable
+history) but the direction is what the wire settled.
+
+## Bugs found but NOT shipped in 2.0.47 (held with reasons — candidate tickets)
+
+Three fresh-eyes reviewers + wire tests found more than three. Held out of this cut:
+
+- **toolChoice not threaded to the Anthropic arm** (`bridgeServer.ts:664` hardcodes `'auto'`). HELD —
+  forwarding a forced `tool_choice` would **400 on Fable 5.1/Mythos** (they reject forced tool use), so
+  the hardcode is protective; needs a model-gated forward, not a blind one.
+- **Client `max_tokens` dropped**, replaced by `anthropicModelCaps().maxOutput` (`anthropicClient.ts:230`).
+  HELD — it is a ceiling, not a bill (correction to the reviewer's "billed 64k"); low value, ~6 edit
+  sites.
+- **Advisor turns under-report usage** (last-write-wins across base passes, `bridgeAnthropic.ts:400`).
+  HELD — advisor-only, subtle accounting, higher risk.
+- **media-only `tool_result` → empty `content`** (`anthropic.ts` ~334). HELD — unverified whether
+  Anthropic 400s on it; defensive-only guard, ponytail says don't add unconfirmed hot-path guards.
+- **Statusline resolver drift** (`wisp-statusline.js:131` missing the provider-id rung + unguarded family
+  fuzzy). HELD — it's a **`wisp-slot`** surface (plugin marketplace), a **separate cut** from 2.0.47.
+- **DROPPED (not a bug):** `contextWindowFor` "guesses 1M for unknown ids" — Fable *is* 1M, the reviewer's
+  premise (Fable=200k) was wrong. The default is correct for every current Claude-5 model.
+- **Needs a real-session capture:** empty-content-turn 400s, thinking-signature lost on interleave,
+  delta-usage zeroing cache fields. Plausible from the code, unverifiable offline.
 
 ## Queue: empty
 
@@ -86,7 +116,11 @@ This session ran the guard and pushed everything, so origin is current. Full tra
 
 ## Waiting on the user
 
-- **Restart the Bridge** (PIDs 6328 / 27788) so 2.0.46 goes live. See the warning above.
+- **Start the Bridge** (`wisp serve` or the TUI) to run 2.0.47 — no `wisp` process was running at the
+  cut, so there is nothing stale; the next start picks up 2.0.47. The editor face is already installed
+  (1.13.2); a VS Code window reload activates it.
+- **File the held bugs** (see the "Bugs found but NOT shipped" list above) as tracker tickets when ready —
+  the statusline resolver drift is a **`wisp-slot`** cut, the rest are core.
 - **#207's three scoping calls** before it can be labelled `ready-for-agent`: poll **cadence**;
   **precedence** when a poll and a turn header disagree; **opt-in or always-on**.
 - **Dismiss the two secret-scanning alerts** as "won't fix" —
@@ -119,6 +153,25 @@ Anthropic client pin (new, 2026-09-02):
   be refused on the way in.
 - **"Released + installed + verified" is not "the fix is live"**
   ([[an-upgraded-package-does-not-touch-the-process-already-running]]).
+
+Prompt-cache placement (new, 2026-09-03, #363):
+
+- **The volatile system tail must sit BEHIND every message breakpoint, not in the `system` array.** Render
+  order is tools→system→messages, so anything in `system` is inside the cached prefix of every message
+  marker — a churning reminder there re-bills the whole history each turn (read frozen on the stable
+  prefix, creation growing). Wire signature reproduced on Haiku
+  ([[2026-09-03-the-volatile-tail-must-sit-behind-every-message-breakpoint]]).
+- **A trailing `role:"system"` turn 400s on Sonnet & Haiku** (`role 'system' is not supported on this
+  model`; Haiku wire-confirmed 2026-09-03). Only Opus 5/4.8 + Fable/Mythos 5 accept the
+  mid-conversation-system beta — gate any positioned-system emission on
+  `modelSupportsMidConversationSystem`, never send it blind.
+- **A turn's bytes must be identical as tail AND as history**, or the prefix cache busts every turn. The
+  shipped fix appends the reminder as a *fresh* trailing turn (never persisted into history), so history
+  stays byte-stable; appending to the last user turn instead would re-bill once per turn (still O(n), but
+  worse than the trailing-turn O(1)).
+- **The 1M-context Claude-5 models have a HIGH minimum cacheable prefix.** A ~22k probe never cached on
+  Sonnet 5/Opus 5 while a ~90k real session did (and Haiku cached at ~11k). Don't read "small probe shows
+  no cache" as a bug — it's below the floor. Verify cache fixes with a big-enough prefix, or on Haiku.
 
 Statusline / status.json:
 

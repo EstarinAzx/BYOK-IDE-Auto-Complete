@@ -7,57 +7,43 @@ tags: [context, active-work]
 
 # Active Work
 
-_Last updated: 2026-09-02 by Opus 5 (user bug report → systematic-debugging → live probe → fix + release cut)_
-_At commit: `58e9d7f` on main, tag `v2.0.46`. Released: **`wisp-router@2.0.46`** (npm `latest`) and **vsix 1.13.1 built + installed**. `wisp-slot` 1.7.4 unchanged._
+_Last updated: 2026-09-03 by Fable 5.1 (user quota-burn report → triage → 3-agent review + wire proofs → fix + release cut)_
+_At commit: `831e61e` on main, tag `v2.0.47`. Released: **`wisp-router@2.0.47`** (npm `latest`) and **vsix 1.13.2 built + installed**. `wisp-slot` 1.7.4 unchanged._
 
 ## Current focus
 
-**2.0.46 is SHIPPED, verified and installed. Nothing is in flight.** The only thing standing between
-the user and a working `claude-fable-5-1` is a **Bridge restart** — see Blocked.
+**2.0.47 is SHIPPED, verified and installed. Nothing is in flight.** Start the Bridge (`wisp serve`/TUI)
+to run it — nothing was running at the cut, so there is no stale process.
 
-Started as a user report: a newly released Claude model was selectable in Wisp but 502'd, with a
-truncated `Anthropic API error 400: "Claude Code 2.1.219 does not …"`. The number was the tell — the
-reporting machine's own CLI was already **2.1.258**, so 2.1.219 could only be Wisp's own pinned claim.
-Root-caused, then **proven on the live wire** rather than argued from the source.
+Started as a user quota-burn report on `claude-fable-5-1` (weekly ~46% on light use). **Triage: the burn
+was mostly Fable's price ($10/$50 per M, 2× Opus) + `xhigh` effort on every turn + a 90k→347k context —
+none of which are bugs.** But a real cache-placement bug (#363) was making long sessions worse, and the
+bridge log that would have shown it was blind (#156/#162). Three Wisp fixes shipped, each verified before
+the cut. See [[pick-up]] for the fix list, the Haiku wire proof, and the held-bugs triage.
 
-**The advertised `claude-cli` version is a per-model floor the backend enforces**
-([[2026-09-02-the-advertised-claude-cli-version-is-a-per-model-floor]]). `claude-fable-5-1` released
-2026-09-01 wanting **2.1.251**; Wisp had claimed 2.1.219 since 2026-07-25.
-
-- **`anthropicClient.ts:113`** — `CLAUDE_CODE_VERSION` 2.1.219 → **2.1.258**. Feeds the `User-Agent`
-  and the body's `cc_version` attribution block as one constant, so the two can never disagree.
-- **`routingScreens.tsx:54`** — the one-tap bind table's `fable` entry → `claude-fable-5-1`. The
-  **second pin stale on the same event**, and the silent one: pressing the button downgraded a working
-  hand-set route with no error.
-- Both now carry comments naming each other, so the next Claude release trips one check, not two
-  mysteries.
-
-**Model discovery was never at fault, and its correctness is what exposed this.** The models.dev pull
-has no family whitelist by design, so the new model reached the picker on release day while the pinned
-fingerprint could not reach the wire
-([[a-live-picker-in-front-of-a-pinned-client-fingerprint-drifts-apart]]).
+**#363 is the money bug, proven on the wire.** The volatile `<system-reminder>` tail sat in the top-level
+`system` array — inside the cached prefix of every message breakpoint — so a changed reminder re-billed
+the whole history each turn (read frozen, creation growing). Now a **trailing role:system turn** behind
+every breakpoint, gated to models that accept one (Sonnet/Haiku 400 on it — wire-confirmed)
+([[2026-09-03-the-volatile-tail-must-sit-behind-every-message-breakpoint]]).
 
 ## State
 
 - **In flight:** nothing.
-- **Done this session:** built + verified + installed the owed **vsix 1.13.0** (the 2.0.45 leftover);
-  pushed the unpushed `f8f3207`; diagnosed the 502 to Wisp's own version pin; drove a three-cell live
-  probe; fixed both stale pins; full gate; cut, published, verified and installed **2.0.46 + vsix
-  1.13.1**; probe deleted.
-- **Blocked:** nothing in the repo. **On the user's machine:** two `wisp` PIDs (**6328**, **27788**)
-  are still serving the old image — see Pick up here.
+- **Done this session:** triaged the Fable quota burn (mostly price + effort + context, not a bug);
+  ran a 3-agent fresh-eyes review of the Anthropic door path; reproduced #363 on the live wire (Haiku);
+  fixed #363 + #156/#162 + #204 with tests (core 1036→1039); full gate; cut, published, verified past the
+  registry read, and installed **2.0.47 + vsix 1.13.2**; probes deleted.
+- **Blocked:** nothing. No `wisp` process was running at the cut — start one to run 2.0.47.
 
 ## Pick up here
 
 **No active work — pick a new task.** The queue is empty by query (`gh issue list --label
-ready-for-agent --state open` → `[]`, re-checked at the cut; still verify by query, not by this note —
+ready-for-agent --state open` → `[]` at session start; still verify by query, not by this note —
 [[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]]).
 
-Before anything else, if the user reports `claude-fable-5-1` still failing: **it is the stale process,
-not the fix.** `npm i -g` upgraded the package and npm pruned the old platform binary, but the running
-PIDs hold their image in memory and keep serving 2.0.45 behavior
-([[an-upgraded-package-does-not-touch-the-process-already-running]]). Restarting is the **user's**
-call — a bridged Claude Code session is talking to that very process.
+The most natural next move is **filing the held bugs** (see [[pick-up]] "Bugs found but NOT shipped"):
+the statusline resolver drift is a **`wisp-slot`** cut, the rest are core. Or scope #207.
 
 Open but deliberately **not** agent-ready: **#207** (active quota probe — blocked on the same three
 scoping calls), **#69**, **#163**.
@@ -65,40 +51,38 @@ scoping calls), **#69**, **#163**.
 ## Verification
 
 - Pre-cut `git rev-list --left-right --count origin/main...main` → `0 0` (and `0 0` after the push)
-- `bun run test` (core vitest) — **1036/1036 across 22 files**
+- `bun run test` (core vitest) — **1039/1039 across 22 files** (was 1036; +3 fix tests)
 - `bun run --cwd packages/core typecheck` — clean
-- `bun run --cwd packages/tui compile` — clean; `bun test packages/tui/tests/` — **28/28**
-- **Live wire, three cells, one variable** — the probe that settled it:
+- `bun run --cwd packages/tui compile` — clean; `bun test packages/tui/tests/` — **28/28**;
+  `bun run --cwd packages/vscode compile` — clean
+- **Live wire, #363 old-vs-new (Haiku, 4 growing turns, changing reminder):**
 
-  | cell | result |
-  |---|---|
-  | `claude-fable-5-1` @ 2.1.219 | **400** `claude_code_version_too_old`, names 2.1.251 |
-  | `claude-fable-5-1` @ 2.1.258 | **200**, answered |
-  | `claude-opus-5` @ 2.1.219 | **200** — control |
+  | placement | read | creation |
+  |---|---|---|
+  | volatile in `system` (pre-#363) | **7610 frozen** | 3877 → 5793 → 7680 |
+  | volatile behind the breakpoints (#363) | 9568 → 13367 | **~1900 flat** |
 
-  The control is what makes the 400 the wire's verdict rather than a malformed request, and is
-  simultaneously the evidence the bump cannot break an already-accepted request. The `anthropic-beta`
-  list rode **both** cells unchanged (still the 2.1.216 capture), which closed the open risk that a new
-  beta gated the model alongside the version.
-- `release.yml` run `33592983325` — **5/5 green**, all four platform binaries on `v2.0.46`
-- **npm verified past the registry read:** both versions scratch-installed, **both bins executed**
-  (banners self-report `v2.0.46` / `v2.0.45`), then the shipped binaries grepped — `2.1.258` **1/0**,
-  `2.1.219` **0/1** (a proven swap, not just an addition), `claude-fable-5-1` **1/0** (npm face only,
-  correct), with `claude-cli/` **1/1** and `fetchAntigravityModels` **2/2** as shared controls
-- **vsix verified in the bundle:** 1.13.1 vs 1.13.0 — `2.1.258` **1/0**, `2.1.219` **0/1**, controls
-  `claude-cli/` **1/1** and `thinkingLevel` **5/5**
-- Installed: global `wisp-router` 2.0.45 → **2.0.46**, `esarinazx.wisp` 1.13.0 → **1.13.1**
+  The read climbs with history and creation holds flat once the volatile is out of the message-marker
+  prefix — the leak closed. Model-acceptance wire-check: **Haiku 400s** on a trailing role:system turn
+  (`role 'system' is not supported`), so the fix is gated to Opus 5/4.8 + Fable/Mythos 5.
+- `release.yml` run `33726251888` — **5/5 green**, all four platform binaries on `v2.0.47`
+- **npm verified past the registry read:** 2.0.47 scratch-installed, **bin executed** (splash self-reports
+  `v2.0.47`), then the shipped binaries grepped 2.0.47 vs 2.0.46 — `modelSupportsMidConversationSystem`
+  **2/0**, `authoritativeServerMiss` **2/0** (a proven swap), `claude-cli/` **1/1** shared control
+- **vsix verified in the bundle:** `wisp-1.13.2.vsix` extension.js — the same two new symbols present
+  (**2/2/3**), absent at `v2.0.46` (git-confirmed **0 files** → **1 file**)
+- Installed: global `wisp-router` 2.0.46 → **2.0.47**, `esarinazx.wisp` 1.13.1 → **1.13.2**
 
 ## Skills for next session
 
-- `/preset pick-up` — baton at [[pick-up]] is current: queue empty, nothing owed in the repo.
-- Next move is a decision, not a task: scope #207's three calls, or #69 / #163.
+- `/preset pick-up` — baton at [[pick-up]] is current: queue empty, held-bugs list ready to file.
+- Next move is a decision: file the held bugs (statusline drift = `wisp-slot` cut; rest = core), or #207.
 
 ## Open questions
 
 - **#207's three scoping calls** — unchanged: poll **cadence**; **precedence** when a poll and a turn
   header disagree; **opt-in or always-on**.
-- **Restart the Bridge** (PIDs 6328 / 27788) to make 2.0.46 live. User's call, user's timing.
+- **Start the Bridge** (`wisp serve`/TUI) to run 2.0.47 — nothing was running at the cut. User's timing.
 - Carried over, unchanged: dismiss the two secret-scanning alerts as won't-fix; rotate `bridgeSecret`;
   #170 needs a Kimi Code subscription; note #189's last criterion when observed; ~20 stale local
   `ticket/*` branches; `.context/Untitled.canvas` untracked, user's file, left alone.
