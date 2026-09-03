@@ -4,6 +4,30 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.2] — 2026-09-03
+
+Three engine fixes, carried here because the extension **bundles its own copy of `@wisp/core`** — no
+`wisp-router` release can deliver them to a picker or native-chat user. Cut alongside npm
+`wisp-router` 2.0.47, which carries the same three changes to the terminal face.
+
+### Fixed
+
+- **A bridged Claude Code session on a Claude-5 model stops re-billing its whole history every turn.**
+  The volatile `<system-reminder>` tail Claude Code appends mid-session sat in the top-level `system`
+  array, inside the cached prefix of every message-level breakpoint (render order `tools → system →
+  messages`). Each reminder change missed all of them and re-billed the whole conversation as
+  `cache_creation`. It now rides as a trailing `role:"system"` turn behind every breakpoint on models
+  that accept one (Opus 5, Opus 4.8, the Fable and Mythos 5 families); Sonnet and Haiku 400 on a
+  positioned system turn, so there it keeps its previous placement, unchanged. Reproduced and fixed on
+  the live wire before shipping. (#363)
+- **A real cache re-bill is no longer hidden by a "STALE" diagnosis.** A server cache diagnosis the bill
+  contradicted used to suppress the whole cache-health heuristic, so a genuine per-turn re-bill logged as
+  "not a real miss". A STALE verdict now falls through to the heuristic; only a non-stale server MISS
+  suppresses it. Log-only. (#156/#162)
+- **A turn that reports no quota headers no longer blanks the statusline's quota block.** The active
+  Provider was evicted from the quota ledger unconditionally; the eviction is now gated on the turn
+  actually carrying meters, so an unmetered response keeps the last reading as the fallback. (#204)
+
 ## [1.13.1] — 2026-09-02
 
 A single fix, carried here because the extension **bundles its own copy of the engine** — no

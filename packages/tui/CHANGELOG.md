@@ -6,6 +6,57 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.47] — 2026-09-03
+
+**A bridged Claude Code session on a Claude-5 model stops re-billing its whole history every turn.** The
+volatile `<system-reminder>` tail Claude Code appends mid-session was placed in the top-level `system`
+array. Render order is `tools → system → messages`, so that block sat inside the cached prefix of every
+message-level breakpoint: each time the reminder changed, all of those breakpoints missed and the entire
+conversation history re-billed as `cache_creation`. On a long session this is O(n²) token spend behind a
+stable prefix that looks healthy.
+
+### Fixed
+
+- **The volatile system tail rides as a trailing `role:"system"` turn, behind every message breakpoint,
+  on models that accept one (Opus 5, Opus 4.8, the Fable and Mythos 5 families).** A reminder change now
+  re-bills only itself; the conversation history reads back from cache. Sonnet and Haiku 400 on a
+  positioned `role:"system"` turn (Haiku confirmed on the wire), so there the tail keeps its previous
+  system-array placement — unchanged, no new failure. (#363)
+- **A real cache re-bill is no longer hidden by a "STALE" diagnosis line.** When the server's cache
+  diagnosis was one the bill contradicted, the door logged only the advisory "not a real miss" and
+  skipped the whole heuristic — including the `#162` "prior write not read back" line. A genuine per-turn
+  tail re-bill therefore reported as nothing wrong. A STALE verdict is untrustworthy by definition, so it
+  now falls through to the heuristic; only a non-stale server MISS suppresses it. Log-only. (#156/#162)
+- **A turn that reports no quota headers no longer blanks the statusline's quota block.** The active
+  Provider was evicted from the quota ledger unconditionally, so a response that omitted the unified
+  rate-limit headers destroyed that Provider's last known reading instead of keeping it as the fallback.
+  The eviction is now gated on the incoming turn actually carrying meters. (#204)
+
+### Surfaces
+
+Derived from `git log v2.0.46..main -- <face-path>` per face, at the cut. Every commit in the window
+touches `packages/core` alone — but core is a bundled dependency, not a published face, so both shipping
+faces carry all three fixes.
+
+- **npm `wisp-router` 2.0.47** — this release. The Bridge door (`wisp serve`, `claude-wisp`) is where the
+  request body is built and the cache-health line is logged, so the terminal face carries every fix.
+- **vsix `wisp` 1.13.2** — the extension bundles its own `@wisp/core`, so the picker and native-chat paths
+  carry the same three fixes; no `wisp-router` publish can deliver them there.
+
+### Notes
+
+The re-bill and its fix were reproduced on the live wire before shipping (Haiku, 5m cache, four growing
+turns with a changing reminder):
+
+    volatile in system (pre-#363):   read 7610 frozen   creation 3877 → 5793 → 7680
+    volatile behind the breakpoints: read 9568 → 13367  creation ~1900 flat
+
+The old shape freezes the read at the stable prefix while creation climbs with the history; moving the
+volatile behind every message breakpoint lets the read grow with the history and holds creation to the
+new turn alone. The shipped placement (a trailing system turn) is strictly better than the wire proxy
+above — it is never persisted into history, so history turns stay byte-stable — but is gated to the
+models that accept a positioned system turn.
+
 ## [2.0.46] — 2026-09-02
 
 **A Claude model newer than the version Wisp claims to be no longer fails.** `claude-fable-5-1`
