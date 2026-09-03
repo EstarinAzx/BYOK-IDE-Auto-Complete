@@ -455,23 +455,31 @@ describe('the two schema cleaners', () => {
     expect(got.properties.const).toBeDefined();
   });
 
-  // Claude Code's Workflow tool sends `args` as `{ description }` alone — JSON Schema for "any value". The
-  // upstream Schema proto requires a type on every node, so the whole tool list 400s on it.
-  it('gives a typeless node a type inferred from its shape, string when it has none', () => {
+  // An itemless array is the ONE shape this wire rejects outright (`…items: missing field`), at any depth.
+  it('gives every itemless array an items, and leaves a typeless node alone', () => {
     const got: any = cleanJsonSchemaForGemini({ type: 'object', properties: {
+      where: { type: 'array', items: { type: 'array' } },
+      bare: { type: 'array' },
       any: { description: 'verbatim JSON' },
-      obj: { properties: { a: { type: 'string' } } },
-      list: { items: { type: 'string' } },
     } });
-    expect(got.properties.any.type).toBe('string');
-    expect(got.properties.any.description).toContain('any JSON value');
-    expect(got.properties.obj.type).toBe('object');
-    expect(got.properties.list.type).toBe('array');
+    expect(got.properties.where.items.items).toEqual({ type: 'string' });
+    expect(got.properties.bare.items).toEqual({ type: 'string' });
+    expect(got.properties.bare.description).toContain('array of any JSON value');
+    // The wire accepts a typeless node, so nothing is invented for it.
+    expect(got.properties.any.type).toBeUndefined();
+  });
 
-    // The inferred object is still an object to VALIDATED mode: it gets the placeholder like any other.
-    const anti: any = cleanJsonSchemaForAntigravity({ type: 'object', properties: { bag: { properties: {} } } });
-    expect(anti.properties.bag.type).toBe('object');
-    expect(anti.properties.bag.required).toEqual(['reason']);
+  // A 2020-12 tuple carries prefixItems and no items; the wire ignores the keyword and rejects the array.
+  it('repairs an array left itemless by a tuple schema or by an earlier pass', () => {
+    const tuple: any = cleanJsonSchemaForGemini({ type: 'object', properties: { pair: { type: 'array', prefixItems: [{ type: 'string' }] } } });
+    expect(tuple.properties.pair.items).toEqual({ type: 'string' });
+
+    // flattenTypeArrays mints `type:'array'` from a type list, and flattenAnyOfOneOf can select an
+    // itemless array member — both land in this pass rather than on the wire.
+    const nullable: any = cleanJsonSchemaForGemini({ type: 'object', properties: { a: { type: ['array', 'null'] } } });
+    expect(nullable.properties.a.items).toEqual({ type: 'string' });
+    const picked: any = cleanJsonSchemaForGemini({ type: 'object', properties: { a: { anyOf: [{ type: 'array' }, { type: 'string' }] } } });
+    expect(picked.properties.a.items).toEqual({ type: 'string' });
   });
 });
 

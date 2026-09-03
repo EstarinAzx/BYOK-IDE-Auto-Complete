@@ -423,18 +423,32 @@ const flattenTypeArrays = (schema: unknown): any => {
   return walk(schema, 0);
 };
 
-// Phase 2d — every node reaching the wire carries a type: Schema.type is the proto's one REQUIRED field, and
-// JSON Schema's "no type = any value" (Claude Code's Workflow.args is exactly `{ description }`) has no
-// Gemini spelling. The shape decides where it can; a bare node becomes a string, the one type that can carry
-// any JSON value; a bare top level is the parameters object itself.
-// ponytail: string for a bare node is transport-lossless, not shape-faithful — a tool wanting a real object
-// back would need per-tool knowledge this layer does not have.
-const defaultMissingTypes = (schema: unknown): any =>
-  mapSchema(schema, (node, depth) => {
-    if (node.type !== undefined) return node;
-    if (depth === 0 || isObj(node.properties)) node.type = 'object';
-    else if (node.items !== undefined) node.type = 'array';
-    else { node.type = 'string'; appendHint(node, 'any JSON value'); }
+/*
+ * Phase 2d — an ARRAY must carry `items`. It is the ONE field this wire demands beyond a node's own
+ * presence, and a bare `{type:'array'}` (JSON Schema's "array of anything", and also what a 2020-12
+ * `prefixItems` tuple degrades to once that unknown keyword is ignored) is rejected outright. Nothing
+ * else the Schema proto marks REQUIRED is actually enforced — wire-confirmed 2026-09-04, one tiny turn
+ * per shape:
+ *
+ *   {type:'array'}                        -> 400 …properties[where].items: missing field
+ *   {type:'array',items:{type:'array'}}    -> 400 …properties[where].items.items: missing field
+ *   {type:'array',prefixItems:[…]}         -> 400 …properties[where].items: missing field
+ *   {type:'array',items:{}} · {description:'…'} · {} · {type:'object'}   -> 200
+ *
+ * So a typeless node needs no repair and gets none: the proto says `type` is REQUIRED, the server
+ * disagrees, and the server is the contract. Only the itemless array is defaulted.
+ *
+ * Runs after flattenTypeArrays and flattenAnyOfOneOf on purpose — both can MINT an itemless array
+ * (a `['array','null']` type list; an anyOf member scored as an array on its declared type alone).
+ *
+ * ponytail: string is the lossless carrier for an unconstrained element — naming a better element type
+ * would need per-tool knowledge this layer does not have.
+ */
+const fillArrayItems = (schema: unknown): any =>
+  mapSchema(schema, (node) => {
+    if (node.type !== 'array' || node.items !== undefined) return node;
+    node.items = { type: 'string' };
+    appendHint(node, 'array of any JSON value');
     return node;
   });
 
@@ -509,7 +523,7 @@ const cleanSchema = (schema: unknown, placeholder: boolean, nested: boolean): an
   out = mergeAllOf(out);
   out = flattenAnyOfOneOf(out);
   out = flattenTypeArrays(out);
-  out = defaultMissingTypes(out);
+  out = fillArrayItems(out);
   out = removeUnsupportedKeywords(out);
   if (!placeholder) out = removeGeminiOnlyKeywords(out);
   out = cleanupRequiredFields(out);
