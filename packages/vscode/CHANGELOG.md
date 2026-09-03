@@ -4,6 +4,22 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.3] — 2026-09-04
+
+One engine fix, carried here because the extension **bundles its own copy of `@wisp/core`** — no
+`wisp-router` release can deliver it to a picker or native-chat user. Cut alongside npm
+`wisp-router` 2.0.48, which carries the same change to the terminal face.
+
+### Fixed
+
+- **An Antigravity turn no longer fails whenever a tool declares an array without saying what is in it.**
+  The upstream rejects an `ARRAY` schema node that carries no `items`, and rejects the entire request with
+  it, so a single such tool took down every Antigravity turn in a session at any model. A bare
+  `{"type":"array"}` is ordinary JSON Schema for "array of anything", and a 2020-12 `prefixItems` tuple
+  degrades into one because this wire ignores that keyword. Such a node now gets
+  `items: {"type":"string"}`. Established by driving the wire per shape, and proven on the same model in
+  the same minute: the reported shape answers 400 raw and 200 through the cleaner.
+
 ## [1.13.2] — 2026-09-03
 
 Three engine fixes, carried here because the extension **bundles its own copy of `@wisp/core`** — no

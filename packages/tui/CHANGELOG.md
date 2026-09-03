@@ -6,6 +6,49 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.0.48] — 2026-09-04
+
+**A bridged turn on an Antigravity row stops failing whenever any tool declares an array without saying
+what is in it.** The upstream rejects such a node outright, and it rejects the whole request — so one
+ordinary MCP tool took down every Antigravity turn in the session, at any model, with
+`GenerateContentRequest.tools[0].function_declarations[N].parameters…items: missing field`.
+
+### Fixed
+
+- **An `ARRAY` node in an Antigravity tool schema always carries `items` now.** A bare `{"type":"array"}`
+  is ordinary JSON Schema for "array of anything", and a 2020-12 `prefixItems` tuple degrades into one
+  here because this wire ignores that keyword. Two of the cleaner's own passes can also mint one — a
+  `["array","null"]` type list, and an `anyOf` member selected as an array on its declared type alone —
+  so the repair runs after them rather than at the entry. Such a node now gets `items: {"type":"string"}`,
+  string being the lossless carrier for an unconstrained element.
+
+### Surfaces
+
+Derived from `git log v2.0.47..main -- <face-path>` per face, at the cut. Both commits in the window touch
+`packages/core` alone — but core is a bundled dependency, not a published face, so both shipping faces
+carry the fix.
+
+- **npm `wisp-router` 2.0.48** — this release. The Bridge door (`wisp serve`, `claude-wisp`) builds the
+  request body, so the terminal face is where the failure was seen and where the fix lands.
+- **vsix `wisp` 1.13.3** — the extension bundles its own `@wisp/core`, so the picker and native-chat paths
+  carry the same fix; no `wisp-router` publish can deliver it there.
+
+### Notes
+
+The upstream's actual rule was established by driving the wire, one tiny turn per candidate shape, rather
+than from the proto: `Schema.type` is marked `REQUIRED` there but is **not** enforced.
+
+    {"type":"array"}                            400  …properties[where].items: missing field
+    {"type":"array","items":{"type":"array"}}   400  …properties[where].items.items: missing field
+    {"type":"array","prefixItems":[…]}          400  …properties[where].items: missing field
+    {"type":"array","items":{}}                 200
+    {"description":"…"}  ·  {}  ·  {"type":"object"}   200
+
+So only the itemless array is repaired. An interim commit in this window (`efaa249`) also defaulted a
+missing `type` on the strength of the proto; the table above is why it was removed again before the cut —
+it repaired something the server never rejected. The shipped fix was then proven on the same model in the
+same minute: the reported shape answers 400 raw and 200 through the cleaner.
+
 ## [2.0.47] — 2026-09-03
 
 **A bridged Claude Code session on a Claude-5 model stops re-billing its whole history every turn.** The
