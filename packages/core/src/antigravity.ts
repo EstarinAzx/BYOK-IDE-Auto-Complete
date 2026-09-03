@@ -423,6 +423,21 @@ const flattenTypeArrays = (schema: unknown): any => {
   return walk(schema, 0);
 };
 
+// Phase 2d — every node reaching the wire carries a type: Schema.type is the proto's one REQUIRED field, and
+// JSON Schema's "no type = any value" (Claude Code's Workflow.args is exactly `{ description }`) has no
+// Gemini spelling. The shape decides where it can; a bare node becomes a string, the one type that can carry
+// any JSON value; a bare top level is the parameters object itself.
+// ponytail: string for a bare node is transport-lossless, not shape-faithful — a tool wanting a real object
+// back would need per-tool knowledge this layer does not have.
+const defaultMissingTypes = (schema: unknown): any =>
+  mapSchema(schema, (node, depth) => {
+    if (node.type !== undefined) return node;
+    if (depth === 0 || isObj(node.properties)) node.type = 'object';
+    else if (node.items !== undefined) node.type = 'array';
+    else { node.type = 'string'; appendHint(node, 'any JSON value'); }
+    return node;
+  });
+
 // Phase 3a — drop what this wire rejects outright, including every x-* extension field.
 const removeUnsupportedKeywords = (schema: unknown): any =>
   mapSchema(schema, (node) => {
@@ -494,6 +509,7 @@ const cleanSchema = (schema: unknown, placeholder: boolean, nested: boolean): an
   out = mergeAllOf(out);
   out = flattenAnyOfOneOf(out);
   out = flattenTypeArrays(out);
+  out = defaultMissingTypes(out);
   out = removeUnsupportedKeywords(out);
   if (!placeholder) out = removeGeminiOnlyKeywords(out);
   out = cleanupRequiredFields(out);

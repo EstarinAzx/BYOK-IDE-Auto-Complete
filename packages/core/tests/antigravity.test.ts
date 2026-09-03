@@ -454,6 +454,25 @@ describe('the two schema cleaners', () => {
     expect(got.properties.format).toBeDefined();
     expect(got.properties.const).toBeDefined();
   });
+
+  // Claude Code's Workflow tool sends `args` as `{ description }` alone — JSON Schema for "any value". The
+  // upstream Schema proto requires a type on every node, so the whole tool list 400s on it.
+  it('gives a typeless node a type inferred from its shape, string when it has none', () => {
+    const got: any = cleanJsonSchemaForGemini({ type: 'object', properties: {
+      any: { description: 'verbatim JSON' },
+      obj: { properties: { a: { type: 'string' } } },
+      list: { items: { type: 'string' } },
+    } });
+    expect(got.properties.any.type).toBe('string');
+    expect(got.properties.any.description).toContain('any JSON value');
+    expect(got.properties.obj.type).toBe('object');
+    expect(got.properties.list.type).toBe('array');
+
+    // The inferred object is still an object to VALIDATED mode: it gets the placeholder like any other.
+    const anti: any = cleanJsonSchemaForAntigravity({ type: 'object', properties: { bag: { properties: {} } } });
+    expect(anti.properties.bag.type).toBe('object');
+    expect(anti.properties.bag.required).toEqual(['reason']);
+  });
 });
 
 // ----------------------------- The fourth tool builder ----------------------------- //
