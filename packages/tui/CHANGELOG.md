@@ -6,6 +6,52 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.1.0] — 2026-09-04
+
+**Two instruction fixes on the Bridge door: an Antigravity client error no longer leaves as a 502 that tells
+Claude Code to retry it, and a Fable cache stall is no longer reported as a Wisp cache break.**
+
+### Fixed
+
+- **A deterministic Antigravity 4xx answers with its real status instead of `502 provider request failed`.**
+  A 502 says "the server broke, retry", so Claude Code retried a request that could never succeed — the
+  itemless-array 400 of 2.0.48 was retried ten times, and the storm hid the stable error. A 400 / 401 /
+  403 / 404 now rides the same four-field shape #166 gave Codex (`antigravity_bad_request`,
+  `antigravity_auth_unavailable`, `antigravity_permission_denied`, `antigravity_not_found`) with the matching
+  Anthropic error type, so the client stops retrying and shows the upstream detail. 5xx stays a gateway
+  condition on purpose — a real outage must never hide behind a client-error status — and 429 keeps its own
+  body classifier.
+- **The cache-health log names the known Fable backend re-bill instead of calling it a real history
+  re-bill.** On `claude-fable-5-1` the `#162` "prior write not read back" stall fires on roughly a third of
+  turns, each 4-16k tokens short, and the old wording sent the user to chase cache breakpoints. It is the
+  backend re-billing a slice of its own thinking, not a Wisp cache break: on a Fable/Mythos-family model the
+  line now says so and names the control. Log-only; the numbers are unchanged and still printed.
+
+### Surfaces
+
+Derived from `git log v2.0.48..main -- <face-path>` per face, at the cut. Every change in the window touches
+`packages/core` alone — core is a bundled dependency, not a published face, so both shipping faces carry
+both fixes.
+
+- **npm `wisp-router` 2.1.0** — this release. The Bridge door (`wisp serve`, `claude-wisp`) is where the
+  failure status is answered and the cache-health line is logged, so the terminal face carries both.
+- **vsix `wisp` 1.13.4** — the extension bundles its own `@wisp/core`, so the picker and native-chat paths
+  carry the same two fixes; no `wisp-router` publish can deliver them there.
+
+### Notes
+
+The re-bill was pinned to the backend by a same-session model control rather than by reasoning: one heavy
+tool-use bridged session ran both models through the same Bridge, and the growth arithmetic
+`read(n+1) = read(n) + creation(n)` held exactly on 40 consecutive Opus 5 turns while the Fable turns beside
+them fell short. Three independent checks close the other doors: Claude Code's native request shape is
+byte-for-byte the same on both models (driven straight at a recording backend, bypassing Wisp); Wisp's
+parse→build round-trip preserves a Fable thinking block's signature byte-for-byte with no `cache_control`
+leaked onto it; and the shortfall tracks Fable's much larger per-turn thinking-signature volume. Nothing in
+the door can make that backend read its own writes back — only a lower effort (fewer thinking blocks) or
+Claude Code's own thinking-clear would shrink it, and both are client-side calls. The gate is a model family,
+not a size bound: the shortfall routinely exceeds the prior turn's entire output, so no per-turn bound would
+be honest.
+
 ## [2.0.48] — 2026-09-04
 
 **A bridged turn on an Antigravity row stops failing whenever any tool declares an array without saying

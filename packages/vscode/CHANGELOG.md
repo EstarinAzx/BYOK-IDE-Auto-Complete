@@ -4,6 +4,25 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.4] — 2026-09-04
+
+Two engine fixes, carried here because the extension **bundles its own copy of `@wisp/core`** — no
+`wisp-router` release can deliver them to a picker or native-chat user. Cut alongside npm
+`wisp-router` 2.1.0, which carries the same two changes to the terminal face.
+
+### Fixed
+
+- **A deterministic Antigravity client error answers with its real status instead of a 502.** A 502 tells
+  the client "the server broke, retry", so a request that could never succeed — a 400 from a rejected tool
+  schema, a 401 from an expired token — was retried instead of surfaced. A 400 / 401 / 403 / 404 now
+  answers with that status and the matching error type, carrying the upstream detail. 5xx stays a gateway
+  condition on purpose, and 429 keeps its own classifier.
+- **The Bridge's cache-health log names the known Fable backend re-bill instead of calling it a real history
+  re-bill.** On `claude-fable-5-1` the "prior write not read back" stall is the backend re-billing a slice of
+  its own thinking, not a Wisp cache break — Opus 5 on the same session reads back exactly. On a
+  Fable/Mythos-family model the line now says so rather than sending the user to chase breakpoints.
+  Log-only.
+
 ## [1.13.3] — 2026-09-04
 
 One engine fix, carried here because the extension **bundles its own copy of `@wisp/core`** — no
