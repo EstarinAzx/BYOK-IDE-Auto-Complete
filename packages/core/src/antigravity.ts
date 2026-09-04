@@ -1129,6 +1129,18 @@ export const antigravityRequestHeaders = (accessToken: string): Record<string, s
  * failure. A 429 whose body classifies carries antigravity429Error's reason instead of the raw body —
  * still the same "API error 429:" prefix, so the predicate keeps matching.
  */
+// 2.1.0: a 4xx client error cannot succeed on a retry, so it rides the #166 shape and the door answers with
+// the real status instead of a 502 — a 502 tells Claude Code "the server broke, retry", and the itemless-array
+// 400 (2.0.48) was retried ten times that way, the storm hiding the stable error. 5xx stays unclassified on
+// purpose: a real outage must never hide behind a client-error status the client would stop retrying. 429
+// keeps its own body classifier above (declining is how the bounded retry stays reachable).
+const ANTIGRAVITY_CLIENT_ERRORS: Record<number, { code: string; type: string }> = {
+  400: { code: 'antigravity_bad_request', type: 'invalid_request_error' },
+  401: { code: 'antigravity_auth_unavailable', type: 'authentication_error' },
+  403: { code: 'antigravity_permission_denied', type: 'permission_error' },
+  404: { code: 'antigravity_not_found', type: 'not_found_error' },
+};
+
 export const antigravityApiError = (status: number, body: string): Error => {
   if (status === 429) {
     let parsed: unknown;
@@ -1139,7 +1151,13 @@ export const antigravityApiError = (status: number, body: string): Error => {
     if (failure) return Object.assign(new Error(failure.message), { [FAILURE_PROPERTY]: failure });
   }
   const detail = body.trim().slice(0, 500);
-  return new Error(`Antigravity API error ${status}${detail ? `: ${detail}` : ''}`);
+  const message = `Antigravity API error ${status}${detail ? `: ${detail}` : ''}`;
+  const client = ANTIGRAVITY_CLIENT_ERRORS[status];
+  if (client) {
+    const failure: AntigravityFailure = { status, code: client.code, type: client.type, message };
+    return Object.assign(new Error(message), { [FAILURE_PROPERTY]: failure });
+  }
+  return new Error(message);
 };
 
 // Whether a failed attempt should move to the NEXT host instead of surfacing. The reference's three

@@ -195,6 +195,47 @@ const quota429 = (reason: string, retryDelay?: string): string => JSON.stringify
   },
 });
 
+// ---------------- Antigravity 4xx classification (2.1.0) ---------------- //
+
+/*
+ * Every non-429 Antigravity failure used to leave the door as `502 provider request failed`. A 502 is the
+ * wrong instruction for a client error: it says "the server broke, retry", so Claude Code retried a
+ * deterministic 400 (the itemless-array schema rejection, 2.0.48) ten times, and the retry storm hid the
+ * stable error. Same instruction problem #166 fixed for Codex. A 4xx cannot succeed on a retry, so it
+ * rides the #166 four-field shape and the door answers with the real status. 5xx stays unclassified —
+ * a real outage must never hide behind a client-error status the client would stop retrying.
+ */
+describe('antigravityApiError — 4xx client errors classify (2.1.0)', () => {
+  it('a 400 carries the #166 shape: real status, invalid_request_error, the upstream detail', () => {
+    const failure = antigravityFailureOf(antigravityApiError(400, 'function_declarations[3].parameters.properties[where].items: missing field'));
+    expect(failure?.status).toBe(400);
+    expect(failure?.type).toBe('invalid_request_error');
+    expect(failure?.code).toBe('antigravity_bad_request');
+    expect(failure?.message).toBe('Antigravity API error 400: function_declarations[3].parameters.properties[where].items: missing field');
+  });
+
+  it('401, 403 and 404 answer with their own status and the matching Anthropic error type', () => {
+    expect(antigravityFailureOf(antigravityApiError(401, 'UNAUTHENTICATED'))).toMatchObject({ status: 401, type: 'authentication_error', code: 'antigravity_auth_unavailable' });
+    expect(antigravityFailureOf(antigravityApiError(403, 'PERMISSION_DENIED'))).toMatchObject({ status: 403, type: 'permission_error', code: 'antigravity_permission_denied' });
+    expect(antigravityFailureOf(antigravityApiError(404, 'NOT_FOUND'))).toMatchObject({ status: 404, type: 'not_found_error', code: 'antigravity_not_found' });
+  });
+
+  // The fallthrough is the load-bearing part: a 5xx is a gateway condition, and it must stay one.
+  it('leaves 5xx unclassified so the 502 path and the bounded retry still own them', () => {
+    expect(antigravityFailureOf(antigravityApiError(500, 'internal'))).toBeUndefined();
+    expect(antigravityFailureOf(antigravityApiError(502, 'bad gateway'))).toBeUndefined();
+    expect(antigravityFailureOf(antigravityApiError(503, 'no capacity available'))).toBeUndefined();
+  });
+
+  // The throw shape is a contract with routing.ts — a classified 4xx keeps the exact message shape, and a
+  // 400 must never read as transient (that is the whole point: no retry can fix it).
+  it('keeps the message shape and is NOT transient, so nothing retries a 400', () => {
+    const err = antigravityApiError(400, 'INVALID_ARGUMENT');
+    expect(err.message).toBe('Antigravity API error 400: INVALID_ARGUMENT');
+    expect(isTransientProviderError(err.message)).toBe(false);
+  });
+});
+
 describe('antigravityFailureOf (#190)', () => {
   it('carries the classified 429 and the horizon the server actually stated', () => {
     const failure = antigravityFailureOf(antigravityApiError(429, quota429('QUOTA_EXHAUSTED', '1h30m')));

@@ -892,4 +892,41 @@ describe('Bridge — a STALE diagnosis still surfaces the #162 tail re-bill (2.0
     expect(t2.some((l) => l.includes('diagnosis STALE'))).toBe(true);          // advisory still printed
     expect(t2.some((l) => l.includes('prior write not read back') && l.includes('#162'))).toBe(true); // no longer shadowed
   });
+
+  /*
+   * 2.1.0: the SAME stalled verdict on a Fable/Mythos-family model is the known backend re-bill, not a Wisp
+   * cache break — proven by a same-session model control (2026-09-04): 40 consecutive Opus 5 turns on the
+   * identical wire grew exactly (read(n+1) = read(n)+creation(n)) while the Fable turns beside them fell
+   * 4-16k short every few turns. Claude Code's request shape is identical on both, and Wisp rebuilds Fable
+   * thinking blocks byte-for-byte. So on Fable the line must name that class instead of sending the user
+   * to chase cache breakpoints; on every other model the #162 wording is still the right instruction.
+   */
+  it('names the known Fable backend re-bill on a fable-family model instead of "real history re-bill"', async () => {
+    const lines: string[] = [];
+    let call = 0;
+    vi.stubGlobal('fetch', async () => (call++ === 0 ? sse({ read: 10000, creation: 5000 }) : sse({ read: 12000, creation: 5000 })));
+    await runServer(deps({ modelMap: () => ({ anthropic: 'claude-fable-5-1' }), log: (m) => lines.push(m) }), async (port) => {
+      await post(port, '/v1/messages', { model: 'anthropic', max_tokens: 100, stream: true, messages: T1 });
+      await post(port, '/v1/messages', { model: 'anthropic', max_tokens: 100, stream: true, messages: T2 });
+    });
+    const line = lines.find((l) => l.includes('turns=5') && l.includes('prior write not read back'));
+    expect(line).toBeDefined();
+    expect(line).toContain('known Fable backend re-bill');
+    expect(line).not.toContain('real history re-bill');
+  });
+
+  // The control: the same stall on Opus keeps the #162 instruction, so a genuine cache break on a model
+  // that reads back exactly is still called what it is.
+  it('keeps the #162 "real history re-bill" wording on a non-fable model', async () => {
+    const lines: string[] = [];
+    let call = 0;
+    vi.stubGlobal('fetch', async () => (call++ === 0 ? sse({ read: 10000, creation: 5000 }) : sse({ read: 12000, creation: 5000 })));
+    await runServer(deps({ log: (m) => lines.push(m) }), async (port) => {
+      await post(port, '/v1/messages', { model: 'anthropic', max_tokens: 100, stream: true, messages: T1 });
+      await post(port, '/v1/messages', { model: 'anthropic', max_tokens: 100, stream: true, messages: T2 });
+    });
+    const line = lines.find((l) => l.includes('turns=5') && l.includes('prior write not read back'));
+    expect(line).toContain('real history re-bill');
+    expect(line).not.toContain('known Fable backend re-bill');
+  });
 });

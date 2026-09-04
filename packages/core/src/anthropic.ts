@@ -264,6 +264,13 @@ export const stripModelTier = (model: string): string => model.replace(/\[1m\]$/
 export const modelSupportsMidConversationSystem = (model: string): boolean =>
   /opus-5|opus-4-8|fable-5|mythos-5/.test(model.toLowerCase());
 
+// The Fable/Mythos 5 families — the models whose backend re-bills a slice of its own thinking each turn as
+// fresh cache_creation the next turn never reads back (2.1.0). Proven by a same-session model control
+// (2026-09-04): 40 consecutive Opus 5 turns on the identical wire grew exactly while the Fable turns beside
+// them fell 4-16k short. The cache-health log names that class rather than sending the user to chase
+// breakpoints; nothing in the door can make that backend read its own writes back.
+export const isFableFamilyModel = (model: string): boolean => /fable-5|mythos-5/.test(model.toLowerCase());
+
 // Translate a conversation into an Anthropic Messages request body. The LEADING system text moves to the
 // top-level `system` block array, led by the Claude Code attribution block (its fingerprint derived from
 // the first user turn's TEXT — so it MUST stay sourced from `content`); mid-conversation system stays

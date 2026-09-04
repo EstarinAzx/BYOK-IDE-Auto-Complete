@@ -30,7 +30,7 @@ import {
   toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, standardEffortToAntigravity, isCodexProvider, isAnthropicProvider, isXaiProvider,
   isAntigravityProvider, isAntigravityImageModel, antigravityImageRefusal,
   antigravityFailureOf, ANTIGRAVITY_QUOTA_EXHAUSTED_CODE,
-  anthropicCacheOutcome, anthropicDiagnosisStale, createAnthropicDiagnosisChain, createAnthropicCacheGrowthTracker,
+  anthropicCacheOutcome, anthropicDiagnosisStale, createAnthropicDiagnosisChain, createAnthropicCacheGrowthTracker, isFableFamilyModel,
   classifyCodexErrorMessage, buildStatus,
   type ToolCallDelta, type AssembledToolCall, type CodexCreds, type AnthropicCreds, type XaiCreds, type AntigravityCreds, type EffortLevel, type BridgeUsage, type AnthropicCacheMissReason, type CodexErrorClass,
   type QuotaMeter, type WispStatus,
@@ -882,7 +882,16 @@ export const createBridgeServer = (deps: BridgeDeps) => {
           // cache working as designed, not a re-bill. Silent. Only a stalled read (prior write not read
           // back) or a baseline-less first sighting still earns the advisory line.
           else if (outcome.kind === 'partial' && growth?.kind !== 'grew') {
-            if (growth?.kind === 'stalled') deps.log(`[bridge] prompt-cache PARTIAL ${provider.id} ${parsed.model}: read=${outcome.readTokens} expected>=${growth.expectedRead} creation=${outcome.creationTokens} turns=${convoTurns} — prior write not read back: real history re-bill (#162)`);
+            if (growth?.kind === 'stalled') {
+              // 2.1.0: on a Fable/Mythos model this stall is the backend re-billing a slice of its own thinking,
+              // not a Wisp cache break — Claude Code's request shape is identical on Fable and Opus, Wisp rebuilds
+              // Fable thinking blocks byte-for-byte, and Opus 5 on the same session reads back exactly. Name the
+              // class; only a model that reads back exactly earns the "check your breakpoints" instruction.
+              const verdict = isFableFamilyModel(result.model)
+                ? 'known Fable backend re-bill, not a Wisp cache break (Opus 5 on this wire reads back exactly)'
+                : 'real history re-bill';
+              deps.log(`[bridge] prompt-cache PARTIAL ${provider.id} ${parsed.model}: read=${outcome.readTokens} expected>=${growth.expectedRead} creation=${outcome.creationTokens} turns=${convoTurns} — prior write not read back: ${verdict} (#162)`);
+            }
             else deps.log(`[bridge] prompt-cache PARTIAL ${provider.id} ${parsed.model}: read=${outcome.readTokens} creation=${outcome.creationTokens} uncached_input=${outcome.uncachedInput} turns=${convoTurns} — probable history re-bill behind a stable prefix (#145)`);
           }
         }
