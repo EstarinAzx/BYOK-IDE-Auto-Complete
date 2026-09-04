@@ -93,6 +93,17 @@ jobs:
         with:
           path: artifacts
 
+      # The VS Code extension rides the same release page (the repo keeps no vsix — *.vsix is
+      # gitignored — so the release is the only copy). BEST-EFFORT: the extension bundles its own
+      # @wisp/core and its version is its own (a cut that bumps only wisp-router re-attaches the
+      # same vsix, harmless); a packaging hiccup must never block the npm release below.
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Package the VS Code extension (best-effort)
+        run: |
+          bun run --cwd packages/vscode compile && bun run --cwd packages/vscode package \
+            || echo "WARN: vsix packaging failed — this release ships without the extension"
+
       # Stage each platform package: drop its compiled binary into bin/ and stamp the version.
       - name: Stage platform packages
         run: |
@@ -132,9 +143,18 @@ jobs:
           cp artifacts/wisp-darwin-arm64/wisp "release/wisp-v$VERSION-darwin-arm64"
           cp artifacts/wisp-darwin-x64/wisp "release/wisp-v$VERSION-darwin-x64"
           cp artifacts/wisp-linux-x64/wisp "release/wisp-v$VERSION-linux-x64"
+          NOTES="Wisp TUI + Bridge + claude-wisp launcher. Install: \`npm i -g wisp-router\` — or grab the binary for your platform below (\`claude-wisp\` = \`wisp claude-wisp …\`)."
+          # The vsix is present only when the best-effort packaging step above succeeded.
+          VSIX=$(ls packages/vscode/*.vsix 2>/dev/null | head -1)
+          if [ -n "$VSIX" ]; then
+            cp "$VSIX" release/
+            NOTES="$NOTES
+
+          VS Code extension: \`$(basename "$VSIX")\` below — install with \`code --install-extension $(basename "$VSIX")\`."
+          fi
           gh release create "$GITHUB_REF_NAME" release/* \
             --title "wisp-router $VERSION" \
-            --notes "Wisp TUI + Bridge + claude-wisp launcher. Install: \`npm i -g wisp-router\` — or grab the binary for your platform below (\`claude-wisp\` = \`wisp claude-wisp …\`)."
+            --notes "$NOTES"
 
       # Platform packages are BEST-EFFORT: npm's spam filter has 403'd and post-publish removed
       # them before — the shim's release-download fallback covers installs either way. The thin

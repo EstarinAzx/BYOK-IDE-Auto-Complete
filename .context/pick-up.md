@@ -73,9 +73,8 @@ while a 296-byte body on the same model seconds later answered 200. Reads like a
 **`git rev-list --left-right --count origin/main...main` — the right-hand number must be 0.**
 
 A branch cut from an unpushed main sweeps those commits into its own squash-merge (`3465c7c`, #202).
-The release commits are pushed (`80e21bb`, tag `v2.1.0`, `1b450b0`), but **the `.context/` commit
-carrying this note is deliberately left unpushed** — expect `0 1` and push before branching. Full trap:
-[[a-branch-cut-from-an-unpushed-main-sweeps-it-into-the-squash]].
+Everything through the release.yml vsix change is pushed — expect `0 0`; if it is not, push before
+branching. Full trap: [[a-branch-cut-from-an-unpushed-main-sweeps-it-into-the-squash]].
 
 ## Waiting on the user
 
@@ -227,6 +226,12 @@ Release:
   ([[a-marker-grep-proves-nothing-without-a-marker-present-in-both]]).
 - **Every release entry carries `### Surfaces`, derived from `git log <last-tag>..main -- <face-path>`**
   ([[2026-07-30-a-surfaces-section-is-checked-against-the-code-not-copied-from-the-ticket]]).
+- **The vsix rides the GitHub release page since the 2.1.0 follow-up** — `*.vsix` is gitignored, so the
+  release is the repo's only copy. `release.yml`'s publish job now compiles + packages the extension
+  (best-effort: a packaging failure prints `WARN` and never blocks the npm release) and stages it beside
+  the binaries; the notes name the file. **Unproven until the next tag** — `wisp-1.13.4.vsix` on
+  `v2.1.0` was uploaded by hand. If the next release page lacks a vsix, read the publish job's
+  "Package the VS Code extension" step first.
 - **Labels are the only real gate**; a closed-by-PR issue keeps its `ready-for-agent` label.
 - **PowerShell splits a `git commit -m` here-string on embedded double quotes** — the message becomes
   pathspecs, the commit fails, and the NEXT `-m` commit sweeps everything staged. Write the message to a
