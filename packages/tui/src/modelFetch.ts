@@ -13,9 +13,9 @@
 
 import {
   resolveBaseUrl, oauthModelOptions, getModelsDevCatalog, isAntigravityProvider, fetchAntigravityModels,
-  type Provider,
+  isCodexProvider, codexCatalog, codexModelIds, codexModelEffort, codexEffortOptions, effortOptionsFor, resolveModel, type Provider,
 } from '@wisp/core';
-import { home, bearerFor, antigravityAuth } from './store';
+import { home, bearerFor, antigravityAuth, codexAuth } from './store';
 
 // ----------------------------- Fetch (throwing) ----------------------------- //
 
@@ -23,7 +23,12 @@ import { home, bearerFor, antigravityAuth } from './store';
 // (same probe the extension uses). undefined = the Provider has no list to give (no base URL /
 // empty answer). Failures THROW with the backend's own words — `wisp models` prints them
 // verbatim; the TUI face below swallows into the pickers' free-text fallback.
-export const fetchModelList = async (p: Provider): Promise<string[] | undefined> => {
+export const fetchModelList = async (p: Provider, refresh = false): Promise<string[] | undefined> => {
+  if (isCodexProvider(p)) {
+    const result = await codexCatalog.get({ creds: await codexAuth.current(), baseUrl: resolveBaseUrl(p, ''), refresh });
+    if (result.source === 'unavailable') throw new Error(result.error);
+    return codexModelIds(result.models);
+  }
   // Antigravity: prefer the upstream's own list when signed in, so a model released after the static
   // snapshot appears without a Wisp release. A live failure falls back to the curated table instead of
   // throwing — the static list is a real answer, and the picker stays useful offline.
@@ -58,6 +63,14 @@ export const fetchModelList = async (p: Provider): Promise<string[] | undefined>
 // ----------------------------- Fetch (swallowing — the Screens' face) ----------------------------- //
 
 // The pickers' contract, unchanged (#117): undefined on ANY failure → free-text fallback.
-export const fetchModelOptions = async (p: Provider): Promise<string[] | undefined> => {
-  try { return await fetchModelList(p); } catch { return undefined; }
+export const fetchModelOptions = async (p: Provider, refresh = false): Promise<string[] | undefined> => {
+  try { const ids = await fetchModelList(p, refresh); return ids?.length ? ids : undefined; } catch { return undefined; }
+};
+
+export const fetchEffortOptions = async (p: Provider): Promise<{ options: string[]; current?: string }> => {
+  const cfg = home.readConfig();
+  if (!isCodexProvider(p)) return { options: effortOptionsFor(p), current: cfg.effort };
+  const { models } = await codexCatalog.get({ creds: await codexAuth.current(), baseUrl: resolveBaseUrl(p, '') });
+  const info = models.find((m) => m.id === resolveModel(cfg.models ?? {}, p));
+  return { options: codexEffortOptions(info), current: codexModelEffort(info, cfg.effort) };
 };

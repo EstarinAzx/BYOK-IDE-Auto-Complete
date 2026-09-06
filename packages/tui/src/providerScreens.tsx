@@ -17,7 +17,7 @@
  *
  * Extracted from app.tsx with #117: the ten provider-flow Screens plus the key/model storage
  * helpers only this flow uses. The shell imports what its action starters need
- * (EFFORT_LADDER, fetchModelOptions, oauthProviders, saveKey).
+ * (fetchModelOptions, oauthProviders, saveKey).
  */
 
 import {
@@ -97,12 +97,6 @@ const saveModel = (p: Provider, model: string): void => {
   const cfg = home.readConfig();
   home.writeConfig({ models: { ...cfg.models, [p.id]: model } });
 };
-
-// ----------------------------------------- Effort ladder ----------------------------------------- //
-
-// The full stored ladder. 'max' is Anthropic-only on the wire, but the send-time clamps
-// (standardEffortToCodex, anthropicThinkingEffort) fold it, so offering it globally is safe.
-export const EFFORT_LADDER: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 // ----------------------------------------- Model lists ----------------------------------------- //
 
@@ -210,9 +204,11 @@ export const ModelLoadingScreen = ({ provider }: { provider: Provider }) => (
 );
 
 // Pick the Provider's remembered model from its curated/live list.
-export const ModelPickScreen = ({ provider, options, onDone }: {
+export const ModelPickScreen = ({ provider, options, onDone, onManual, onRefresh }: {
   provider: Provider;
   options: string[];
+  onManual: () => void;
+  onRefresh: () => void;
   onDone: (message?: string) => void;
 }) => (
   <box {...PANEL} title={`Model — ${provider.label}`} marginTop={1} flexDirection="column">
@@ -221,17 +217,19 @@ export const ModelPickScreen = ({ provider, options, onDone }: {
       focused
       {...SELECT_COLORS}
       {...SELECT_MOUSE}
-      height={Math.min(options.length, 14)}
+      height={Math.min(options.length + 2, 14)}
       showDescription={false}
       showSelectionIndicator={false}
       showScrollIndicator
-      options={options.map((id) => ({
+      options={[...options.map((id) => ({
         name: id === resolveModel(home.readConfig().models ?? {}, provider) ? `${id} (current)` : id,
         description: '',
         value: id,
-      }))}
+      })), { name: 'Enter a model id…', description: '', value: ' manual' }, { name: 'Refresh models', description: '', value: ' refresh' }]}
       onSelect={(_i, opt) => {
         if (!opt) return;
+        if (opt.value === ' manual') { onManual(); return; }
+        if (opt.value === ' refresh') { onRefresh(); return; }
         saveModel(provider, opt.value as string);
         onDone(`${provider.label} model → ${opt.value}`);
       }}
@@ -300,18 +298,18 @@ export const SigninWaitScreen = ({ provider, device }: { provider: Provider; dev
   );
 
 // Pick the stored reasoning effort — writes config here; navigation stays a callback.
-export const EffortPickScreen = ({ onDone }: { onDone: (message?: string) => void }) => (
+export const EffortPickScreen = ({ onDone, options, current }: { onDone: (message?: string) => void; options: string[]; current?: string }) => (
   <box {...PANEL} title="Reasoning Effort (Codex + Anthropic)" marginTop={1} flexDirection="column">
     <select
       focused
       {...SELECT_COLORS}
       {...SELECT_MOUSE}
-      height={Math.min(EFFORT_LADDER.length * 2, 16)}
+      height={Math.min(options.length * 2, 16)}
       showSelectionIndicator={false}
       showScrollIndicator
-      options={EFFORT_LADDER.map((e) => ({
-        name: e === (home.readConfig().effort ?? DEFAULT_EFFORT) ? `${e} (current)` : e,
-        description: e === 'max' ? 'Anthropic only — folds to xhigh on Codex' : '',
+      options={options.map((e) => ({
+        name: e === (current ?? DEFAULT_EFFORT) ? `${e} (current)` : e,
+        description: '',
         value: e,
       }))}
       onSelect={(_i, opt) => {

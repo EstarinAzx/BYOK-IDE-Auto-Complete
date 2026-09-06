@@ -8,6 +8,7 @@ import { createBridgeServer, type BridgeDeps } from '../src/bridgeServer';
 import { MAX_PROVIDER_ATTEMPTS, TRANSIENT_FAILURES_BEFORE_COOLDOWN, TRANSIENT_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS } from '../src/routing';
 import { ANTIGRAVITY_QUOTA_EXHAUSTED_CODE, antigravityImageRefusal } from '../src/catalog';
 import type { Provider } from '../src/catalog';
+import { codexCatalog } from '../src/codexModels';
 
 // The Grok catalog row — id 'xai', the subscription-proxy base (grok-build routes there).
 const GROK: Provider = { id: 'xai', label: 'Grok', baseUrl: 'https://cli-chat-proxy.grok.com/v1', defaultModel: 'grok-build', apiKeyEnv: '', kind: 'xai-oauth' };
@@ -50,6 +51,30 @@ const makeDeps = (over: Partial<BridgeDeps>): BridgeDeps => ({
   accessSecret: () => 'secret',
   log: () => {},
   ...over,
+});
+
+describe('Codex catalogue capabilities through both Bridge doors', () => {
+  it.each(['/v1/messages', '/v1/chat/completions'].flatMap((path) =>
+    ['max', 'future-depth'].map((effort) => [path, effort])))('preserves a future model on %s with %s effort', async (path, effort) => {
+    const model = { id: 'future-name-nano', name: 'Future', visible: true, reasoningEfforts: ['medium', 'max', 'future-depth'], defaultEffort: 'medium', contextWindow: 345_000 };
+    const discovery = vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [model] });
+    const bodies: any[] = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      bodies.push(JSON.parse(init.body as string)); return grokSse();
+    });
+    const provider: Provider = { id: 'codex', label: 'Codex', kind: 'codex', baseUrl: 'https://codex.example', defaultModel: model.id, apiKeyEnv: '' };
+    try {
+      await runServer(makeDeps({ providers: [provider], activeProviderId: () => 'codex', effort: () => path === '/v1/messages' ? 'medium' : effort,
+        codexSignedIn: async () => true, codexCreds: async () => ({ accessToken: 'test-token', accountId: 'test-account' }),
+      }), async (port) => {
+        const reply = await post(port, path, { model: 'codex', stream: true, max_tokens: 10,
+          output_config: { effort }, messages: [{ role: 'user', content: 'hi' }] });
+        expect(reply.status).toBe(200);
+        expect(bodies).toHaveLength(1);
+        expect(bodies[0]).toMatchObject({ model: model.id, reasoning: { effort } });
+      });
+    } finally { discovery.mockRestore(); vi.unstubAllGlobals(); }
+  });
 });
 
 // POST over node http (NOT fetch — fetch is stubbed for the upstream xai call) → { status, body }.

@@ -476,7 +476,8 @@ describe('parseAnthropicMessagesRequest', () => {
   it('carries a valid output_config.effort, undefined when absent or junk', () => {
     expect(parseAnthropicMessagesRequest({ model: 'm', messages: [], output_config: { effort: 'xhigh' } } as any).effort).toBe('xhigh');
     expect(parseAnthropicMessagesRequest({ model: 'm', messages: [] } as any).effort).toBeUndefined();
-    expect(parseAnthropicMessagesRequest({ model: 'm', messages: [], output_config: { effort: 'turbo' } } as any).effort).toBeUndefined();
+    expect(parseAnthropicMessagesRequest({ model: 'm', messages: [], output_config: { effort: 'future-depth' } } as any).effort).toBe('future-depth');
+    expect(parseAnthropicMessagesRequest({ model: 'm', messages: [], output_config: { effort: {} } } as any).effort).toBeUndefined();
   });
 
   // Discovery lists claude-wisp-<provider> aliases (slice-1 decision); the door strips the prefix inbound so

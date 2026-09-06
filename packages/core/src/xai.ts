@@ -3,7 +3,7 @@
 /*
  * Depends on:
  *   - ./shared — the provider kernel: ModelCaps, ModelsDevCatalog + sortByReleaseDesc, the effort ladder
- *     (CodexReasoning/EffortLevel/standardEffortToCodex/DEFAULT_EFFORT), and trimmedString.
+ *     (CodexReasoning/EffortLevel/standardEffortToXai/DEFAULT_EFFORT), and trimmedString.
  *   - ./catalog — the Provider row type ONLY (import type, erased at runtime), so catalog -> xai is the sole
  *     runtime edge and the graph stays acyclic.
  *   - the Web URL global — the isXaiEndpoint host guard.
@@ -14,7 +14,7 @@
 
 import type { Provider } from './catalog';
 import {
-  sortByReleaseDesc, standardEffortToCodex, DEFAULT_EFFORT, trimmedString,
+  sortByReleaseDesc, standardEffortToXai, DEFAULT_EFFORT, trimmedString,
   type ModelCaps, type ModelsDevCatalog, type CodexReasoning, type EffortLevel,
 } from './shared';
 
@@ -166,7 +166,7 @@ export const xaiRequestHeaders = (model: string, bearer: string, sessionId: stri
 // grok-build/composer reject it. Effort folds 'max'→'xhigh' (xAI's wire tops there, like Codex).
 export const xaiReasoning = (model: string, effort?: EffortLevel): CodexReasoning | undefined =>
   /grok-[4-9]/.test(model.toLowerCase())
-    ? { effort: standardEffortToCodex(effort ?? DEFAULT_EFFORT), summary: 'auto' }
+    ? { effort: standardEffortToXai(effort ?? DEFAULT_EFFORT), summary: 'auto' }
     : undefined;
 
 // Sanitize a RAW external Responses payload for xAI — the path where the Bridge forwards a client's

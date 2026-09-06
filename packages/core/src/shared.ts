@@ -50,17 +50,15 @@ export const sortByReleaseDesc = (models: Record<string, ModelsDevEntry>, ids: s
 
 // ----------------------------- Effort ladder ----------------------------- //
 
-// Codex's reasoning-depth wire values, and the reasoning object the Responses API takes (summary 'auto').
-export type CodexEffort = 'low' | 'medium' | 'high' | 'xhigh';
-export type CodexReasoning = { effort: CodexEffort; summary: 'auto' };
+// Codex effort values are supplied by its catalogue, so a new provider-defined level can survive
+// storage and the UI without a release. Each other provider validates against its own wire vocabulary.
+export type CodexEffort = string;
+export type CodexReasoning = { effort: CodexEffort; summary?: string };
+export type EffortLevel = string;
 
-// The shared wisp.effort knob's type. Superset of CodexEffort with 'max' on top — 'max' is Anthropic-only
-// (Codex's wire tops at xhigh), so it lives here, NOT in CodexEffort. Normalized per-Provider at send time.
-export type EffortLevel = CodexEffort | 'max';
-
-// Map a stored EffortLevel onto Codex's wire type: 'max' folds to xhigh (its ceiling). Without this a knob
-// left on 'max' after a Provider switch would 400 the Responses call.
-export const standardEffortToCodex = (effort: EffortLevel): CodexEffort => (effort === 'max' ? 'xhigh' : effort);
+// Grok's legacy four-level Responses wire. Codex itself resolves effort through model metadata.
+export const standardEffortToXai = (effort: EffortLevel): CodexEffort =>
+  effort === 'max' ? 'xhigh' : ['low', 'medium', 'high', 'xhigh'].includes(effort) ? effort : DEFAULT_EFFORT;
 
 // Antigravity's tier vocabulary. Its own client offers exactly three stops — low / medium / high — so the
 // two rungs above them fold onto 'high' rather than putting an unattested value on the wire. The fold is
@@ -68,7 +66,7 @@ export const standardEffortToCodex = (effort: EffortLevel): CodexEffort => (effo
 // without having probed every rung: we never send one we haven't seen the first-party client send.
 export type AntigravityThinkingLevel = 'low' | 'medium' | 'high';
 export const standardEffortToAntigravity = (effort: EffortLevel): AntigravityThinkingLevel =>
-  effort === 'xhigh' || effort === 'max' ? 'high' : effort;
+  effort === 'xhigh' || effort === 'max' ? 'high' : effort === 'low' || effort === 'high' ? effort : 'medium';
 
 // Default reasoning depth — 'medium' preserves the pre-Effort behavior for callers that don't thread one.
 export const DEFAULT_EFFORT: CodexEffort = 'medium';

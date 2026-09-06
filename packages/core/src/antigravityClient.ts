@@ -43,9 +43,8 @@ type AntigravityRequestArgs = {
   model: string;
   messages: AntigravityTurn[];
   tools?: ToolSpec[];
-  // Already folded to this wire's three stops by the caller (standardEffortToCodex's neighbour), the same
-  // way the Codex arm hands codexStream a CodexEffort rather than the raw knob. Absent = send no
-  // thinkingConfig at all, which is every row whose id already pins its tier.
+  // Already folded to this wire's three stops by the caller. Absent = send no thinkingConfig at all,
+  // which is every row whose id already pins its tier.
   thinkingLevel?: AntigravityThinkingLevel;
   signal?: AbortSignal;
 };

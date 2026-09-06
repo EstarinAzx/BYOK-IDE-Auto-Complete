@@ -82,7 +82,7 @@ describe('parseWispConfig', () => {
     const raw = JSON.stringify({
       provider: 42,
       models: 'nope',
-      effort: 'bogus',
+      effort: 42,
       routing: { families: 'nope' },
       customBaseUrl: [],
       bridge: { port: 'high', aliasPickerShowsModel: 'yes', aliasOnlyModels: 'sure' },

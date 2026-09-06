@@ -4,6 +4,27 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.5] — 2026-09-06
+
+### Added
+
+- Codex model and effort pickers use the signed-in account's catalogue, including unfamiliar names and
+  variants. Refresh actions are available in the main model card and Codex routing rows; routing inputs
+  also accept a manually entered model id while showing discovered suggestions.
+- Account-scoped discovery cache shared with the terminal and Bridge; refresh on use after 15 minutes.
+
+### Fixed
+
+- Native chat, Inquire, and the hosted Bridge use discovered reasoning support, image capability and
+  context windows. Codex's `max` effort is no longer silently reduced to `xhigh`.
+- Claude Code's `max` stays `max` on supporting models; unsupported effort values use the model's
+  advertised default. Codex's Ultra orchestration mode is excluded from ordinary reasoning choices.
+
+### Surfaces
+
+- **VS Code: 1.13.5** — this extension bundles the core changes also carried by **wisp-router 2.1.1**.
+- **wisp-slot: unchanged.**
+
 ## [1.13.4] — 2026-09-04
 
 Two engine fixes, carried here because the extension **bundles its own copy of `@wisp/core`** — no

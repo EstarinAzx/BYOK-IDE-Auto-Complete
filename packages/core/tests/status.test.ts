@@ -162,7 +162,7 @@ describe('contextPercent', () => {
 
 describe('contextWindowFor', () => {
   it('reads the Codex and Anthropic offline caps tables', () => {
-    expect(contextWindowFor(provider({ kind: 'codex' }), 'gpt-5.6-sol')).toBe(1_050_000);
+    expect(contextWindowFor(provider({ kind: 'codex' }), 'gpt-5.6-sol')).toBeUndefined();
     expect(contextWindowFor(provider({ kind: 'anthropic-oauth' }), 'claude-sonnet-4-5')).toBeGreaterThan(0);
     expect(contextWindowFor(provider({ kind: 'xai-oauth' }), 'grok-4.5')).toBeGreaterThan(0);
   });
@@ -184,6 +184,7 @@ describe('buildStatus', () => {
       model: 'gpt-5.4',
       usage: usage({ input_tokens: 200_000, output_tokens: 44_000 }),
       meters: [{ label: '7d', percent: 7 }],
+      contextWindow: 1_050_000,
     });
     expect(status).toEqual({
       updatedAt: 1785816700000,

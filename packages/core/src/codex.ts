@@ -2,8 +2,8 @@
 
 /*
  * Depends on:
- *   - ./shared — the provider kernel: ModelCaps, ModelsDevCatalog + sortByReleaseDesc, the effort ladder
- *     (CodexEffort/CodexReasoning/DEFAULT_EFFORT), the SSE event shape (CodexResponsesEvent), the tool
+ *   - ./shared — the provider kernel: ModelCaps, the effort types
+ *     (CodexEffort/CodexReasoning), the SSE event shape (CodexResponsesEvent), the tool
  *     shapes (ToolSpec/AssembledToolCall), and trimmedString.
  *   - ./catalog — the Provider row type ONLY (import type, erased at runtime), so catalog -> codex is the
  *     sole runtime edge and the graph stays acyclic.
@@ -14,10 +14,11 @@
  */
 
 import type { Provider } from './catalog';
+import type { CodexModelInfo } from './codexModels';
 import {
-  sortByReleaseDesc, DEFAULT_EFFORT, trimmedString,
+  trimmedString,
   type BridgeUsage,
-  type ModelCaps, type ModelsDevCatalog,
+  type ModelCaps,
   type CodexEffort, type CodexReasoning,
   type CodexResponsesEvent, type ToolSpec, type AssembledToolCall,
 } from './shared';
@@ -172,47 +173,33 @@ export const buildCodexResponsesBody = (args: {
   };
 };
 
-// The reasoning object to send for a Codex model, or undefined when it must be omitted. gpt-5 / o-series
-// need it; the gpt-4.x and *-spark (fast-loop) variants reject it. The Effort knob supplies the depth.
-export const codexReasoning = (model: string, effort: CodexEffort = DEFAULT_EFFORT): CodexReasoning | undefined => {
-  const m = model.toLowerCase();
-  if (m.includes('spark')) return undefined;
-  return /^(gpt-5|o3|o4)/.test(m) ? { effort, summary: 'auto' } : undefined;
+// Reasoning and capabilities come from the same discovered model used by every picker. Unknown
+// manual ids remain usable, with unadvertised optional request fields omitted.
+export const codexEffortOptions = (info?: CodexModelInfo): string[] =>
+  // Ultra starts Codex's multi-agent runtime (multi_agent_reasoning_effort supplies its actual
+  // model effort). Wisp forwards Responses turns and does not implement that runtime; the backend
+  // rejects literal ultra. This is a protocol distinction, independent of model names or variants.
+  (info?.reasoningEfforts ?? []).filter((effort) => effort !== 'ultra');
+
+export const codexModelEffort = (info?: CodexModelInfo, requested?: string): string | undefined => {
+  const supported = codexEffortOptions(info);
+  if (!supported?.length) return undefined;
+  if (requested && supported.includes(requested)) return requested;
+  return info?.defaultEffort && supported.includes(info.defaultEffort) ? info.defaultEffort : undefined;
 };
 
-// Real Codex model windows — the OFFLINE FALLBACK when the models.dev catalog is absent (the live
-// lookupModelsDevCaps('openai', …) wins otherwise, and now carries these ids). Tiers mirror models.dev:
-// gpt-5.4+ flagships (incl. 5.6 sol/terra/luna) = 1.05M/128K, -codex/-mini variants = 400K/128K,
-// spark = 128K/32K, o-series = 200K/100K. The order matters: o-series first (o4-mini has '-mini'),
-// spark before -codex (gpt-5.3-codex-spark has both). vision:true (gpt-5/o are multimodal; the
-// Responses backend accepts input_image).
-export const codexModelCaps = (model: string): ModelCaps => {
-  const m = model.toLowerCase();
-  if (/^o[0-9]/.test(m)) return { contextInput: 200_000, maxOutput: 100_000, vision: true };
-  if (m.includes('spark')) return { contextInput: 128_000, maxOutput: 32_000, vision: true };
-  if (/-(codex|mini|nano)/.test(m)) return { contextInput: 400_000, maxOutput: 128_000, vision: true };
-  return { contextInput: 1_050_000, maxOutput: 128_000, vision: true };
+export const codexReasoning = (model: string, effort?: CodexEffort, info?: CodexModelInfo): CodexReasoning | undefined => {
+  if (info?.id !== model) return undefined;
+  const selected = codexModelEffort(info, effort);
+  // Codex's catalogue uses 'none' for disabled summaries; Responses represents that by omission.
+  const summary = info?.reasoningSummary;
+  return selected ? { effort: selected, ...(summary && ['auto', 'concise', 'detailed'].includes(summary) ? { summary } : {}) } : undefined;
 };
 
-// Curated Codex model ids — the OFFLINE FALLBACK for codexModelsFrom. The codex row's defaultModel must
-// stay a member of this list.
-export const CODEX_MODELS: string[] = [
-  'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.3-codex',
-  'gpt-5.3-codex-spark', 'gpt-5.2-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini',
-  'gpt-5.4-mini', 'o3', 'o4-mini',
-];
-
-// Live Codex dropdown ids from models.dev's openai lineup — keep the ChatGPT-subscription families
-// (gpt-5*, o3*, o4-mini*), drop the API-only variants it rejects (-pro, -nano, -chat-latest,
-// -deep-research). Catalog absent or filter empty → curated fallback.
-export const codexModelsFrom = (catalog?: ModelsDevCatalog): string[] => {
-  const models = catalog?.openai?.models;
-  if (!models) return CODEX_MODELS;
-  const ids = Object.keys(models).filter(
-    (id) => /^(gpt-5|o3|o4-mini)/.test(id) && !/-(pro|nano|chat-latest|deep-research)$/.test(id),
-  );
-  return ids.length ? sortByReleaseDesc(models, ids) : CODEX_MODELS;
-};
+export const codexModelCaps = (model: string, info?: CodexModelInfo): ModelCaps => info?.id === model ? {
+  ...(info.contextWindow ? { contextInput: info.contextWindow } : {}),
+  ...(info.inputModalities ? { vision: info.inputModalities.includes('image') } : {}),
+} : {};
 
 // ----------------------------- Codex Responses reply ----------------------------- //
 

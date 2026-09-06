@@ -6,6 +6,40 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.1.1] — 2026-09-06
+
+### Added
+
+- Codex discovers models directly with the signed-in ChatGPT account. New families and variants appear
+  on catalogue refresh without a Wisp release; the upstream visibility flag controls the picker.
+- Discovery refreshes on use after 15 minutes and saves the last successful catalogue per account and
+  endpoint under `~/.wisp/cache/`. Network failures keep that snapshot; no snapshot falls back to manual
+  entry. `wisp models codex --refresh` and the pickers' **Refresh models** action bypass the cache.
+- Both terminal model pickers offer **Enter a model id…**, including when discovery succeeds.
+
+### Fixed
+
+- Reasoning levels, defaults, image support and context windows come from Codex metadata. Model-name
+  checks and the Codex max→xhigh clamp are removed. Provider-defined effort names survive storage and
+  the Bridge; other providers still validate their own supported values.
+- Claude Code's `max` reaches Codex as `max` when the model supports it. Unsupported effort values use
+  the selected model's advertised default.
+- Codex's catalogue summary mode `none` is translated to an omitted Responses field (sending the literal
+  value causes a 400). Unknown manual models omit unadvertised optional reasoning settings.
+- Codex's `ultra` runtime mode is excluded from Wisp's effort options: it starts Codex multi-agent
+  orchestration and is rejected as a literal Responses effort. Ordinary advertised efforts, including
+  `max`, remain available per model.
+- The client version required by discovery is refreshed from OpenAI's published npm package metadata,
+  with the last successful version as an outage fallback. No Codex installation is required.
+
+### Surfaces
+
+- **npm / TUI / Bridge: 2.1.1** — discovery, persistence, model and effort pickers, manual entry, refresh,
+  and both Bridge request dialects.
+- **VS Code extension: 1.13.5** — carries the same core, catalogue-backed model/capability/effort controls,
+  Codex refresh buttons, and editable routing model fields with suggestions.
+- **wisp-slot: unchanged** — consumes the Bridge's discovered context window through status.json.
+
 ## [2.1.0] — 2026-09-04
 
 **Two instruction fixes on the Bridge door: an Antigravity client error no longer leaves as a 502 that tells

@@ -93,10 +93,10 @@ export type BridgeAnthropicRequest = BridgeChatRequest & {
   advisor?: { model?: string };
 };
 
-// Validate an inbound output_config.effort against Wisp's ladder — the body is untrusted, so an unknown
-// string yields undefined (the door then falls back to the panel effort) rather than a junk wire value.
+// Validate the shape here; each provider validates support at send time. Codex's advertised effort
+// vocabulary can grow without a Bridge release, just as its model ids can.
 const normalizeEffort = (v: string | undefined): EffortLevel | undefined =>
-  v === 'low' || v === 'medium' || v === 'high' || v === 'xhigh' || v === 'max' ? v : undefined;
+  typeof v === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(v) ? v : undefined;
 
 // The joined text of a string-or-text-block field. A bare string is itself; a block array joins its text
 // blocks with `sep`. System uses '\n\n' (each block is a separate directive — billing marker, then prompt);

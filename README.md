@@ -57,6 +57,20 @@ Custom aliases pin short names (`sol`, `terra`, `grok`, …) to exact provider+m
   <img src="docs/claude-wisp-session.png" alt="Claude Code session on a Wisp gateway model (grok-4.5)" width="720">
 </p>
 
+## Codex model discovery
+
+Wisp reads the signed-in Codex account's model catalogue, including new names and variants. The same
+metadata supplies reasoning choices, image support and context windows. Discovery refreshes on use
+after 15 minutes; the last successful account-specific list is saved for temporary outages.
+
+Use `wisp models codex --refresh`, **Refresh models** in the terminal picker, or the extension's refresh
+button to check immediately. Manual model entry remains available. Wisp does not require a Codex CLI
+installation: it reads OpenAI's published package version as metadata for the discovery request.
+
+Claude Code's `max` effort passes through as `max` when the selected Codex model supports it; an
+unsupported effort uses that model's advertised default. Codex's **Ultra** mode adds multi-agent
+orchestration and is not accepted as a Responses reasoning value, so Wisp does not offer it as an effort.
+
 ## Install
 
 ### TUI + Bridge + Claude Code launcher (npm)

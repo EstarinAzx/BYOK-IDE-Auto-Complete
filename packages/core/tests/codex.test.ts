@@ -7,7 +7,7 @@ import {
   responsesIncompleteReason, responsesUsage,
   classifyCodexError, classifyCodexErrorMessage,
   decodeJwtPayload, parseChatgptAccountId, shouldRefreshCodexToken,
-  parseCodexAuthJson, codexReasoning, standardEffortToCodex, codexModelCaps, CODEX_MODELS, codexModelsFrom,
+  parseCodexAuthJson, codexReasoning, standardEffortToXai, codexModelCaps,
   toCodexResponsesTools, reduceResponsesToolCalls, PROVIDERS,
   type Provider, type EditMessage, type CodexResponsesEvent,
 } from '../src/catalog';
@@ -324,141 +324,22 @@ describe('reduceResponsesToolCalls', () => {
   });
 });
 
-describe('codexReasoning', () => {
-  // gpt-5 / o-series are reasoning models — send a reasoning object so the Responses call is accepted.
-  it('requests reasoning for gpt-5 and o-series models', () => {
-    expect(codexReasoning('gpt-5.3-codex')).toEqual({ effort: 'medium', summary: 'auto' });
-    expect(codexReasoning('gpt-5.4')).toEqual({ effort: 'medium', summary: 'auto' });
-    expect(codexReasoning('o3')).toEqual({ effort: 'medium', summary: 'auto' });
-    expect(codexReasoning('o4-mini')).toEqual({ effort: 'medium', summary: 'auto' });
-  });
-
-  // The non-reasoning / fast-loop variants must NOT carry reasoning (they reject it).
-  it('sends no reasoning for gpt-4.x and spark variants', () => {
-    expect(codexReasoning('gpt-4.1')).toBeUndefined();
-    expect(codexReasoning('gpt-5.3-codex-spark')).toBeUndefined();
-  });
-
-  // The panel-chosen Effort rides through to the reasoning object for reasoning models.
-  it('threads the supplied Effort through for reasoning models', () => {
-    expect(codexReasoning('gpt-5.4', 'high')).toEqual({ effort: 'high', summary: 'auto' });
-    expect(codexReasoning('gpt-5.5', 'xhigh')).toEqual({ effort: 'xhigh', summary: 'auto' });
-    expect(codexReasoning('o3', 'low')).toEqual({ effort: 'low', summary: 'auto' });
-    expect(codexReasoning('gpt-5.3-codex')).toEqual({ effort: 'medium', summary: 'auto' }); // default
-  });
-
-  // Effort is inert for the non-reasoning variants — they reject reasoning whatever the value.
-  it('still omits reasoning for spark / gpt-4.x regardless of Effort', () => {
-    expect(codexReasoning('gpt-4.1', 'high')).toBeUndefined();
-    expect(codexReasoning('gpt-5.3-codex-spark', 'low')).toBeUndefined();
-  });
-});
-
-describe('standardEffortToCodex', () => {
-  // The shared wisp.effort knob is EffortLevel (includes 'max'); Codex's wire type tops out at xhigh.
-  // A stored 'max' (set while on Anthropic, then switched Provider) must map to xhigh or it 400s on the
-  // Responses call. Mirrors openclaude standardEffortToOpenAI (max→xhigh).
+describe('standardEffortToXai', () => {
+  // Grok keeps its existing max→xhigh translation. Codex uses its discovered model capabilities.
   it('maps max to xhigh', () => {
-    expect(standardEffortToCodex('max')).toBe('xhigh');
+    expect(standardEffortToXai('max')).toBe('xhigh');
   });
 
-  // Every other level is already a valid CodexEffort — pass through untouched.
+  // Grok's other supported levels pass through untouched.
   it('passes through the non-max levels unchanged', () => {
-    expect(standardEffortToCodex('low')).toBe('low');
-    expect(standardEffortToCodex('medium')).toBe('medium');
-    expect(standardEffortToCodex('high')).toBe('high');
-    expect(standardEffortToCodex('xhigh')).toBe('xhigh');
+    expect(standardEffortToXai('low')).toBe('low');
+    expect(standardEffortToXai('medium')).toBe('medium');
+    expect(standardEffortToXai('high')).toBe('high');
+    expect(standardEffortToXai('xhigh')).toBe('xhigh');
   });
 });
 
-describe('codexModelCaps', () => {
-  // The OFFLINE FALLBACK when the models.dev catalog is absent (the live lookup wins otherwise). Tiers
-  // mirror models.dev's openai entries: gpt-5.4+ flagships (incl. the 5.6 sol/terra/luna trio) = 1.05M/128K,
-  // and the gpt-5/o families are multimodal — the Responses backend accepts input_image (as Codex CLI does).
-  it('returns the 1.05M/128K window for the gpt-5.4+ flagships, vision capable', () => {
-    expect(codexModelCaps('gpt-5.6-sol')).toEqual({ contextInput: 1_050_000, maxOutput: 128_000, vision: true });
-    expect(codexModelCaps('gpt-5.6-terra')).toEqual({ contextInput: 1_050_000, maxOutput: 128_000, vision: true });
-    expect(codexModelCaps('gpt-5.5')).toEqual({ contextInput: 1_050_000, maxOutput: 128_000, vision: true });
-    expect(codexModelCaps('gpt-5.4')).toEqual({ contextInput: 1_050_000, maxOutput: 128_000, vision: true });
-  });
-
-  // The -codex / -mini variants sit on the 400K window (models.dev: gpt-5.3-codex, gpt-5.4-mini), and the
-  // ids models.dev no longer lists (gpt-5.2-codex, gpt-5.1-codex-max/-mini) stay on their generation's 400K.
-  it('returns the 400K/128K window for the -codex and -mini variants, vision capable', () => {
-    expect(codexModelCaps('gpt-5.3-codex')).toEqual({ contextInput: 400_000, maxOutput: 128_000, vision: true });
-    expect(codexModelCaps('gpt-5.4-mini')).toEqual({ contextInput: 400_000, maxOutput: 128_000, vision: true });
-    expect(codexModelCaps('gpt-5.1-codex-max')).toEqual({ contextInput: 400_000, maxOutput: 128_000, vision: true });
-    expect(codexModelCaps('gpt-5.2-codex')).toEqual({ contextInput: 400_000, maxOutput: 128_000, vision: true });
-  });
-
-  // The fast-loop spark variant is the small window (models.dev: 128K context / 32K output).
-  it('returns the 128K/32K window for the spark variant, vision capable', () => {
-    expect(codexModelCaps('gpt-5.3-codex-spark')).toEqual({ contextInput: 128_000, maxOutput: 32_000, vision: true });
-  });
-
-  // The o-series reasoning models are a 200K context / 100K output, also multimodal.
-  it('returns the 200K/100K window for the o-series, vision capable', () => {
-    expect(codexModelCaps('o3')).toEqual({ contextInput: 200_000, maxOutput: 100_000, vision: true });
-    expect(codexModelCaps('o4-mini')).toEqual({ contextInput: 200_000, maxOutput: 100_000, vision: true });
-  });
-});
-
-describe('CODEX_MODELS', () => {
-  // A curated list (no /models route on the Codex backend); it must include the row's default model so
-  // the panel dropdown always offers a working pick.
-  it('is a non-empty curated list including a current Codex coding model', () => {
-    expect(CODEX_MODELS.length).toBeGreaterThan(0);
-    expect(CODEX_MODELS).toContain('gpt-5.3-codex');
-  });
-
-  // #172. The "defaultModel must stay a member" rule was a comment in codex.ts that nothing checked, and
-  // the row's default was separately an id the ChatGPT-account path REFUSES — a fresh sign-in that never
-  // picked a model sent a request the backend 400s. Both halves are asserted against the REAL row here.
-  // The accepted set is a whitelist of ids verified by live probe (2026-07-29), not a guess: the account
-  // path is pickier than the model list, so a new default has to be probed before it lands here.
-  // Note this restriction is account-path-only — 'gpt-5.3-codex' stays a valid id for API-key callers,
-  // stays in CODEX_MODELS above, and stays in the codexModelCaps tiering.
-  const ACCOUNT_PATH_ACCEPTS = ['gpt-5.6-sol', 'gpt-5.4'];
-
-  it("contains the codex row's default, and that default is one the ChatGPT-account path accepts", () => {
-    const codexRow = PROVIDERS.find((p) => p.id === 'codex')!;
-    expect(CODEX_MODELS).toContain(codexRow.defaultModel);
-    expect(ACCOUNT_PATH_ACCEPTS).toContain(codexRow.defaultModel);
-  });
-});
-
-describe('codexModelsFrom', () => {
-  // A miniature models.dev openai entry exercising every filter rule at once.
-  const catalog = {
-    openai: {
-      models: {
-        'gpt-5.6-sol': { release_date: '2026-07-09' },
-        'gpt-5.6-terra': { release_date: '2026-07-09' },
-        'gpt-5.5': { release_date: '2026-03-12' },
-        'gpt-5.5-pro': { release_date: '2026-03-12' },
-        'gpt-5.4-nano': { release_date: '2025-12-05' },
-        'gpt-5.3-chat-latest': { release_date: '2025-10-01' },
-        'o4-mini-deep-research': { release_date: '2025-06-26' },
-        'o4-mini': { release_date: '2025-04-16' },
-        'gpt-5.2': {}, // undated → must trail the dated ids, not vanish
-        'o1': { release_date: '2024-12-17' },
-        'gpt-4.1': { release_date: '2025-04-14' },
-      },
-    },
-  };
-
-  it('keeps the Codex-served families newest-first, drops the API-only variants', () => {
-    // Dropped: -pro, -nano, -chat-latest, -deep-research suffixes; o1/gpt-4.1 (outside the keep families).
-    // Sol before terra: same release_date → alphabetical tiebreak. Undated gpt-5.2 trails.
-    expect(codexModelsFrom(catalog)).toEqual(['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.5', 'o4-mini', 'gpt-5.2']);
-  });
-
-  it('falls back to the curated list when the catalog is absent, has no openai entry, or filters to nothing', () => {
-    expect(codexModelsFrom(undefined)).toEqual(CODEX_MODELS);
-    expect(codexModelsFrom({})).toEqual(CODEX_MODELS);
-    expect(codexModelsFrom({ openai: { models: { 'gpt-4.1': {} } } })).toEqual(CODEX_MODELS);
-  });
-});
+// Discovery and capability contracts live in codexModels.test.ts.
 
 describe('reduceResponsesTextEvents', () => {
   // The streaming path: text arrives as a run of response.output_text.delta events, concatenated in order.

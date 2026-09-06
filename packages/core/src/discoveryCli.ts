@@ -30,10 +30,10 @@ export const runProvidersCommand = (providers: Provider[]): DiscoveryCliResult =
 export const runModelsCommand = async (
   args: string[],
   providers: Provider[],
-  fetchModels: (provider: Provider) => Promise<string[] | undefined>,
+  fetchModels: (provider: Provider, refresh?: boolean) => Promise<string[] | undefined>,
 ): Promise<DiscoveryCliResult> => {
-  if (args.length !== 1 || !args[0]) {
-    return { lines: ['Usage:', '  wisp models <provider>'], exitCode: 1 };
+  if (!args[0] || args.length > 2 || (args.length === 2 && args[1] !== '--refresh')) {
+    return { lines: ['Usage:', '  wisp models <provider> [--refresh]'], exitCode: 1 };
   }
   // Command-first shape (#120): a typo'd id must fail loud here — it can never fall through
   // the argv dispatch and silently open the TUI.
@@ -42,7 +42,7 @@ export const runModelsCommand = async (
     return { lines: [`unknown provider: ${args[0]} — run \`wisp providers\` to list ids`], exitCode: 1 };
   }
   try {
-    const models = await fetchModels(provider);
+    const models = await fetchModels(provider, args[1] === '--refresh');
     if (!models || models.length === 0) {
       return { lines: [`no model list for '${provider.id}' — set a model id manually`], exitCode: 1 };
     }

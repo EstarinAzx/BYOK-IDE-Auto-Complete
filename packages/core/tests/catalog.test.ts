@@ -7,7 +7,7 @@ import {
   buildChatModelInfos, buildOpenAiChatMessages, assembleToolCalls, toOpenAiTools,
   modelSupportsVision,
   parseModelsDevEntry, lookupModelsDevCaps,
-  oauthModelOptions, CODEX_MODELS, ANTHROPIC_MODELS,
+  oauthModelOptions, ANTHROPIC_MODELS,
   chatCompletionTextDelta,
   CUSTOM_ID, PROVIDERS, type Provider,
 } from '../src/catalog';
@@ -322,7 +322,7 @@ describe('buildChatModelInfos', () => {
   // reasoning object is even sent.
   it('appends the active Effort to a reasoning-capable codex row label', () => {
     const codex = provider({ id: 'codex', label: 'Codex', defaultModel: 'gpt-5.3-codex', kind: 'codex' });
-    const [info] = buildChatModelInfos([codex], { keyed: { codex: true }, modelMap: {}, customBaseUrl: '', effort: 'high' });
+    const [info] = buildChatModelInfos([codex], { keyed: { codex: true }, modelMap: {}, customBaseUrl: '', effort: 'high', codexInfo: (id) => ({ id, name: id, visible: true, reasoningEfforts: ['medium', 'high'], defaultEffort: 'medium' }) });
     expect(info.name).toBe('Codex — gpt-5.3-codex · high');
   });
 
@@ -616,7 +616,7 @@ describe('oauthModelOptions', () => {
   // One rule for "which curated list backs an OAuth Provider" — shared by the Active-Provider
   // panel state and the per-row Routing-map lists (#53).
   it('returns the Codex list for the codex kind (curated fallback without a catalog)', () => {
-    expect(oauthModelOptions(provider({ kind: 'codex' }), undefined)).toEqual(CODEX_MODELS);
+    expect(oauthModelOptions(provider({ kind: 'codex' }), undefined)).toEqual([]);
   });
 
   it('returns the Claude list for the anthropic-oauth kind (curated fallback without a catalog)', () => {

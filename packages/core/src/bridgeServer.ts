@@ -25,9 +25,10 @@
 import * as http from 'http';
 import * as crypto from 'crypto';
 import type OpenAI from 'openai';
+import { codexCatalog } from './codexModels';
 import {
   Provider, resolveModel, resolveBaseUrl, buildOpenAiChatMessages, toOpenAiTools, toCodexResponsesTools,
-  toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToCodex, standardEffortToAntigravity, isCodexProvider, isAnthropicProvider, isXaiProvider,
+  toAnthropicTools, assembleToolCalls, buildChatModelInfos, standardEffortToAntigravity, isCodexProvider, isAnthropicProvider, isXaiProvider,
   isAntigravityProvider, isAntigravityImageModel, antigravityImageRefusal,
   antigravityFailureOf, ANTIGRAVITY_QUOTA_EXHAUSTED_CODE,
   anthropicCacheOutcome, anthropicDiagnosisStale, createAnthropicDiagnosisChain, createAnthropicCacheGrowthTracker, isFableFamilyModel,
@@ -400,7 +401,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
         // leading system message buildCodexResponsesBody folds into instructions (its only role:'system' source).
         const turns = parsed.turns.map((t) => ({ role: t.role, content: t.text, images: t.images, toolCalls: t.toolCalls, toolResults: t.toolResults }));
         const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
-        const upstream = codexStream({ creds, baseUrl, model, messages, effort: standardEffortToCodex(deps.effort()), tools: toCodexResponsesTools(parsed.tools), toolChoice: 'auto', signal });
+        const upstream = codexStream({ creds, baseUrl, model, messages, effort: deps.effort(), tools: toCodexResponsesTools(parsed.tools), toolChoice: 'auto', signal });
         return { ok: true, events: mapOAuthStream(upstream) };
       },
     },
@@ -423,7 +424,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
     },
     {
       // Grok (#95) — a Codex twin on the Responses wire, but its own effort ladder: xaiReasoning folds
-      // max→xhigh + gates per model, so the shared EffortLevel rides raw (NOT standardEffortToCodex).
+      // max→xhigh + gates per model, so the shared EffortLevel rides raw into that provider's adapter.
       id: 'xai',
       matches: isXaiProvider,
       classify: () => undefined,
@@ -626,7 +627,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
   const startProviderStream = async (
     parsed: BridgeAnthropicRequest, provider: Provider, pinnedModel: string | undefined, controller: AbortController,
     onQuota?: (meters: QuotaMeter[]) => void,
-  ): Promise<{ ok: false; status: number; message: string } | { ok: true; events: AsyncIterable<BridgeStreamEvent>; model: string }> => {
+  ): Promise<{ ok: false; status: number; message: string } | { ok: true; events: AsyncIterable<BridgeStreamEvent>; model: string; contextWindow?: number }> => {
     // A routed Target's pinned model (#51) beats the Provider's panel-selected model — this request only.
     const modelId = pinnedModel ?? resolveModel(deps.modelMap(), provider);
     const baseUrl = resolveBaseUrl(provider, deps.customBaseUrl());
@@ -640,8 +641,9 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       const messages = parsed.system ? [{ role: 'system' as const, content: parsed.system }, ...turns] : turns;
       // Non-strict tools: the door forwards an external client's toolset, and Codex strict mode rejects the
       // rich schemas Claude Code's tools carry (dynamic maps / propertyNames). strict:false passes them through.
-      const upstream = codexStream({ creds, baseUrl, model: modelId, messages, effort: standardEffortToCodex(effort), tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', signal: controller.signal, onQuota });
-      return { ok: true, events: mapOAuthStream(upstream), model: modelId };
+      const modelInfo = (await codexCatalog.get({ creds, baseUrl })).models.find((m) => m.id === modelId);
+      const upstream = codexStream({ creds, baseUrl, model: modelId, modelInfo, messages, effort, tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', signal: controller.signal, onQuota });
+      return { ok: true, events: mapOAuthStream(upstream), model: modelId, contextWindow: modelInfo?.contextWindow };
     }
     if (isAnthropicProvider(provider)) {
       const creds = await deps.anthropicCreds();
@@ -691,7 +693,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // Effort reaches only the '-tiered' rows — every other id on this wire pins its own reasoning depth
       // (gemini-3.1-pro-low vs -high are two models, not one with a dial), so applyAntigravityThinkingLevel
       // drops the level for them rather than overriding a tier the user picked by picking the row. The fold
-      // to this wire's three stops happens here, mirroring the Codex arm's standardEffortToCodex above.
+      // to this wire's three stops happens here before calling the provider's adapter.
       // No tool strictness knob: buildAntigravityTools already cleans Claude Code's rich schemas for this
       // wire, so the door's `false` strict flag has no equivalent to pass. The stream already speaks
       // BridgeStreamEvent, so unlike the three arms above it needs no mapOAuthStream hop.
@@ -843,7 +845,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // every context field rather than writing a zero.
       // ponytail: streaming path only. The non-streaming branch above is Claude Code's /model validation
       // probe, not a turn — recording it would overwrite a real reading with a probe's.
-      deps.recordStatus?.(buildStatus({ now: Date.now(), provider, model: result.model, usage: lastUsage, meters: quotaMeters }));
+      deps.recordStatus?.(buildStatus({ now: Date.now(), provider, model: result.model, usage: lastUsage, meters: quotaMeters, contextWindow: result.contextWindow }));
       // Cache-health check (#111 regression guard): only the Anthropic OAuth path reports real cache tokens,
       // and only a probable MISS or PARTIAL is worth a line — a healthy hit/fresh turn stays silent so the
       // log isn't noise.

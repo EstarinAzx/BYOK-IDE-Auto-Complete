@@ -28,10 +28,10 @@ import OpenAI from 'openai';
 import {
   Provider, resolveModel, resolveBaseUrl, buildChatModelInfos, lookupModelsDevCaps,
   buildOpenAiChatMessages, assembleToolCalls, toOpenAiTools, toCodexResponsesTools, isCodexProvider, codexModelCaps,
-  isAnthropicProvider, anthropicModelCaps, toAnthropicTools, standardEffortToCodex,
-  isXaiProvider, xaiModelCaps,
+  isAnthropicProvider, anthropicModelCaps, toAnthropicTools, isXaiProvider, xaiModelCaps,
   type NormalizedTurn, type ToolCallDelta, type CodexCreds, type EffortLevel, type AnthropicCreds, type XaiCreds,
 } from '@wisp/core';
+import { codexCatalog } from '@wisp/core';
 import { codexStream } from '@wisp/core';
 import { anthropicStream } from '@wisp/core';
 import { xaiStream } from '@wisp/core';
@@ -130,11 +130,14 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       getModelsDevCatalog(),
       new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 4000)),
     ]);
-    // Codex and Anthropic have no catalogKey, but models.dev's openai/anthropic entries DO carry their
-    // real windows — look the id up there first so new releases (gpt-5.6's 1M window) are honest, and
-    // fall back to each kind's hardcoded table offline; every other row pulls caps via its catalogKey.
+    // Codex's account catalogue takes precedence over public API metadata for context and vision.
+    // Other OAuth providers use models.dev with their existing offline capability fallbacks.
+    const codexProvider = deps.providers.find(isCodexProvider);
+    const codexModels = codexProvider && keyed[codexProvider.id]
+      ? (await codexCatalog.get({ creds: await deps.codexCreds(), baseUrl: resolveBaseUrl(codexProvider, deps.customBaseUrl()) })).models : [];
+    const codexInfo = (id: string) => codexModels.find((m) => m.id === id);
     const caps = (provider: Provider, model: string) =>
-      isCodexProvider(provider) ? (lookupModelsDevCaps(catalog, 'openai', model) ?? codexModelCaps(model))
+      isCodexProvider(provider) ? ({ ...lookupModelsDevCaps(catalog, 'openai', model), ...codexModelCaps(model, codexInfo(model)) })
         : isAnthropicProvider(provider) ? (lookupModelsDevCaps(catalog, 'anthropic', model) ?? anthropicModelCaps(model))
           : isXaiProvider(provider) ? (lookupModelsDevCaps(catalog, 'xai', model) ?? xaiModelCaps(model))
             : provider.catalogKey ? lookupModelsDevCaps(catalog, provider.catalogKey, model) : undefined;
@@ -143,9 +146,9 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       modelMap: deps.modelMap(),
       customBaseUrl: deps.customBaseUrl(),
       caps,
-      // Only feeds the Codex row's picker-label suffix — normalize so a knob left on 'max' reads as its
-      // Codex-honest 'xhigh', never a level Codex can't send (#32).
-      effort: standardEffortToCodex(deps.effort()),
+      // Label and request resolve effort through the same model metadata.
+      effort: deps.effort(),
+      codexInfo,
     });
   },
 
@@ -170,7 +173,7 @@ const makeProvider = (deps: ChatProviderDeps): vscode.LanguageModelChatProvider 
       const tools = toCodexResponsesTools((options.tools ?? []).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })));
       const toolChoice = options.toolMode === vscode.LanguageModelChatToolMode.Required ? 'required' : 'auto';
       try {
-        for await (const ev of codexStream({ creds, baseUrl, model: modelId, messages: toCodexMessages(messages), effort: standardEffortToCodex(deps.effort()), tools, toolChoice, signal: controller.signal })) {
+        for await (const ev of codexStream({ creds, baseUrl, model: modelId, messages: toCodexMessages(messages), effort: deps.effort(), tools, toolChoice, signal: controller.signal })) {
           if (ev.type === 'text') { progress.report(new vscode.LanguageModelTextPart(ev.value)); continue; }
           // #165: usage events are Bridge-only (VS Code does its own accounting) — skip them explicitly
           // rather than let "not text" fall through as "must be a tool call".

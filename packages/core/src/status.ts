@@ -139,7 +139,7 @@ export const contextTokens = (usage: BridgeUsage): number =>
 export const contextPercent = (tokens: number, window: number | undefined): number | undefined =>
   window === undefined || window <= 0 ? undefined : Math.round((tokens / window) * 100);
 
-// The model's total context window, from the OFFLINE caps tables the three OAuth kinds already carry.
+// Other OAuth providers still use their offline caps. Codex supplies catalogue metadata to buildStatus.
 // Keyed Providers get undefined on purpose: their window is only known from models.dev, which the door
 // does not fetch per turn, and DEFAULT_MAX_INPUT_TOKENS is a picker-budgeting placeholder — reporting a
 // percentage against it would be a confident wrong number where no number is the honest answer.
@@ -153,6 +153,7 @@ export const contextWindowFor = (provider: Provider, model: string): number | un
 // ----------------------------- The snapshot ----------------------------- //
 
 export type BuildStatusArgs = {
+  contextWindow?: number;      // resolved Codex catalogue metadata for this turn
   now: number;                 // injected clock — this module stays pure
   provider: Provider;
   model: string;
@@ -163,9 +164,9 @@ export type BuildStatusArgs = {
 // Assemble the snapshot. Every optional field is spread in only when it has a real value, so a Provider
 // that reported no usage / no headers degrades to a SHORTER snapshot — the reader then renders a shorter
 // badge. Nothing is synthesized to keep the shape uniform.
-export const buildStatus = ({ now, provider, model, usage, meters }: BuildStatusArgs): WispStatus => {
+export const buildStatus = ({ now, provider, model, usage, meters, contextWindow }: BuildStatusArgs): WispStatus => {
   const tokens = usage ? contextTokens(usage) : undefined;
-  const window = contextWindowFor(provider, model);
+  const window = contextWindow ?? contextWindowFor(provider, model);
   const percent = tokens === undefined ? undefined : contextPercent(tokens, window);
   return {
     updatedAt: now,

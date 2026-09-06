@@ -22,6 +22,7 @@ export * from './bridgeAnthropic';
 export * from './bridgeServer';
 export * from './modelsDev';
 export * from './codexClient';
+export * from './codexModels';
 export * from './anthropicClient';
 export * from './xaiClient';
 export * from './antigravityClient';

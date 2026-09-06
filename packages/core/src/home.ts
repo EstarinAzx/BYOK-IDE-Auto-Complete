@@ -104,7 +104,8 @@ const snapshotStore = (v: unknown): SnapshotStore | undefined => {
   return Object.fromEntries(entries);
 };
 
-const EFFORT_VALUES: ReadonlySet<string> = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
+// Provider metadata validates support at selection/send time. Persist future Codex effort names too.
+const validEffort = (v: unknown): boolean => typeof v === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(v);
 
 // Keep only correctly-typed known creds fields — a hand-edited bundle must never flow a number into a
 // Bearer header or a string into an expiry compare. An empty result is still a valid tombstone.
@@ -135,7 +136,7 @@ export const parseWispConfig = (raw: string | undefined | null): WispConfig => {
     const models = stringRecord(cfg.models);
     if (models) cfg.models = models; else delete cfg.models;
   }
-  if ('effort' in cfg && !(typeof cfg.effort === 'string' && EFFORT_VALUES.has(cfg.effort))) delete cfg.effort;
+  if ('effort' in cfg && !validEffort(cfg.effort)) delete cfg.effort;
   if ('routing' in cfg) {
     const r = cfg.routing;
     if (!(isRecord(r) && isRecord(r.families) && Array.isArray(r.aliases))) delete cfg.routing;

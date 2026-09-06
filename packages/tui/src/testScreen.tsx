@@ -18,8 +18,7 @@
 import {
   resolveBaseUrl, isCodexProvider, isAnthropicProvider, isXaiProvider,
   DEFAULT_EFFORT, codexStream, anthropicStream, xaiStream, sseBlocks,
-  chatCompletionTextDelta, standardEffortToCodex,
-  type Provider,
+  chatCompletionTextDelta, type Provider,
 } from '@wisp/core';
 import { home, codexAuth, anthropicAuth, xaiAuth, bearerFor } from './store';
 import { PANEL, DIM } from './theme';
@@ -41,7 +40,7 @@ export async function* streamTestReply(p: Provider, model: string, signal: Abort
   if (isCodexProvider(p)) {
     const creds = await codexAuth.current();
     if (!creds) throw new Error(`${p.label} is not signed in — /signin codex.`);
-    for await (const ev of codexStream({ creds, baseUrl, model, messages: [message], effort: standardEffortToCodex(cfg.effort ?? DEFAULT_EFFORT), signal }))
+    for await (const ev of codexStream({ creds, baseUrl, model, messages: [message], effort: cfg.effort ?? DEFAULT_EFFORT, signal }))
       if (ev.type === 'text') yield ev.value;
     return;
   }

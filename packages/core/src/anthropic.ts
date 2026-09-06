@@ -238,7 +238,7 @@ export const modelSupportsAnthropicMax = (model: string): boolean => {
 // level for every effort-aware Provider, so a cross-model pick must degrade rather than 400.
 export const anthropicThinkingEffort = (model: string, effort?: EffortLevel): { thinking?: { type: 'adaptive' }; output_config?: { effort: EffortLevel } } => {
   if (!effort || !modelSupportsAnthropicEffort(model)) return {};
-  let level: EffortLevel = effort;
+  let level: EffortLevel = ['low', 'medium', 'high', 'xhigh', 'max'].includes(effort) ? effort : 'medium';
   if (level === 'xhigh' && !modelSupportsAnthropicXHigh(model)) level = 'high';
   if (level === 'max' && !modelSupportsAnthropicMax(model)) level = 'high';
   return { thinking: { type: 'adaptive' }, output_config: { effort: level } };

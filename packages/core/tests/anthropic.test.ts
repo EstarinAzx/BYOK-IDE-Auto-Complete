@@ -43,10 +43,10 @@ describe('effortOptionsFor', () => {
       .toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
   });
 
-  // Codex's wire tops at xhigh (no 'max' level) — the picker must not offer a level it can't send.
-  it('omits max for Codex', () => {
+  // Codex effort choices require the selected model's discovered metadata.
+  it('does not invent Codex effort options without metadata', () => {
     expect(effortOptionsFor(provider({ kind: 'codex', defaultModel: 'gpt-5.3-codex' })))
-      .toEqual(['low', 'medium', 'high', 'xhigh']);
+      .toEqual([]);
   });
 });
 

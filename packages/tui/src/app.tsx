@@ -11,7 +11,7 @@
  *   - ./theme: splash/colors/panel/select styling (#116 — the select-transparency landmine's home).
  *   - ./widgets: wrapWords (#116) — the status row's hand-wrap; the other widgets live with their flows.
  *   - ./providerScreens: the ten provider-flow Screens + that flow's helpers (#117) — the
- *     shell imports the Screens plus EFFORT_LADDER, fetchModelOptions, oauthProviders, saveKey.
+ *     shell imports the Screens plus fetchModelOptions, oauthProviders, saveKey.
  *   - ./routingScreens: the eight routing-flow Screens + that flow's row helpers (#118) — the
  *     shell imports the Screens plus routingMap, rowLabel, sectionOf, CLAUDE_FAMILY_MODELS.
  *   - ./paletteScreen: the palette Screen (#119) — the shell keeps line/selIdx and Enter semantics.
@@ -34,13 +34,14 @@ import {
   FAMILY_KEYS, withFamilyRoute, withAlias, withoutAlias,
   type Provider, type EffortLevel, type Target,
 } from '@wisp/core';
+import { fetchEffortOptions } from './modelFetch';
 import { home, activeProvider, codexAuth, anthropicAuth, xaiAuth, kimiAuth, antigravityAuth } from './store';
 import { createTuiBridge, ensureBridgeSecret, bridgeAddress, bridgePort } from './bridge';
 import type { Mode, RouteRow } from './modes';
 import { SPLASH, ACCENT, DIM } from './theme';
 import { wrapWords } from './widgets';
 import {
-  EFFORT_LADDER, fetchModelOptions, oauthProviders, saveKey,
+  fetchModelOptions, oauthProviders, saveKey,
   ProvidersScreen, ProviderMenuScreen, KeyPickScreen, KeyEntryScreen, ModelLoadingScreen,
   ModelPickScreen, ModelFreeScreen, OauthPickScreen, SigninWaitScreen, EffortPickScreen,
 } from './providerScreens';
@@ -59,7 +60,7 @@ import pkg from '../package.json';
 // ----------------------------------------- Store ----------------------------------------- //
 
 // The store handle + OAuth managers moved to store.ts with #63 (shared with `wisp serve`);
-// the provider flow's key/model storage helpers, EFFORT_LADDER, and fetchModelOptions moved
+// the provider flow's key/model storage helpers, and fetchModelOptions moved
 // to providerScreens.tsx with #117 — the shell imports what its starters need.
 
 // ----------------------------------------- /routing ----------------------------------------- //
@@ -94,6 +95,8 @@ const COPIED_CLEAR_MS = 1500;
 
 export const App = () => {
   const [mode, setMode] = useState<Mode>({ kind: 'input' });
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   const [line, setLine] = useState('');       // live palette input, drives suggestions
   const [selIdx, setSelIdx] = useState(0);    // palette highlight — Up/Down move it, Enter runs it
   const [secret, setSecret] = useState('');   // key-entry buffer — rendered only as bullets
@@ -205,9 +208,16 @@ export const App = () => {
   // Fetch the row Provider's model list, then land on pick or free text. The guard compares the row
   // by REFERENCE — only the flow that set this loading mode may resolve it, so an Esc'd or replaced
   // fetch is discarded (same race as /model, sharper check).
-  const startRouteModel = (row: RouteRow, p: Provider) => {
+  const startModel = (p: Provider, refresh = false) => {
+    const loading: Mode = { kind: 'model-loading', provider: p };
+    setMode(loading);
+    void fetchModelOptions(p, refresh).then((options) => setMode((m) => m !== loading ? m
+      : options ? { kind: 'model-pick', provider: p, options } : { kind: 'model-free', provider: p }));
+  };
+
+  const startRouteModel = (row: RouteRow, p: Provider, refresh = false) => {
     setMode({ kind: 'route-model-loading', row, provider: p });
-    void fetchModelOptions(p).then((options) =>
+    void fetchModelOptions(p, refresh).then((options) =>
       setMode((m) => m.kind !== 'route-model-loading' || m.row !== row ? m
         : options ? { kind: 'route-model-pick', row, provider: p, options }
         : { kind: 'route-model-free', row, provider: p }));
@@ -320,14 +330,9 @@ export const App = () => {
         return;
       }
       case 'model': {
-        const p = (target.args[0] ? byId(target.args[0]) : activeProvider());
+        const p = target.args[0] ? byId(target.args[0]) : activeProvider();
         if (!p) { setStatus(`Unknown provider: ${target.args[0]}`); return; }
-        setMode({ kind: 'model-loading', provider: p });
-        // Guard on provider id too — an Esc + second /model must not let the slow first fetch win.
-        void fetchModelOptions(p).then((options) =>
-          setMode((m) => m.kind !== 'model-loading' || m.provider.id !== p.id ? m
-            : options ? { kind: 'model-pick', provider: p, options }
-            : { kind: 'model-free', provider: p }));
+        startModel(p, target.args[1] === '--refresh');
         return;
       }
       case 'signin':
@@ -344,13 +349,20 @@ export const App = () => {
       }
       case 'effort': {
         const arg = target.args[0]?.toLowerCase();
-        if (arg) {
-          if (!(EFFORT_LADDER as string[]).includes(arg)) { setStatus(`Effort is one of: ${EFFORT_LADDER.join(' / ')}`); return; }
-          home.writeConfig({ effort: arg as EffortLevel });
-          setStatus(`Effort → ${arg}`);
-          return;
-        }
-        setMode({ kind: 'effort-pick' });
+        const p = activeProvider();
+        const loading: Mode = { kind: 'model-loading', provider: p };
+        modeRef.current = loading;
+        setMode(loading);
+        void fetchEffortOptions(p).then(({ options, current }) => {
+          if (modeRef.current !== loading) return;
+          if (!options.length) { backToInput('No advertised effort options for this model.'); return; }
+          if (arg) {
+            if (!options.includes(arg)) backToInput(`Effort is one of: ${options.join(' / ')}`);
+            else { home.writeConfig({ effort: arg }); backToInput(`Effort → ${arg}`); }
+            return;
+          }
+          setMode({ kind: 'effort-pick', options, current });
+        }).catch(() => { if (modeRef.current === loading) backToInput('Could not fetch effort options.'); });
         return;
       }
       case 'test': {
@@ -569,7 +581,9 @@ export const App = () => {
       {mode.kind === 'model-loading' && <ModelLoadingScreen provider={mode.provider} />}
 
       {mode.kind === 'model-pick' && (
-        <ModelPickScreen provider={mode.provider} options={mode.options} onDone={backToInput} />
+        <ModelPickScreen provider={mode.provider} options={mode.options} onDone={backToInput}
+          onManual={() => setMode({ kind: 'model-free', provider: mode.provider })}
+          onRefresh={() => startModel(mode.provider, true)} />
       )}
 
       {mode.kind === 'model-free' && <ModelFreeScreen provider={mode.provider} onDone={backToInput} />}
@@ -637,6 +651,8 @@ export const App = () => {
           row={mode.row}
           provider={mode.provider}
           options={mode.options}
+          onManual={() => setMode({ kind: 'route-model-free', row: mode.row, provider: mode.provider })}
+          onRefresh={() => startRouteModel(mode.row, mode.provider, true)}
           onApply={(target) => applyRoute(mode.row, target)}
         />
       )}
@@ -650,7 +666,7 @@ export const App = () => {
         />
       )}
 
-      {mode.kind === 'effort-pick' && <EffortPickScreen onDone={backToInput} />}
+      {mode.kind === 'effort-pick' && <EffortPickScreen onDone={backToInput} options={mode.options} current={mode.current} />}
 
       {/* feedback wraps by hand too — tips and bind confirmations outgrow narrow windows */}
       {status !== '' && (

@@ -15,7 +15,7 @@ import {
   type CodexEffort, type EffortLevel,
   type ToolSpec, type AssembledToolCall,
 } from './shared';
-import { isCodexProvider, codexReasoning, codexModelsFrom } from './codex';
+import { isCodexProvider, codexReasoning } from './codex';
 import { isAnthropicProvider, anthropicModelsFrom } from './anthropic';
 import { isXaiProvider, xaiModelsFrom } from './xai';
 import { isAntigravityProvider, ANTIGRAVITY_MODELS } from './antigravity';
@@ -77,7 +77,7 @@ export const PROVIDERS: Provider[] = [
   { id: 'opencode-zen', label: 'OpenCode Zen', baseUrl: 'https://opencode.ai/zen/v1', defaultModel: 'claude-haiku-4-5', apiKeyEnv: 'OPENCODE_API_KEY', catalogKey: 'opencode', keyId: 'opencode-go' },
   // Codex = subscription ChatGPT Codex backend (Responses API via OAuth, no key). kind:'codex' switches
   // off the OpenAI-chat path. No catalogKey; hidden from the native chat picker (keyless rows are).
-  // ⚠ defaultModel must be an id the ChatGPT-ACCOUNT path accepts — a narrower set than CODEX_MODELS,
+  // ⚠ defaultModel must be an id the ChatGPT-ACCOUNT path accepts — independent of the dynamically discovered list,
   // since defaultModel is what a fresh sign-in sends before the user picks anything. 'gpt-5.3-codex' and
   // bare 'gpt-5.6' are 400ed there ("not supported when using Codex with a ChatGPT account", #172) while
   // staying valid for API-key callers and in the caps tiering. Verified 200 (2026-07-29): sol, gpt-5.4.
@@ -317,6 +317,7 @@ export const buildChatModelInfos = (
     customBaseUrl: string;
     caps?: (provider: Provider, model: string) => ModelCaps | undefined;
     effort?: CodexEffort;
+    codexInfo?: (model: string) => import('./codexModels').CodexModelInfo | undefined;
   },
 ): ChatModelInfo[] =>
   providers.flatMap((p) => {
@@ -335,7 +336,8 @@ export const buildChatModelInfos = (
     // Codex rows mirror the active Effort in the label (· medium) — but only when the caller threads one
     // (the in-VS-Code picker does; the Bridge doors don't — their effort is per-request, so a static
     // label would show DEFAULT_EFFORT forever). codexReasoning gates so an inert row never claims a depth.
-    const depth = isCodexProvider(p) && state.effort && codexReasoning(model) ? ` · ${state.effort}` : '';
+    const reasoning = isCodexProvider(p) ? codexReasoning(model, state.effort, state.codexInfo?.(model)) : undefined;
+    const depth = reasoning && state.effort ? ` · ${reasoning.effort}` : '';
     return [{
       id: p.id,
       name: `${p.label} — ${model}${depth}`,
@@ -502,29 +504,24 @@ export const planZenToGoMigration = (
 
 // ----------------------------- Provider dispatchers ----------------------------- //
 
-// One rule for "which curated list backs an OAuth Provider" — shared by the Active-Provider panel state
+// Fallback lists for OAuth providers. Codex has no static fallback; its callers use codexCatalog.
+// Shared by the Active-Provider panel state
 // and the per-row Routing-map lists. Keyed kinds answer undefined: they have a live /models route instead.
 // Antigravity takes no catalog argument: models.dev carries no Antigravity provider, so ANTIGRAVITY_MODELS
 // answers here — the faces prefer the live fetchAntigravityModels list when signed in and use this as the
 // signed-out/offline fallback (#189).
 export const oauthModelOptions = (p: Provider, catalog?: ModelsDevCatalog): string[] | undefined =>
-  isCodexProvider(p) ? codexModelsFrom(catalog)
+  isCodexProvider(p) ? []
     : isAnthropicProvider(p) ? anthropicModelsFrom(catalog)
     : isXaiProvider(p) ? xaiModelsFrom(catalog)
     : isAntigravityProvider(p) ? ANTIGRAVITY_MODELS
     : undefined;
 
-// The effort levels the panel offers for a Provider. Mirrors the first-party /effort slider: every
-// effort-capable Claude shows the FULL low→max ladder — the wire clamps to the model's ceiling
-// (anthropicThinkingEffort), so an offered xhigh/max degrades, never 400s. Codex omits 'max' (its wire
-// tops at xhigh). Grok is a Codex-twin → same low→xhigh ladder. Only Codex/Anthropic/Grok call this.
-// A dispatcher (sits above the providers, like oauthModelOptions) — stays in catalog through the peel.
+// The fixed vocabularies for providers without effort discovery. Codex callers supply their selected
+// model's reasoningEfforts instead; no metadata means no advertised effort choices.
 export const effortOptionsFor = (provider: Provider): EffortLevel[] =>
-  isAnthropicProvider(provider)
-    ? ['low', 'medium', 'high', 'xhigh', 'max']
-    : isXaiProvider(provider)
-      ? ['low', 'medium', 'high', 'xhigh']
-      : ['low', 'medium', 'high', 'xhigh'];
+  isCodexProvider(provider) ? [] : isAnthropicProvider(provider)
+    ? ['low', 'medium', 'high', 'xhigh', 'max'] : ['low', 'medium', 'high', 'xhigh'];
 
 // ----------------------------- PKCE + state (OAuth) ----------------------------- //
 

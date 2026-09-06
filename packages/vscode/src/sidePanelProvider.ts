@@ -45,9 +45,9 @@ export type PanelState = {
   kind?: 'openai-chat' | 'codex' | 'anthropic-oauth' | 'xai-oauth' | 'kimi-oauth' | 'antigravity-oauth';
   signedIn?: boolean; // OAuth kinds only: whether a token bundle is present
   account?: string; // #150: "you@email · Max" from the bootstrap identity (Anthropic only)
-  modelOptions?: string[]; // OAuth kinds only: models.dev-sourced ids for the dropdown (curated fallback; no live /models route)
-  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'; // Codex + Anthropic: the reasoning-effort knob (governs every call)
-  effortOptions?: ('low' | 'medium' | 'high' | 'xhigh' | 'max')[]; // per-model option list — host-computed so 'max' only shows for max-capable Claude (#32)
+  modelOptions?: string[]; // OAuth kinds only: host-discovered ids for the dropdown
+  effort?: string; // Codex + Anthropic: the reasoning-effort knob (governs every call)
+  effortOptions?: string[]; // provider/model options computed by the host
   bridgeRunning: boolean; // Bridge listener state → the panel's running/stopped indicator + Start/Stop label
   bridgeAddress: string; // http://127.0.0.1:<port> — shown so the user knows what to point the CLI at
   bridgeSecret?: string; // the access secret, sent only while running (meant to be copied into the CLI)
@@ -66,7 +66,7 @@ export type PanelHost = {
   storeApiKey: (value: string) => Promise<void>;
   clearApiKey: () => Promise<void>;
   fetchModelIds: () => Promise<string[]>;
-  fetchProviderModelIds: (providerId: string) => Promise<string[]>; // Routing-map row dropdowns (#53): any Provider, [] on failure
+  fetchProviderModelIds: (providerId: string, refresh?: boolean) => Promise<string[]>; // Routing-map row dropdowns (#53): any Provider, [] on failure
   setModel: (id: string) => Promise<void>;
   setProvider: (id: string) => Promise<void>;
   setBaseUrl: (url: string) => Promise<void>;
@@ -76,7 +76,7 @@ export type PanelHost = {
   anthropicSignOut: () => Promise<void>;
   xaiSignIn: () => Promise<void>;
   xaiSignOut: () => Promise<void>;
-  setEffort: (effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max') => Promise<void>;
+  setEffort: (effort: string) => Promise<void>;
   setFamilyRoute: (family: FamilyKey, target: Target | undefined) => Promise<void>; // set/clear one Routing map Family row (#51)
   setAlias: (name: string, target: Target) => Promise<void>; // add/retarget one Routing map Alias row (#52)
   removeAlias: (name: string) => Promise<void>; // remove one Routing map Alias row by name (#52)
@@ -140,7 +140,7 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
 
   // ----------------------------- Message routing ----------------------------- //
 
-  private onMessage = async (msg: { type?: string; value?: unknown }): Promise<void> => {
+  private onMessage = async (msg: { type?: string; value?: unknown; refresh?: boolean }): Promise<void> => {
     try {
       switch (msg?.type) {
         case 'ready':
@@ -166,13 +166,14 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
         case 'refreshModels': {
           const ids = await this.host.fetchModelIds();
           void this.view?.webview.postMessage({ type: 'models', ids });
+          await this.postState();
           return;
         }
         case 'fetchProviderModels': {
           // A Routing-map row's list (#53). Failures answer empty ids, never an error message —
           // the row silently falls back to free text (AC: no error spam).
           if (typeof msg.value !== 'string' || !msg.value) return;
-          const ids = await this.host.fetchProviderModelIds(msg.value).catch(() => []);
+          const ids = await this.host.fetchProviderModelIds(msg.value, msg.refresh === true).catch(() => []);
           void this.view?.webview.postMessage({ type: 'providerModels', providerId: msg.value, ids });
           return;
         }
@@ -196,8 +197,8 @@ export class WispPanelProvider implements vscode.WebviewViewProvider {
           await this.host.xaiSignOut();
           return;
         case 'selectEffort':
-          // Constrain to the valid depths so a malformed message can't write a junk value ('max' added #32).
-          if (msg.value === 'low' || msg.value === 'medium' || msg.value === 'high' || msg.value === 'xhigh' || msg.value === 'max') await this.host.setEffort(msg.value);
+          // Validate shape here; the host checks the model's advertised choices.
+          if (typeof msg.value === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(msg.value)) await this.host.setEffort(msg.value);
           return;
         case 'bridgeToggle':
           // Start/stop the Bridge; the host pushes fresh state so the indicator + secret update.

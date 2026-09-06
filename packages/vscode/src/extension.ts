@@ -27,7 +27,7 @@ import { NO_KEY_MESSAGE, WispPanelProvider, PanelState } from './sidePanelProvid
 import {
   Provider, PROVIDERS, CUSTOM_ID, resolveModel, resolveBaseUrl, resolveKeyId, planLegacyMigration, planZenToGoMigration,
   buildEditPrompt, parseEditBlocks, applyEditBlocks, diffLines, isCodexProvider, isCodexSignedIn, DEFAULT_EFFORT,
-  isAnthropicProvider, isAnthropicSignedIn, anthropicAccountLabel, isXaiProvider, isXaiSignedIn, isKimiProvider, KimiAuth, isAntigravityProvider, isAntigravitySignedIn, AntigravityAuth, fetchAntigravityModels, standardEffortToCodex, effortOptionsFor, oauthModelOptions,
+  isAnthropicProvider, isAnthropicSignedIn, anthropicAccountLabel, isXaiProvider, isXaiSignedIn, isKimiProvider, KimiAuth, isAntigravityProvider, isAntigravitySignedIn, AntigravityAuth, fetchAntigravityModels, effortOptionsFor, oauthModelOptions,
   type CodexCreds, type EffortLevel, type AnthropicCreds, type XaiCreds,
 } from '@wisp/core';
 import { getModelsDevCatalog } from '@wisp/core';
@@ -35,6 +35,7 @@ import { EMPTY_ROUTING_MAP, withFamilyRoute, withAlias, withoutAlias, type Routi
 import { registerWispChatProvider } from './chatProvider';
 import { createBridgeServer, DEFAULT_BRIDGE_PORT } from '@wisp/core';
 import { CodexAuth, AnthropicAuth, XaiAuth } from '@wisp/core';
+import { codexCatalog, codexModelIds, codexModelEffort, codexEffortOptions } from '@wisp/core';
 import { codexInquire } from '@wisp/core';
 import { anthropicInquire } from '@wisp/core';
 import { xaiRequest } from '@wisp/core';
@@ -139,7 +140,7 @@ const activeModel = (): string =>
 
 // The reasoning Effort — one global value (config.json), defaulting to medium so existing behavior is
 // unchanged. Shared by Codex + Anthropic; ignored by every keyed Provider. Stored as the wider EffortLevel
-// (#32 'max'); each send site normalizes (standardEffortToCodex for Codex, the clamp for Anthropic).
+// Codex resolves it against model metadata; the other providers validate their own vocabularies.
 const activeEffort = (): EffortLevel => home.readConfig().effort ?? DEFAULT_EFFORT;
 
 // The Bridge Routing map (config.json) — empty (everything → Active Provider) until the panel sets rows.
@@ -253,6 +254,11 @@ const clearApiKey = async (): Promise<void> => {
 // as served (bare, e.g. "minimax-m3") — the /go chat endpoint rejects a provider-prefixed id,
 // so the selectable ids must match the served form to be usable.
 const fetchModelIds = async (): Promise<string[]> => {
+  if (isCodexProvider(activeProvider())) {
+    const result = await loadCodexModels(true);
+    if (result.error) throw new Error(result.error);
+    return codexModelIds(result.models);
+  }
   const client = await getClient();
   if (!client) throw new Error(NO_KEY_MESSAGE);
   const page = await client.models.list();
@@ -281,12 +287,18 @@ const antigravityModelIds = async (p: Provider): Promise<string[]> => {
 // models.dev curated list; keyed kinds probe GET /models with that Provider's own key. Every failure
 // (unknown id, no key, Custom without URL, offline) is an empty list, never a throw — the row falls
 // back to free text and configuring a route is never blocked.
-const providerModelIds = async (id: string): Promise<string[]> => {
+const loadCodexModels = async (refresh = false) => codexCatalog.get({
+  creds: await codexAuth.current(),
+  baseUrl: resolveBaseUrl(PROVIDERS.find((p) => isCodexProvider(p))!, ''), refresh,
+});
+
+const providerModelIds = async (id: string, refresh = false): Promise<string[]> => {
   const p = PROVIDERS.find((r) => r.id === id);
   if (!p) return [];
   try {
     if (isAntigravityProvider(p)) return await antigravityModelIds(p);
-    if (isCodexProvider(p) || isAnthropicProvider(p)) {
+    if (isCodexProvider(p)) return codexModelIds((await loadCodexModels(refresh)).models);
+    if (isAnthropicProvider(p)) {
       // Same timeout race as getState so a cold models.dev can't stall the row; undefined → curated list.
       const catalog = await Promise.race([
         getModelsDevCatalog(),
@@ -320,6 +332,11 @@ const setModel = async (id: string): Promise<void> => {
 
 // Persist the Codex reasoning Effort (one global value in config.json).
 const setEffort = async (effort: EffortLevel): Promise<void> => {
+  const p = activeProvider();
+  const options = isCodexProvider(p)
+    ? codexEffortOptions((await loadCodexModels()).models.find((m) => m.id === activeModel()))
+    : effortOptionsFor(p);
+  if (!options.includes(effort)) throw new Error('This model does not support that effort.');
   home.writeConfig({ effort });
   void panel?.postState();
 };
@@ -397,12 +414,14 @@ const getState = async (): Promise<PanelState> => {
   // The OAuth dropdowns are models.dev-sourced — race the cached fetch against a short timeout (same
   // pattern as chatProvider) so a cold/slow models.dev can never stall panel open; undefined → curated
   // fallback inside the *ModelsFrom pures. Skipped entirely for the API-key kinds (live /models instead).
-  const catalog = isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p)
+  const catalog = isAnthropicProvider(p) || isXaiProvider(p)
     ? await Promise.race([
         getModelsDevCatalog(),
         new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 4000)),
       ])
     : undefined;
+  const codexModels = isCodexProvider(p) ? (await loadCodexModels()).models : [];
+  const codexInfo = codexModels.find((m) => m.id === activeModel());
   return {
     keyIsSet: keySource !== 'none',
     keySource,
@@ -416,15 +435,13 @@ const getState = async (): Promise<PanelState> => {
     signedIn,
     // #150: the "signed in as …" upgrade — only Anthropic's bootstrap captures an account identity.
     account: isAnthropicProvider(p) ? anthropicAccountLabel(home.readAuth().anthropic) : undefined,
-    // The OAuth Providers have no OpenAI-style /models route — their dropdown comes from models.dev
-    // (curated fallback). Antigravity is the exception: it has its own discovery call, preferred live.
-    modelOptions: isAntigravityProvider(p) ? await antigravityModelIds(p) : oauthModelOptions(p, catalog),
+    // Codex and Antigravity use their own discovery calls; the other OAuth kinds use models.dev.
+    modelOptions: isCodexProvider(p) ? codexModelIds(codexModels) : isAntigravityProvider(p) ? await antigravityModelIds(p) : oauthModelOptions(p, catalog),
     // The reasoning-effort knob's current value (drives the panel's Effort select). Shared by the two
     // effort-aware OAuth Providers — Codex and Anthropic (#31); every other Provider leaves it undefined.
-    effort: isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p) ? activeEffort() : undefined,
-    // The option list backing that select — Anthropic shows the full low→max ladder (the wire clamps per
-    // model), Codex + Grok stop at xhigh; mirrors the first-party /effort slider (#32).
-    effortOptions: isCodexProvider(p) || isAnthropicProvider(p) || isXaiProvider(p) ? effortOptionsFor(p) : undefined,
+    effort: isCodexProvider(p) ? codexModelEffort(codexInfo, activeEffort()) : isAnthropicProvider(p) || isXaiProvider(p) ? activeEffort() : undefined,
+    // Codex options are model metadata; other providers retain their own effort vocabularies.
+    effortOptions: isCodexProvider(p) ? codexEffortOptions(codexInfo) : isAnthropicProvider(p) || isXaiProvider(p) ? effortOptionsFor(p) : undefined,
     // Bridge surface: the running/stopped indicator + the address/secret the user copies into the CLI. The
     // secret crosses the boundary only while running (it's the Bridge's own localhost secret, meant to be
     // copied — not a Provider key); '' in memory while stopped, so it stays hidden then.
@@ -868,7 +885,7 @@ const inquire = async (): Promise<void> => {
         // Codex speaks the Responses API and Anthropic the Messages API (each its own client); every
         // other Provider uses the OpenAI SDK.
         if (codex) {
-          reply = await codexInquire({ creds: creds!, baseUrl: activeBaseUrl(), model, messages, effort: standardEffortToCodex(activeEffort()), signal: controller.signal });
+          reply = await codexInquire({ creds: creds!, baseUrl: activeBaseUrl(), model, messages, effort: activeEffort(), signal: controller.signal });
         } else if (anthropic) {
           reply = await anthropicInquire({ creds: anthropicCreds!, baseUrl: activeBaseUrl(), model, messages, effort: activeEffort(), signal: controller.signal });
         } else if (xai) {

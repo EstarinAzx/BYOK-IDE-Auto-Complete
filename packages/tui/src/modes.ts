@@ -36,7 +36,7 @@ export type Mode =
   // `device` is Kimi's leg (#170): the browser flows have nothing to show, but a device flow must display
   // the verification URL + user code the server issued, so it arrives mid-wait and re-renders this screen.
   | { kind: 'signin-wait'; provider: Provider; origin?: 'menu'; device?: { verificationUri: string; verificationUriComplete?: string; userCode: string } }
-  | { kind: 'effort-pick' }
+  | { kind: 'effort-pick'; options: string[]; current?: string }
   | { kind: 'test'; provider: Provider; model: string; text: string; phase: 'streaming' | 'done' | 'error'; error?: string }
   // Address + secret ride in the mode so the screen render stays pure (ensureBridgeSecret hits disk
   // and can write auth.json — a side effect that must not live in JSX).

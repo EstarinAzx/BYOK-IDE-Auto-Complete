@@ -36,8 +36,8 @@ type State = {
   signedIn?: boolean;
   account?: string; // #150: "you@email · Max" when the bootstrap identity was captured (Anthropic only)
   modelOptions?: string[];
-  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-  effortOptions?: ('low' | 'medium' | 'high' | 'xhigh' | 'max')[]; // host-computed; 'max' only for max-capable Claude (#32)
+  effort?: string;
+  effortOptions?: string[]; // host-computed model capabilities
   bridgeRunning: boolean;
   bridgeAddress: string;
   bridgeSecret?: string; // present only while running — the secret to paste into the Copilot CLI
@@ -85,11 +85,11 @@ export const App = () => {
   const [providerModels, setProviderModels] = useState<Record<string, string[]>>({});
   const requestedProviders = useRef(new Set<string>());
 
-  // One fetch per Provider per panel session — a re-pick never re-spams the endpoint.
-  const ensureProviderModels = (id: string) => {
-    if (!id || requestedProviders.current.has(id)) return;
+  // Reuse lists during the panel session, with an explicit refresh for newly released models.
+  const ensureProviderModels = (id: string, refresh = false) => {
+    if (!id || (!refresh && requestedProviders.current.has(id))) return;
     requestedProviders.current.add(id);
-    vscode.postMessage({ type: 'fetchProviderModels', value: id });
+    vscode.postMessage({ type: 'fetchProviderModels', value: id, refresh });
   };
 
   useEffect(() => {
@@ -201,7 +201,7 @@ export const App = () => {
   };
 
   // The OAuth Providers (Codex, Anthropic) swap the API-key field for a sign-in/out control and carry no
-  // live /models route. oauth gates both behaviours; the per-kind label/messages below distinguish them.
+  // API key field. Model discovery is handled by the host for each kind.
   const oauth = state.kind === 'codex' || state.kind === 'anthropic-oauth' || state.kind === 'xai-oauth';
   // Two rows are credential-wise OAuth but sign in from the `wisp` terminal face, so the panel shows status
   // and points there rather than offering a button it cannot run: Kimi (#170, a device flow) and Antigravity
@@ -219,7 +219,7 @@ export const App = () => {
     ? 'Subscription-backed Grok — sign in with your xAI account; no API key.'
     : 'Subscription-backed ChatGPT Codex — sign in with your ChatGPT account; no API key.';
 
-  // OAuth kinds have no live /models list — use the curated modelOptions; every other Provider uses the
+  // OAuth kinds use host-discovered modelOptions; every other Provider uses the
   // fetched list. Either way, prepend the current model if it isn't already present so the select stays
   // truthful (e.g. a stale pick still shows alongside the curated ids).
   const baseOptions = oauth ? (state.modelOptions ?? []) : models;
@@ -399,9 +399,8 @@ export const App = () => {
             >
               {options.map((id) => <option key={id} value={id}>{id}</option>)}
             </select>
-            {/* The OAuth kinds have no /models route (not the OpenAI-chat client), so hide the live
-                refresh — the user picks from the curated list or types a model id in the field below. */}
-            {!oauth && (
+            {/* Codex has its own discovery endpoint; keyed providers use their ordinary model list. */}
+            {(!oauth || state.kind === 'codex') && (
               <button
                 class="btn btn-secondary shrink-0"
                 title="Refresh model list from the endpoint"
@@ -432,7 +431,7 @@ export const App = () => {
               class="input"
               value={state.effort ?? 'medium'}
               onChange={(e) => {
-                const value = e.currentTarget.value as 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+                const value = e.currentTarget.value as string;
                 setState({ ...state, effort: value }); // optimistic; the state push confirms
                 vscode.postMessage({ type: 'selectEffort', value });
               }}
@@ -507,31 +506,21 @@ export const App = () => {
                 <option value="">Unmapped</option>
                 {state.providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
               </select>
-              {/* Model: a dropdown when the row Provider's list is known (#53), else the free-text
-                  input — configuring a route is never blocked on a fetch. */}
-              {rowModelOptions(d.providerId, d.model) ? (
-                <select
-                  class="input min-w-0 flex-1"
-                  value={d.model}
-                  onChange={(e) => commitFamilyRoute(family, { providerId: d.providerId, model: e.currentTarget.value })}
-                >
-                  <option value="">model…</option>
-                  {rowModelOptions(d.providerId, d.model)!.map((id) => <option key={id} value={id}>{id}</option>)}
-                </select>
-              ) : (
-                <input
-                  class="input min-w-0 flex-1"
-                  type="text"
-                  placeholder="model id"
-                  value={d.model}
-                  onInput={(e) => {
-                    const model = e.currentTarget.value;
-                    setRouteDrafts((cur) => cur && { ...cur, [family]: { ...cur[family], model } });
-                  }}
-                  onBlur={(e) => commitFamilyRoute(family, { providerId: d.providerId, model: e.currentTarget.value })}
-                  onKeyDown={(e) => { if (e.key === 'Enter') commitFamilyRoute(family, { providerId: d.providerId, model: e.currentTarget.value }); }}
-                />
-              )}
+              {/* Model: discovered suggestions plus free entry, including while discovery is unavailable. */}
+              <input
+                class="input min-w-0 flex-1" type="text" placeholder="model id"
+                list={`models-${family}`} value={d.model}
+                onInput={(e) => {
+                  const model = e.currentTarget.value;
+                  setRouteDrafts((cur) => cur && { ...cur, [family]: { ...cur[family], model } });
+                }}
+                onBlur={(e) => commitFamilyRoute(family, { providerId: d.providerId, model: e.currentTarget.value })}
+                onKeyDown={(e) => { if (e.key === 'Enter') commitFamilyRoute(family, { providerId: d.providerId, model: e.currentTarget.value }); }}
+              />
+              <datalist id={`models-${family}`}>
+                {(rowModelOptions(d.providerId, d.model) ?? []).map((id) => <option key={id} value={id} />)}
+              </datalist>
+              {d.providerId === 'codex' && <button class="btn btn-secondary shrink-0" title="Refresh Codex models" onClick={() => ensureProviderModels(d.providerId, true)}>↻</button>}
             </div>
           );
         })}
@@ -570,26 +559,15 @@ export const App = () => {
             <option value="">Provider…</option>
             {state.providers.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
-          {/* Model: dropdown when the draft Provider's list is known (#53), else free text. */}
-          {rowModelOptions(aliasDraft.providerId, aliasDraft.model) ? (
-            <select
-              class="input min-w-0 flex-1"
-              value={aliasDraft.model}
-              onChange={(e) => setAliasDraft({ ...aliasDraft, model: e.currentTarget.value })}
-            >
-              <option value="">model…</option>
-              {rowModelOptions(aliasDraft.providerId, aliasDraft.model)!.map((id) => <option key={id} value={id}>{id}</option>)}
-            </select>
-          ) : (
-            <input
-              class="input min-w-0 flex-1"
-              type="text"
-              placeholder="model id"
-              value={aliasDraft.model}
-              onInput={(e) => setAliasDraft({ ...aliasDraft, model: e.currentTarget.value })}
-              onKeyDown={(e) => { if (e.key === 'Enter') addAlias(); }}
-            />
-          )}
+          {/* Discovered suggestions remain editable for a model that has not reached discovery yet. */}
+          <input class="input min-w-0 flex-1" type="text" placeholder="model id"
+            list="alias-models" value={aliasDraft.model}
+            onInput={(e) => setAliasDraft({ ...aliasDraft, model: e.currentTarget.value })}
+            onKeyDown={(e) => { if (e.key === 'Enter') addAlias(); }} />
+          <datalist id="alias-models">
+            {(rowModelOptions(aliasDraft.providerId, aliasDraft.model) ?? []).map((id) => <option key={id} value={id} />)}
+          </datalist>
+          {aliasDraft.providerId === 'codex' && <button class="btn btn-secondary shrink-0" title="Refresh Codex models" onClick={() => ensureProviderModels(aliasDraft.providerId, true)}>↻</button>}
           <button class="btn btn-secondary shrink-0" disabled={!aliasReady} onClick={addAlias}>Add</button>
         </div>
         {aliasCollides && (

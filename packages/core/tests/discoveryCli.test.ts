@@ -50,6 +50,15 @@ describe('runModelsCommand — one Provider’s models, headless', () => {
     expect(result.lines.join('\n')).toContain('wisp models <provider>');
   });
 
+  it('passes an explicit refresh through to discovery', async () => {
+    let force: boolean | undefined;
+    const result = await runModelsCommand(['alpha', '--refresh'], providers, async (_p, refresh) => {
+      force = refresh; return ['brand-new-model'];
+    });
+    expect(force).toBe(true);
+    expect(result.lines).toEqual(['brand-new-model']);
+  });
+
   it('fetch failure surfaces the backend’s own words, non-zero', async () => {
     const result = await runModelsCommand(['beta'], providers, async () => {
       throw new Error('401 Unauthorized — invalid api key');

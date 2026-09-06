@@ -212,10 +212,12 @@ export const RouteModelLoadingScreen = ({ provider }: { provider: Provider }) =>
 );
 
 // Pick the row's pinned model from the Provider's curated/live list.
-export const RouteModelPickScreen = ({ row, provider, options, onApply }: {
+export const RouteModelPickScreen = ({ row, provider, options, onApply, onManual, onRefresh }: {
   row: RouteRow;
   provider: Provider;
   options: string[];
+  onManual: () => void;
+  onRefresh: () => void;
   onApply: (target: Target) => void;
 }) => (
   <box {...PANEL} title={`Model for ${titleLabel(row)} - ${provider.label}`} marginTop={1} flexDirection="column">
@@ -224,19 +226,21 @@ export const RouteModelPickScreen = ({ row, provider, options, onApply }: {
       focused
       {...SELECT_COLORS}
       {...SELECT_MOUSE}
-      height={Math.min(options.length, 14)}
+      height={Math.min(options.length + 2, 14)}
       showDescription={false}
       showSelectionIndicator={false}
       showScrollIndicator
-      options={options.map((id) => {
+      options={[...options.map((id) => {
         const t = rowTarget(routingMap(), row);
         return {
           name: t?.providerId === provider.id && t.model === id ? `${id} (current)` : id,
           description: '',
           value: id,
         };
-      })}
+      }), { name: 'Enter a model id…', description: '', value: ' manual' }, { name: 'Refresh models', description: '', value: ' refresh' }]}
       onSelect={(_i, opt) => {
+        if (opt?.value === ' manual') { onManual(); return; }
+        if (opt?.value === ' refresh') { onRefresh(); return; }
         if (opt) onApply({ providerId: provider.id, model: String(opt.value) });
       }}
     />
