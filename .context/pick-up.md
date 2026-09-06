@@ -1,7 +1,7 @@
 ---
 type: pick-up
 project: wisp
-updated: 2026-09-04
+updated: 2026-09-06
 tags: [context, pick-up]
 ---
 
@@ -9,25 +9,27 @@ tags: [context, pick-up]
 
 Start: read `.context/overview.md` + `.context/active-work.md` to rehydrate the project.
 
-**Latest (2026-09-04, second cut of the day): 2.1.0 + vsix 1.13.4 are SHIPPED, verified on both faces and
-installed. Nothing is owed in the repo.**
+**Latest (2026-09-06): 2.1.1 + vsix 1.13.5 are SHIPPED, verified and installed.** Source and release
+tag: `6d39522` on main, `v2.1.1`. Release workflow `34010930438` passed all five jobs; npm latest is
+2.1.1, and the release page contains all four binaries plus the automatically packaged 1.13.5 VSIX.
 
-The Fable cache re-bill that 2.0.48 left open was run to ground and **is the backend, not Wisp**. One heavy
-bridged session ran both models through the same Bridge: 40 consecutive Opus 5 turns grew exactly
-(`read(n+1) = read(n)+creation(n)`), the Fable turns beside them fell 4-16k short on ~30% of turns. Claude
-Code's native request is byte-identical on both models, Wisp rebuilds Fable thinking byte-for-byte, and the
-shortfall exceeds one turn's whole output. So 2.1.0 (`f7b3c50`) **names** it in the `#162` line on a
-Fable/Mythos model instead of sending the user to chase breakpoints, and changes nothing on the wire.
-Same cut: **Antigravity 400/401/403/404 answer as themselves** (the #166 shape) instead of the 502 that
-had Claude Code retrying a dead request ten times. Full reasoning:
-[[2026-09-04-the-fable-cache-rebill-is-the-backend-classify-dont-chase]] ·
-[[2026-09-04-the-fable-cache-rebill-is-the-backend-not-wisp]].
+Codex now discovers models and capabilities through the signed-in account, with no model-name
+whitelist. Astra appears, as will future visible names/variants. Catalogue refreshes on use after
+15 minutes; explicit refresh and manual entry work in both faces. Claude Code max stays max on
+supporting models. Ultra is Codex multi-agent orchestration and is rejected as a literal Responses
+effort; summary `none` also becomes omission. Full decision and live evidence:
+[[2026-09-06-codex-discovery-is-account-metadata-ultra-is-orchestration]].
+
+Published npm binary executed: Astra present in 2.1.1, absent in the installed 2.1.0 control, Sol
+present in both. Published Windows/npm binaries match by SHA-256; published VSIX bundle checked
+against 1.13.4. Gates: **1,063 core + 30 terminal tests**, all typechecks/builds. The compiled panel
+was browser-tested with a mock host; no claim of a live VS Code native-chat turn. See [[active-work]].
 
 ## Bridge state
 
-**No Bridge is running** — the 2.0.47 process from the last note is gone (no PID, no listener). There is
-nothing to restart; whatever the user starts next lands on 2.1.0 (global `wisp-router@2.1.0`, binary at
-`~/.wisp/bin/v2.1.0/`). The editor face is on 1.13.4; a window reload activates it.
+**No Bridge is running** — no listener on port 41184 at the cut. Global `wisp-router@2.1.1` is
+installed and `wisp models codex --refresh` returns Astra. The editor face is 1.13.5; reload the
+VS Code window to activate it. Existing already-open terminal UIs need reopening for the new code.
 
 ## Next task: none queued — pick from the held bugs
 
@@ -73,12 +75,13 @@ while a 296-byte body on the same model seconds later answered 200. Reads like a
 **`git rev-list --left-right --count origin/main...main` — the right-hand number must be 0.**
 
 A branch cut from an unpushed main sweeps those commits into its own squash-merge (`3465c7c`, #202).
-Everything through the release.yml vsix change is pushed — expect `0 0`; if it is not, push before
+The release and baton commits are pushed — expect `0 0`; if it is not, inspect and push before
 branching. Full trap: [[a-branch-cut-from-an-unpushed-main-sweeps-it-into-the-squash]].
 
 ## Waiting on the user
 
-- **Start a Bridge when needed** — none is running; it will be 2.1.0.
+- **Start a Bridge when needed** — none is running; it will be 2.1.1. Reopen Wisp / reload VS Code
+  to activate the updated terminal / extension code.
 - **File the held bugs** as tracker tickets when ready — the statusline drift is a `wisp-slot` cut, the
   rest are core/tui.
 - **Dismiss the two secret-scanning alerts** as "won't fix" —
@@ -98,6 +101,17 @@ branching. Full trap: [[a-branch-cut-from-an-unpushed-main-sweeps-it-into-the-sq
 - Optional: `/plugin update wisp-slot` to refresh cached skill/hook copies to 1.7.4.
 
 ## Landmines (durable — keep carrying)
+
+Codex discovery (2026-09-06):
+
+- **Models come from the account catalogue, not model-name regexes or API-key availability.**
+  `visibility: list` controls the picker; Spark remains available through OAuth despite
+  `supported_in_api: false`. Cache is scoped to account and endpoint; no static Codex fallback.
+- **Discovery requires a current client_version.** It comes from OpenAI npm metadata, not a pin.
+  An ancient version returned a successful empty list. No Codex installation is required.
+- **Claude Code max is Responses max when supported; Ultra is orchestration.** Literal Ultra and
+  reasoning summary none both returned 400. Do not restore the old max-to-xhigh clamp.
+- Details: [[2026-09-06-codex-discovery-is-account-metadata-ultra-is-orchestration]].
 
 Fable cache (new, 2026-09-04):
 
@@ -229,8 +243,8 @@ Release:
 - **The vsix rides the GitHub release page since the 2.1.0 follow-up** — `*.vsix` is gitignored, so the
   release is the repo's only copy. `release.yml`'s publish job now compiles + packages the extension
   (best-effort: a packaging failure prints `WARN` and never blocks the npm release) and stages it beside
-  the binaries; the notes name the file. **Unproven until the next tag** — `wisp-1.13.4.vsix` on
-  `v2.1.0` was uploaded by hand. If the next release page lacks a vsix, read the publish job's
+  the binaries; the notes name the file. **Proven on v2.1.1** — run `34010930438` automatically
+  attached `wisp-1.13.5.vsix`, downloaded and checked in its bundle. If a release lacks a vsix, read the publish job's
   "Package the VS Code extension" step first.
 - **Labels are the only real gate**; a closed-by-PR issue keeps its `ready-for-agent` label.
 - **PowerShell splits a `git commit -m` here-string on embedded double quotes** — the message becomes
@@ -260,8 +274,8 @@ Credential hygiene ([[2026-07-29-a-public-repo-is-a-publishing-decision-not-a-co
 General:
 
 - **`packages/core` has NO `compile` script** — gate is `bun run --cwd packages/core typecheck`. Test
-  gate is **`bun run test`** (vitest, now 1047) — bare `bun test` runs Bun's runner, bogus failures.
-  `packages/tui/tests/` is the **bun runner** (28), run explicitly. No root `typecheck` script.
+  gate is **`bun run test`** (vitest, now 1063) — bare `bun test` runs Bun's runner, bogus failures.
+  `packages/tui/tests/` is the **bun runner** (30), run explicitly. No root `typecheck` script.
 - Prefer the scoped **`packages/tui:verify`** skill for tui/core CLI-surface work.
 - A store that does not parse is never overwritten (#182, ADR-0004); `status.json` and `bridge.log` are
   the documented exceptions.

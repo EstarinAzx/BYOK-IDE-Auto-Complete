@@ -1,7 +1,7 @@
 ---
 type: overview
 project: wisp
-updated: 2026-07-30
+updated: 2026-09-06
 tags: [context, overview]
 ---
 
@@ -27,9 +27,15 @@ Bun-workspaces **monorepo** since #58 / PR #70 (ADR-0001): three packages, one r
 - Side-panel implementation plan (now executed) lives outside the repo at the agent plan path noted in [[active-work]].
 
 ## How to run
+
+Codex discovery since **wisp-router 2.1.1 / extension 1.13.5** is account-backed in
+`packages/core/src/codexModels.ts`, with a 15-minute cache, explicit refresh, and manual entry.
+Its model/effort/capability choices no longer use models.dev name filters or static Codex lists.
+See [[2026-09-06-codex-discovery-is-account-metadata-ultra-is-orchestration]].
+
 - Install: `bun install` (root — one lockfile for all three packages).
 - Build: `bun run compile` (root, or in `packages/vscode`) = `tsc -p ./ && tsc -p webview` (typecheck-only) `&& esbuild bundle && vite build`.
-- Test: `bun run test` (root → 464 Vitest tests in `packages/core/tests/*.test.ts`; no Electron host).
+- Test: `bun run test` (root → 1,063 Vitest tests in `packages/core/tests/*.test.ts`; no Electron host). Terminal tests: `bun test packages/tui/tests/` (30).
 - TUI: `cd packages/tui; bun run dev` (writes real `~/.wisp`; set `WISP_HOME` to sandbox). Headless Bridge: `bun src/index.tsx serve`. Claude Code through the Bridge: `bun src/claude-wisp.ts [claude args…]` (the `claude-wisp` bin once installed).
 - Dev: press **F5** in VS Code → Extension Development Host (the Wisp icon is in *that* window's activity bar).
 - Package: `bun run package` in `packages/vscode` (= `vsce package --no-dependencies`; deps are already bundled) → installable `.vsix`.

@@ -1,127 +1,87 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-09-04
+updated: 2026-09-06
 tags: [context, active-work]
 ---
 
 # Active Work
 
-_Last updated: 2026-09-04 by Fable 5.1 (Fable re-bill run to ground → not a Wisp bug → log reclassified + Antigravity 4xx classified → 2.1.0 cut)_
-_At commit: `1b450b0` on main, tag `v2.1.0` on `80e21bb`. Released: **`wisp-router@2.1.0`** (npm `latest`) and **vsix 1.13.4 built + installed**. `wisp-slot` 1.7.4 unchanged._
+_Last updated: 2026-09-06. Source/release commit `6d39522` on main, tag `v2.1.1`.
+Released and installed: **wisp-router 2.1.1** and **VS Code extension 1.13.5**.
+wisp-slot stays 1.7.4. This baton is committed separately on main after release verification._
 
 ## Current focus
 
-**2.1.0 is SHIPPED, verified on both faces and installed. Nothing is in flight.**
+**The Codex discovery change is shipped, verified, and installed. Nothing remains in flight.**
 
-The session's question was the Fable cache re-bill left by 2.0.48. Answer: **it is the backend, not
-Wisp.** A same-session model control settled it — one heavy bridged session (`9157be5a`) ran both models
-through the same Bridge; 40 consecutive Opus 5 turns grew exactly (`read(n+1) = read(n)+creation(n)`)
-while the Fable turns beside them fell 4-16k short on ~30% of turns
-([[2026-09-04-the-fable-cache-rebill-is-the-backend-classify-dont-chase]]). Three checks closed the
-other doors: Claude Code's native request is byte-identical on both models (driven at a recorder with Wisp
-bypassed); Wisp's parse→build round-trip preserves Fable thinking signatures byte-for-byte; and the
-shortfall exceeds one turn's whole output, so the classifier is a model-family gate, not a size bound.
+Astra was excluded by the old model-name filter. Wisp now reads the authenticated account catalogue,
+including future visible names and variants, and uses its reasoning/image/context metadata throughout
+both faces and both Bridge dialects. Discovery refreshes on use after 15 minutes, has a saved
+account-specific fallback, and exposes explicit refresh and manual entry. It discovers the required
+Codex client version from OpenAI package metadata instead of installing Codex or pinning a version.
 
-Shipped in 2.1.0 (`f7b3c50`): the `#162` line names the known Fable backend re-bill on a Fable/Mythos
-model (log-only, numbers still print; Opus keeps `real history re-bill`), and **Antigravity
-400/401/403/404 now answer as themselves** through the #166 shape instead of leaving as a 502 that told
-Claude Code to retry ten times. 5xx stays 502 on purpose; 429 keeps its body classifier.
+Claude Code max remains Responses max when supported. Ultra adds Codex multi-agent orchestration;
+sending it as an ordinary Responses effort returned 400. Summary none similarly becomes omission.
+See [[2026-09-06-codex-discovery-is-account-metadata-ultra-is-orchestration]] for the design and evidence.
 
-**No Bridge is running.** The 2.0.47 process from the last note is gone (no `wisp` PID, no listener).
-Whatever the user starts next (`wisp serve`, the TUI `/bridge`) lands on 2.1.0 — the global `wisp-router`
-is 2.1.0 and the binary is at `~/.wisp/bin/v2.1.0/`. The editor face is 1.13.4; a window reload activates
-it.
+## Release and verification
 
-## State
+- **Release:** [v2.1.1](https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.1.1).
+  Source `6d39522` and the annotated tag were pushed to origin; the tag resolves to that source commit.
+- **Workflow:** [34010930438](https://github.com/EstarinAzx/Wisp-Router/actions/runs/34010930438),
+  all five jobs green: Windows x64, Linux x64, macOS arm64/x64, and publish.
+- **npm:** both the version endpoint and latest report 2.1.1. Scratch-installed the published package
+  under gitignored `out/verify-wisp-2.1.1/` and executed its real binary, not just its package manifest.
+  The optional Windows platform package was delivered normally on this cut.
+- **Previous-version control:** published 2.1.1 lists Astra; installed 2.1.0 does not. Sol appears in
+  both. The new catalogue lists seven visible account models. Published Windows asset and npm platform
+  binary match SHA-256 `9b6301d35359641d7dc59643654b7ae03abf715786962b6f05a547c6f55ea2cc`.
+- **VSIX:** workflow automatically attached 1.13.5 (the previously unproven packaging step is proven).
+  Downloaded VSIX digest matches GitHub:
+  `18f67a1640315a092aad9561b7ce881a836745e9f7af72c71f587e0815d3a3d3`.
+  Its bundle has live package-version discovery; 1.13.4 lacks it. Both contain the Responses account
+  header as the shared control.
+- **Local gate:** 1,063/1,063 core tests across 23 files; 30/30 TUI tests across 5 files; core/TUI/
+  extension typechecks and both package builds. No dependency changes. Both Bridge doors preserve max
+  and a synthetic future advertised effort in real-listener tests.
+- **Live behavior:** Astra text, tool-call response, and max requests completed through codexStream.
+  The tool probe did not execute a tool. Ultra and literal reasoning summary none were rejected, then
+  translated appropriately. Only normal Wisp auth was used; no account identifiers or credentials
+  entered the repository. The tool environment used exported public Windows CA roots for TLS trust;
+  verification was never disabled and no global trust/environment setting was changed.
+- **UI:** real OpenTUI keyboard tests cover unfamiliar model/effort values and refresh/manual actions.
+  Compiled extension panel tested in a browser harness for refresh and manual routing persistence.
+  The browser host was mocked; this was not a live VS Code native-chat turn.
+- **Installed:** global npm reports wisp-router 2.1.1; VS Code reports esarinazx.wisp@1.13.5.
+  The installed global `wisp models codex --refresh` returns Astra. Reload VS Code to activate its new
+  extension host; reopen any pre-existing terminal UI to use the new binary.
 
-- **In flight:** nothing.
-- **Done this session:** mined three real transcripts for per-turn cache growth (the miner is throwaway,
-  re-create under `out/probe/`); drove `claude` 2.1.260 at a zero-cost recording backend on Fable and
-  Opus and diffed consecutive request skeletons; proved the parse→build thinking round-trip under bun;
-  found the same-session Opus control; wrote the reclassification + the 4xx classifier TDD-first (six new
-  tests, red then green); cut, published, verified both faces past the registry read, installed both.
-- **Blocked:** nothing.
+## Bridge and workspace state
+
+**No Bridge listener on port 41184 at the cut.** Nothing was restarted. The next Wisp host uses 2.1.1.
+The two pre-existing user changes, `.context/flows.md` and `.context/Untitled.canvas`, remain outside
+our commits. Release probes, downloaded packages, and build artifacts remain gitignored under out/.
 
 ## Pick up here
 
-**Queue empty by query at the cut** (`gh issue list --label ready-for-agent --state open` → `[]`; verify
-by query, not by this note). The remaining held bugs are candidate tickets, listed in [[pick-up]]. The
-strongest next cut is **a TUI-hosted Bridge writes nothing to `bridge.log`** — it is why today's failures
-left no trace last session and why the re-bill needed transcripts instead of the log.
+The ready-for-agent queue is empty by query; check it again at pickup. The held bugs and durable
+landmines are in [[pick-up]]. No held issue was implemented, filed, or relabeled in this session.
+Open but deliberately not ready: #207 (three scoping calls), #69, #163.
 
-Open but deliberately **not** agent-ready: **#207** (active quota probe — three scoping calls), **#69**,
-**#163**.
-
-## Verification
-
-- Pre-push `git rev-list --left-right --count origin/main...main` → `0 0` after the push; tag `v2.1.0`
-  pushed explicitly and confirmed on `git ls-remote --tags`
-- `bun run test` — **1047/1047 across 22 files** (was 1041; +4 Antigravity 4xx tests, +2 Fable/Opus
-  log tests, each watched red before green)
-- `bun run --cwd packages/core typecheck` clean · `bun run --cwd packages/tui compile` clean ·
-  `bun test packages/tui/tests/` **28/28** · `bun run --cwd packages/vscode compile` clean
-- `release.yml` run `33838090896` — **5/5 green**, all four platform binaries on the `v2.1.0` release
-- **npm verified past the registry read:** 2.1.0 scratch-installed, **bin executed** (downloaded
-  `wisp-v2.1.0-win32-x64.exe` from the GitHub release, printed the live routing map); global
-  `wisp-router@2.1.0`; registry `latest: 2.1.0` (lagged ~1 min behind the publish step — a read straight
-  after "success" still said 2.0.48; the platform packages published per the job log yet `npm view` 404s
-  them, the documented-normal shim fallback)
-- **Marker swap in both shipped artifacts, npm 2.1.0 / 2.0.48 and vsix 1.13.4 / 1.13.3** — identical
-  columns in each pair: `isFableFamilyModel` **2/0**, `antigravity_bad_request` **1/0**,
-  `known Fable backend re-bill` **1/0**, `antigravity_permission_denied` **1/0**, with
-  `modelSupportsMidConversationSystem` **2/2** and `fillArrayItems` **2/2** as the shared controls
-- Installed: global `wisp-router` 2.0.48 → **2.1.0**, `esarinazx.wisp` 1.13.3 → **1.13.4**
-- **Not live-driven:** the Antigravity 4xx door answer is proven by unit test through the same `classify`
-  hook #190 verified live for 429 — no fresh live 4xx was cheaply reachable (the itemless-array 400 is
-  repaired since 2.0.48, and a bogus model needs a routing edit). Say "unit-proven through a live-proven
-  hook", not "live-verified".
-
-## Skills for next session
-
-- `/preset pick-up` — the baton at [[pick-up]] is current: queue empty, held bugs listed, no Bridge
-  running.
-- Cache questions on a Claude model: **get a same-session control on a second model before touching the
-  door** — the transcript miner (per-turn read/creation/shortfall) is a 60-line throwaway and beat every
-  hypothesis this session.
-
-## Open questions
-
-- **The big-body 429s** — unchanged from 2.0.48: a 46,720-byte Antigravity body answered
-  `429 RESOURCE_EXHAUSTED` on both hosts while a 296-byte body on the same model seconds later answered
-  200. Looks like a size or token-rate limit. Now that 4xx answer as themselves, a 429 on this wire is
-  still "retry small before concluding".
-- **#207's three scoping calls** — unchanged: poll **cadence**; **precedence** when a poll and a turn
-  header disagree; **opt-in or always-on**.
-- Carried over, unchanged: dismiss the two secret-scanning alerts as won't-fix; rotate `bridgeSecret`;
-  #170 needs a Kimi Code subscription; note #189's last criterion when observed; ~20 stale local
-  `ticket/*` branches; `.context/Untitled.canvas` untracked, user's file, left alone.
-
-## Recent context
-
-- **Reasoning from the docs nearly sent this the wrong way twice.** The Fable 5.1 "preserved thinking"
-  rules suggested Wisp's trailing system turn was a history edit; the capture showed the path is not even
-  exercised. The thinking-signature correlation suggested a per-turn size bound; the numbers showed the
-  shortfall exceeds a turn's whole output. The same-session control was the only thing that could not be
-  argued with.
-- **PowerShell splits a `git commit -m` here-string on embedded double quotes** — twice the fix commit
-  failed as pathspecs and the next `-m` commit swept everything staged. Write the message to a gitignored
-  file and use `-F`. Caught before the push both times by `git show --stat` per commit.
-- **`Start-Sleep` is blocked in this harness** — a registry read that lags the publish step needs a plain
-  re-read a tool call later, not a sleep.
+Carried forward: the TUI-hosted Bridge log gap; Antigravity routing sign-in warning; toolChoice and
+max_tokens gaps; advisor accounting; media-only tool results; statusline resolver drift; per-message
+control hints; large-body 429s. Their exact scope and constraints remain in [[pick-up]].
+The Fable cache re-bill decision from 2.1.0 remains unchanged: require a same-session Opus control
+before reopening it. Other user-owned follow-ups (secret-scanning alert dismissal, access-secret
+rotation, Kimi subscription, stale branch cleanup) remain held as listed there.
 
 ## Related
 
-- [[overview]]
 - [[pick-up]]
+- [[overview]]
 - [[decisions]]
-- [[gotchas]]
+- [[2026-09-06-codex-discovery-is-account-metadata-ultra-is-orchestration]]
 - [[2026-09-04-the-fable-cache-rebill-is-the-backend-classify-dont-chase]]
-- [[2026-09-04-the-fable-cache-rebill-is-the-backend-not-wisp]]
-- [[2026-09-03-the-volatile-tail-must-sit-behind-every-message-breakpoint]]
-- [[a-tool-schema-the-wire-rejects-fails-every-turn-not-one-tool]]
-- [[2026-07-30-a-classified-verdict-rides-on-the-error-not-its-message]]
 - [[an-upgraded-package-does-not-touch-the-process-already-running]]
-- [[a-marker-grep-proves-nothing-without-a-marker-present-in-both]]
 - [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]
-- [[a-handoff-cannot-predict-a-queue-state-its-own-last-step-changes]]
