@@ -132,7 +132,7 @@ export const toCodexResponsesTools = (tools: ToolSpec[], strict = true): CodexRe
 // The native-chat path has no system turn, so fall back to this.
 const CODEX_DEFAULT_INSTRUCTIONS = 'You are a helpful coding assistant.';
 
-// Translate a conversation into a Codex Responses request body. System content becomes `instructions`
+// Translate a conversation into a Responses request body. System content becomes `instructions`
 // (defaulting when absent). Each non-system turn expands to its items in API-required order: an assistant
 // turn's text (output_text) then its function_call items; a user turn's function_call_output items then
 // its text (input_text) + image (input_image) message. A content-less turn yields no message item.
@@ -144,11 +144,19 @@ export const buildCodexResponsesBody = (args: {
   reasoning?: CodexReasoning;
   tools?: CodexResponsesTool[];
   toolChoice?: 'auto' | 'required';
+  // Codex accepts ordered developer input; other Responses providers retain their existing folding.
+  preserveSystemMessages?: boolean;
 }): CodexResponsesBody => {
-  const instructions = args.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n') || CODEX_DEFAULT_INSTRUCTIONS;
+  const instructions: string[] = [];
   const input: CodexInputItem[] = [];
+  let conversationStarted = false;
   for (const m of args.messages) {
-    if (m.role === 'system') continue;
+    if (m.role === 'system') {
+      if (!args.preserveSystemMessages || !conversationStarted) instructions.push(m.content);
+      else if (m.content) input.push({ type: 'message', role: 'developer', content: [{ type: 'input_text', text: m.content }] });
+      continue;
+    }
+    conversationStarted = true;
     if (m.role === 'assistant') {
       if (m.content) input.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: m.content }] });
       for (const tc of m.toolCalls ?? []) input.push({ type: 'function_call', call_id: tc.id, name: tc.name, arguments: tc.argsJson });
@@ -166,7 +174,7 @@ export const buildCodexResponsesBody = (args: {
   // API (400), and the real Codex CLI omits it too — omitting grants the model-max output budget.
   // codexModelCaps.maxOutput is picker-display metadata ONLY. Length is governed by reasoning.effort.
   return {
-    model: args.model, instructions, input,
+    model: args.model, instructions: instructions.join('\n\n') || CODEX_DEFAULT_INSTRUCTIONS, input,
     ...(args.reasoning ? { reasoning: args.reasoning } : {}),
     store: false, stream: true,
     ...(args.tools && args.tools.length ? { tools: args.tools, tool_choice: args.toolChoice ?? 'auto', parallel_tool_calls: true } : {}),

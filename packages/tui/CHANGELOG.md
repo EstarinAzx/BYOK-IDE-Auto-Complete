@@ -6,6 +6,27 @@ this package adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Changes up to 2.0.10 are folded into the product changelog at
 `packages/vscode/CHANGELOG.md`.
 
+## [2.1.2] ? 2026-09-07
+
+### Fixed
+
+- Codex requests through Claude Code's Bridge reuse its validated conversation session ID instead of
+  generating a new one on every turn. Independent sessions stay separate; missing or malformed session
+  metadata retains isolated per-request IDs.
+- Codex keeps later system notes in their original conversation position as developer messages instead
+  of rewriting the opening instructions, preserving the earlier prompt prefix for cache reuse.
+
+### Surfaces
+
+- **npm / TUI / Bridge: 2.1.2** ? both Codex caching fixes.
+- **VS Code extension: 1.13.6** ? bundles the same core, including its hosted Bridge.
+- **wisp-slot: unchanged.** Other providers retain their existing request mapping.
+
+### Notes
+
+- Cache hits still depend on upstream availability. Controlled live requests verified reuse with the
+  corrected identity and message ordering; this is not a guarantee of fixed usage savings.
+
 ## [2.1.1] — 2026-09-06
 
 ### Added

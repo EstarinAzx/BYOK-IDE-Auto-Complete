@@ -642,7 +642,7 @@ export const createBridgeServer = (deps: BridgeDeps) => {
       // Non-strict tools: the door forwards an external client's toolset, and Codex strict mode rejects the
       // rich schemas Claude Code's tools carry (dynamic maps / propertyNames). strict:false passes them through.
       const modelInfo = (await codexCatalog.get({ creds, baseUrl })).models.find((m) => m.id === modelId);
-      const upstream = codexStream({ creds, baseUrl, model: modelId, modelInfo, messages, effort, tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', signal: controller.signal, onQuota });
+      const upstream = codexStream({ creds, baseUrl, model: modelId, modelInfo, messages, effort, tools: toCodexResponsesTools(parsed.tools, false), toolChoice: 'auto', sessionId: parsed.sessionId, signal: controller.signal, onQuota });
       return { ok: true, events: mapOAuthStream(upstream), model: modelId, contextWindow: modelInfo?.contextWindow };
     }
     if (isAnthropicProvider(provider)) {

@@ -77,6 +77,48 @@ describe('Codex catalogue capabilities through both Bridge doors', () => {
   });
 });
 
+describe('Codex conversation cache continuity', () => {
+  it('keeps session identity and the prompt prefix across turns, without sharing independent sessions', async () => {
+    const model = { id: 'gpt-6-astra', name: 'Astra', visible: true, reasoningEfforts: ['low'], defaultEffort: 'low' };
+    const discovery = vi.spyOn(codexCatalog, 'get').mockResolvedValue({ source: 'cache', models: [model] });
+    const sent: { headers: Headers; body: any }[] = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init: RequestInit) => {
+      sent.push({ headers: new Headers(init.headers), body: JSON.parse(init.body as string) });
+      return grokSse();
+    });
+    const provider: Provider = { id: 'codex', label: 'Codex', kind: 'codex', baseUrl: 'https://codex.example', defaultModel: model.id, apiKeyEnv: '' };
+    const sessionA = '11111111-1111-4111-8111-111111111111';
+    const sessionB = '22222222-2222-4222-8222-222222222222';
+    const metadata = (session_id: string) => ({ user_id: JSON.stringify({ device_id: 'device', account_uuid: 'private-account', session_id }) });
+    try {
+      await runServer(makeDeps({ providers: [provider], activeProviderId: () => 'codex',
+        codexSignedIn: async () => true, codexCreds: async () => ({ accessToken: 'test-token', accountId: 'test-account' }),
+      }), async (port) => {
+        const first = { model: 'codex', stream: true, system: 'stable rules', metadata: metadata(sessionA), messages: [{ role: 'user', content: 'hi' }] };
+        expect((await post(port, '/v1/messages', first)).status).toBe(200);
+        expect((await post(port, '/v1/messages', { ...first, messages: [
+          ...first.messages, { role: 'assistant', content: 'hello' }, { role: 'system', content: 'late note' }, { role: 'user', content: 'continue' },
+        ] })).status).toBe(200);
+        expect((await post(port, '/v1/messages', { ...first, metadata: metadata(sessionB) })).status).toBe(200);
+        for (const value of [undefined, undefined, { user_id: '{invalid' }, metadata('bad\r\nheader')]) {
+          expect((await post(port, '/v1/messages', { ...first, metadata: value })).status).toBe(200);
+        }
+      });
+      expect(sent).toHaveLength(7);
+      expect(sent[0].headers.get('session_id')).toBe(sessionA);
+      expect(sent[1].headers.get('session_id')).toBe(sessionA);
+      expect(sent[2].headers.get('session_id')).toBe(sessionB);
+      const fallbacks = sent.slice(3).map(s => s.headers.get('session_id'));
+      expect(new Set(fallbacks).size).toBe(4);
+      for (const id of fallbacks) expect(id).toMatch(/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i);
+      expect(sent[1].body.instructions).toBe('stable rules');
+      expect(sent[1].body.input.slice(0, sent[0].body.input.length)).toEqual(sent[0].body.input);
+      expect(sent[1].body.input[2]).toEqual({ type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'late note' }] });
+      expect(JSON.stringify(sent)).not.toContain('private-account');
+    } finally { discovery.mockRestore(); vi.unstubAllGlobals(); }
+  });
+});
+
 // POST over node http (NOT fetch — fetch is stubbed for the upstream xai call) → { status, body }.
 const post = (port: number, path: string, payload: unknown): Promise<{ status: number; body: string }> =>
   new Promise((resolve, reject) => {

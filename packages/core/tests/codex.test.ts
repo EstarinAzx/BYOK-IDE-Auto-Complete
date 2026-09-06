@@ -86,6 +86,35 @@ describe('buildCodexResponsesBody', () => {
     ]);
   });
 
+  it('preserves late system notes as developer input when requested by Codex', () => {
+    const body = buildCodexResponsesBody({ model: 'gpt-6-astra', preserveSystemMessages: true, messages: [
+      { role: 'system', content: 'rules' },
+      { role: 'system', content: 'more rules' },
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: 'hello' },
+      { role: 'system', content: '' },
+      { role: 'system', content: 'hook note' },
+      { role: 'user', content: 'go' },
+      { role: 'system', content: 'trailing note' },
+    ] });
+    expect(body.instructions).toBe('rules\n\nmore rules');
+    expect(body.input).toEqual([
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] },
+      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hello' }] },
+      { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'hook note' }] },
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'go' }] },
+      { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'trailing note' }] },
+    ]);
+  });
+
+  it('does not promote a late note when there are no leading instructions', () => {
+    const body = buildCodexResponsesBody({ model: 'gpt-6-astra', preserveSystemMessages: true, messages: [
+      { role: 'user', content: 'hi' }, { role: 'system', content: 'later' },
+    ] });
+    expect(body.instructions).toBe('You are a helpful coding assistant.');
+    expect(body.input[1]).toEqual({ type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'later' }] });
+  });
+
   // The Codex backend REQUIRES instructions (400 "Instructions are required" otherwise). The native-chat
   // path carries no system turn (VS Code's chat API has no System role), so default it rather than omit.
   it('defaults instructions when there is no system message', () => {

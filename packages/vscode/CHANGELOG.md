@@ -4,6 +4,20 @@ All notable changes to **Wisp** are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.6] ? 2026-09-07
+
+### Fixed
+
+- The hosted Bridge preserves Claude Code's validated conversation ID for Codex requests, keeping
+  independent sessions separate and falling back to per-request IDs when metadata is unavailable.
+- Codex preserves later system notes as ordered developer messages, so adding a note does not rewrite
+  the opening instructions. The shared body builder keeps other providers' existing behavior.
+
+### Surfaces
+
+- **VS Code: 1.13.6** ? bundles the same core fixes as **wisp-router 2.1.2**.
+- **wisp-slot: unchanged.**
+
 ## [1.13.5] — 2026-09-06
 
 ### Added

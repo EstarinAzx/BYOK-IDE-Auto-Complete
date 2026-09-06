@@ -70,6 +70,7 @@ export type AnthropicMessagesRequest = {
   temperature?: number;
   stream?: boolean;
   output_config?: { effort?: string }; // Claude Code's /effort rides here (effort beta) — the one beta field the door reads
+  metadata?: { user_id?: unknown };
 };
 
 // The normalized tool_choice the door carries downstream. A bare string for auto/any/none; { name } for a
@@ -83,6 +84,7 @@ export type BridgeAnthropicRequest = BridgeChatRequest & {
   toolChoice?: NormalizedToolChoice;
   temperature?: number;
   effort?: EffortLevel; // Claude Code's /effort (output_config.effort) — overrides the panel effort when present
+  sessionId?: string; // Validated conversation identity; account/device metadata never leaves this parser.
   // #139: the stable/volatile split of the system text, read off the client's own cache_control markers.
   // `system` stays the FULL join (every backend arm keeps its meaning); the Anthropic arm alone uses the
   // split to keep its cache breakpoint on the stable side so mid-session <system-reminder> appends stop
@@ -97,6 +99,16 @@ export type BridgeAnthropicRequest = BridgeChatRequest & {
 // vocabulary can grow without a Bridge release, just as its model ids can.
 const normalizeEffort = (v: string | undefined): EffortLevel | undefined =>
   typeof v === 'string' && /^[a-z][a-z0-9_-]{0,63}$/.test(v) ? v : undefined;
+
+// Current Claude Code encodes its conversation UUID in metadata.user_id JSON.
+// Missing/malformed metadata must not group unrelated callers into one session.
+const sessionIdFromMetadata = (value: unknown): string | undefined => {
+  if (typeof value !== 'string' || value.length > 4096) return undefined;
+  try {
+    const id = JSON.parse(value)?.session_id;
+    return typeof id === 'string' && /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(id) ? id.toLowerCase() : undefined;
+  } catch { return undefined; }
+};
 
 // The joined text of a string-or-text-block field. A bare string is itself; a block array joins its text
 // blocks with `sep`. System uses '\n\n' (each block is a separate directive — billing marker, then prompt);
@@ -240,6 +252,7 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
 
   const toolChoice = normalizeToolChoice(body.tool_choice);
   const effort = normalizeEffort(body.output_config?.effort);
+  const sessionId = sessionIdFromMetadata(body.metadata?.user_id);
   // #139: split at the client's marker. stable = top-level blocks through the last marked one; volatile =
   // the top-level tail alone (mid-conversation system rides positioned in the turn list since #145).
   const systemSplit = stableEnd >= 0 ? {
@@ -257,6 +270,7 @@ export const parseAnthropicMessagesRequest = (body: AnthropicMessagesRequest): B
     ...(toolChoice !== undefined ? { toolChoice } : {}),
     ...(body.temperature !== undefined ? { temperature: body.temperature } : {}),
     ...(effort !== undefined ? { effort } : {}),
+    ...(sessionId ? { sessionId } : {}),
     ...(advisorTool ? { advisor: { ...(typeof advisorTool.model === 'string' ? { model: advisorTool.model } : {}) } } : {}),
   };
 };
