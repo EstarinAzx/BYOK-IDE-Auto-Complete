@@ -1,87 +1,47 @@
 ---
 type: active-work
 project: wisp
-updated: 2026-09-06
+updated: 2026-09-07
 tags: [context, active-work]
 ---
 
 # Active Work
 
-_Last updated: 2026-09-06. Source/release commit `6d39522` on main, tag `v2.1.1`.
-Released and installed: **wisp-router 2.1.1** and **VS Code extension 1.13.5**.
-wisp-slot stays 1.7.4. This baton is committed separately on main after release verification._
+_Last updated: 2026-09-07 by GPT-6 Astra / Codex (auto)_
+_At release commit: `f4bd855`, tag `v2.1.2`_
 
 ## Current focus
 
-**The Codex discovery change is shipped, verified, and installed. Nothing remains in flight.**
+**Wisp 2.1.2 and VS Code extension 1.13.6 are released, verified, and installed.** Codex caching now preserves conversation identity and the position of late system notes. No implementation work remains in flight.
 
-Astra was excluded by the old model-name filter. Wisp now reads the authenticated account catalogue,
-including future visible names and variants, and uses its reasoning/image/context metadata throughout
-both faces and both Bridge dialects. Discovery refreshes on use after 15 minutes, has a saved
-account-specific fallback, and exposes explicit refresh and manual entry. It discovers the required
-Codex client version from OpenAI package metadata instead of installing Codex or pinning a version.
+## State
 
-Claude Code max remains Responses max when supported. Ultra adds Codex multi-agent orchestration;
-sending it as an ordinary Responses effort returned 400. Summary none similarly becomes omission.
-See [[2026-09-06-codex-discovery-is-account-metadata-ultra-is-orchestration]] for the design and evidence.
-
-## Release and verification
-
-- **Release:** [v2.1.1](https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.1.1).
-  Source `6d39522` and the annotated tag were pushed to origin; the tag resolves to that source commit.
-- **Workflow:** [34010930438](https://github.com/EstarinAzx/Wisp-Router/actions/runs/34010930438),
-  all five jobs green: Windows x64, Linux x64, macOS arm64/x64, and publish.
-- **npm:** both the version endpoint and latest report 2.1.1. Scratch-installed the published package
-  under gitignored `out/verify-wisp-2.1.1/` and executed its real binary, not just its package manifest.
-  The optional Windows platform package was delivered normally on this cut.
-- **Previous-version control:** published 2.1.1 lists Astra; installed 2.1.0 does not. Sol appears in
-  both. The new catalogue lists seven visible account models. Published Windows asset and npm platform
-  binary match SHA-256 `9b6301d35359641d7dc59643654b7ae03abf715786962b6f05a547c6f55ea2cc`.
-- **VSIX:** workflow automatically attached 1.13.5 (the previously unproven packaging step is proven).
-  Downloaded VSIX digest matches GitHub:
-  `18f67a1640315a092aad9561b7ce881a836745e9f7af72c71f587e0815d3a3d3`.
-  Its bundle has live package-version discovery; 1.13.4 lacks it. Both contain the Responses account
-  header as the shared control.
-- **Local gate:** 1,063/1,063 core tests across 23 files; 30/30 TUI tests across 5 files; core/TUI/
-  extension typechecks and both package builds. No dependency changes. Both Bridge doors preserve max
-  and a synthetic future advertised effort in real-listener tests.
-- **Live behavior:** Astra text, tool-call response, and max requests completed through codexStream.
-  The tool probe did not execute a tool. Ultra and literal reasoning summary none were rejected, then
-  translated appropriately. Only normal Wisp auth was used; no account identifiers or credentials
-  entered the repository. The tool environment used exported public Windows CA roots for TLS trust;
-  verification was never disabled and no global trust/environment setting was changed.
-- **UI:** real OpenTUI keyboard tests cover unfamiliar model/effort values and refresh/manual actions.
-  Compiled extension panel tested in a browser harness for refresh and manual routing persistence.
-  The browser host was mocked; this was not a live VS Code native-chat turn.
-- **Installed:** global npm reports wisp-router 2.1.1; VS Code reports esarinazx.wisp@1.13.5.
-  The installed global `wisp models codex --refresh` returns Astra. Reload VS Code to activate its new
-  extension host; reopen any pre-existing terminal UI to use the new binary.
-
-## Bridge and workspace state
-
-**No Bridge listener on port 41184 at the cut.** Nothing was restarted. The next Wisp host uses 2.1.1.
-The two pre-existing user changes, `.context/flows.md` and `.context/Untitled.canvas`, remain outside
-our commits. Release probes, downloaded packages, and build artifacts remain gitignored under out/.
+- **Done:** release merged and pushed to main, annotated v2.1.2 tag published, all five [release jobs](https://github.com/EstarinAzx/Wisp-Router/actions/runs/34035909343) passed. [Release](https://github.com/EstarinAzx/Wisp-Router/releases/tag/v2.1.2) contains all four platform binaries and the 1.13.6 VSIX; npm serves 2.1.2.
+- **Verified:** 1,066 core tests and 30 terminal tests, typechecks/builds, independent review, and a small live comparison through the actual Bridge. Both downloaded Windows artifacts matched GitHub SHA-256 digests. New binary/VSIX contain the fixes; the previous Windows release is the negative control.
+- **Installed:** global npm package is 2.1.2; its release-download fallback at `~/.wisp/bin/v2.1.2/wisp.exe` boots successfully with `wisp routing --json`. VS Code reports `esarinazx.wisp@1.13.6`. Existing Wisp hosts need reopening; reload VS Code to activate its new extension host.
+- **Runtime:** no listener on port 41184 at the final check. No Bridge was started or user window reloaded. Saved routes, auth, model/provider, permissions, and notification settings were preserved.
+- **Remaining:** no ready-for-agent issue was open at the cut. Unrelated `.context/flows.md` edits and `.context/Untitled.canvas` remain outside these commits. The Traycer-managed fix worktree is retained with gitignored build/probe outputs.
 
 ## Pick up here
 
-The ready-for-agent queue is empty by query; check it again at pickup. The held bugs and durable
-landmines are in [[pick-up]]. No held issue was implemented, filed, or relabeled in this session.
-Open but deliberately not ready: #207 (three scoping calls), #69, #163.
+No active work ? pick a new task. Re-query `gh issue list --label ready-for-agent --state open`; if empty, ask the user which held item to scope. The TUI-hosted Bridge log gap remains the strongest held candidate, but is not authorized merely by this note. See [[release-follow-ups]].
 
-Carried forward: the TUI-hosted Bridge log gap; Antigravity routing sign-in warning; toolChoice and
-max_tokens gaps; advisor accounting; media-only tool results; statusline resolver drift; per-message
-control hints; large-body 429s. Their exact scope and constraints remain in [[pick-up]].
-The Fable cache re-bill decision from 2.1.0 remains unchanged: require a same-session Opus control
-before reopening it. Other user-owned follow-ups (secret-scanning alert dismissal, access-secret
-rotation, Kimi subscription, stale branch cleanup) remain held as listed there.
+## Open questions
+
+The saved Wisp Codex bearer returned 401 during investigation; the native Codex bearer for the same account worked. Neither was changed. If the next bridged turn still fails, investigate/sign in normally rather than blindly rotating or copying refresh tokens.
+
+## Recent context
+
+- Keep the per-request fallback when conversation identity is missing/invalid. A global ID would group unrelated clients. xAI still uses its existing system-message folding.
+- Cache hits vary: the first fixed late-note probe missed once; the follow-up preserved 3,200 tokens through repeats and late notes. Do not promise a fixed percentage of weekly savings.
+- The native vs bridged usage comparison had unequal workloads and effort. The current native conversation was high; some bridged work was xhigh. Published fixes address demonstrated mechanisms, not a proven historical cost multiplier.
+- The health preset found zero skill-install findings and passed the Codex adapter check. Template drift (9 findings) and stale-only vault notices (4 ecosystem, 38 BCDE311, 21 BCDE321) were recorded; no structural vault errors. Traycer vault lint passed. No template mirroring or unrelated cleanup was performed.
 
 ## Related
 
-- [[pick-up]]
 - [[overview]]
 - [[decisions]]
+- [[pick-up]]
+- [[release-follow-ups]]
+- [[2026-09-07-codex-cache-identity-and-ordered-notes]]
 - [[2026-09-06-codex-discovery-is-account-metadata-ultra-is-orchestration]]
-- [[2026-09-04-the-fable-cache-rebill-is-the-backend-classify-dont-chase]]
-- [[an-upgraded-package-does-not-touch-the-process-already-running]]
-- [[verifying-a-fix-release-needs-the-previous-version-as-a-control]]

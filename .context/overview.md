@@ -1,7 +1,7 @@
 ---
 type: overview
 project: wisp
-updated: 2026-09-06
+updated: 2026-09-07
 tags: [context, overview]
 ---
 
@@ -35,7 +35,7 @@ See [[2026-09-06-codex-discovery-is-account-metadata-ultra-is-orchestration]].
 
 - Install: `bun install` (root — one lockfile for all three packages).
 - Build: `bun run compile` (root, or in `packages/vscode`) = `tsc -p ./ && tsc -p webview` (typecheck-only) `&& esbuild bundle && vite build`.
-- Test: `bun run test` (root → 1,063 Vitest tests in `packages/core/tests/*.test.ts`; no Electron host). Terminal tests: `bun test packages/tui/tests/` (30).
+- Test: `bun run test` (root → 1,066 Vitest tests in `packages/core/tests/*.test.ts`; no Electron host). Terminal tests: `bun test packages/tui/tests/` (30).
 - TUI: `cd packages/tui; bun run dev` (writes real `~/.wisp`; set `WISP_HOME` to sandbox). Headless Bridge: `bun src/index.tsx serve`. Claude Code through the Bridge: `bun src/claude-wisp.ts [claude args…]` (the `claude-wisp` bin once installed).
 - Dev: press **F5** in VS Code → Extension Development Host (the Wisp icon is in *that* window's activity bar).
 - Package: `bun run package` in `packages/vscode` (= `vsce package --no-dependencies`; deps are already bundled) → installable `.vsix`.
@@ -53,6 +53,8 @@ See [[2026-09-06-codex-discovery-is-account-metadata-ultra-is-orchestration]].
 - API keys/OAuth tokens are **never** in VS Code settings — they live in owner-only `~/.wisp/auth.json` (ADR-0002, #59; retired SecretStorage) with per-provider env fallbacks (`OPENCODE_API_KEY`, …).
 
 ## Map
+
+- [[release-follow-ups]] ? held work and carried landmines
 
 - [[stack]] — languages, libraries, env vars
 - [[api]] — the extension's command/provider/settings surface + the external Zen API
